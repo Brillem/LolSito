@@ -54,4 +54,18 @@ class LolEsportsApiTest {
         assertEquals("en-US", request.url.queryParameter("hl"))
         assertEquals(51, response.data.leagues.size)
     }
+
+    @Test
+    fun `getEventDetails sends api key, locale and id`() = runTest {
+        server.enqueue(MockResponse.Builder().body(Fixtures.read("getEventDetails.json")).build())
+
+        val response = api.getEventDetails(id = "115660588583040710")
+
+        val request = server.takeRequest()
+        assertEquals(ApiConfig.API_KEY, request.headers["x-api-key"])
+        assertEquals("/persisted/gw/getEventDetails", request.url.encodedPath)
+        assertEquals("en-US", request.url.queryParameter("hl"))
+        assertEquals("115660588583040710", request.url.queryParameter("id"))
+        assertEquals(5, response.data.event?.match?.games?.size)
+    }
 }

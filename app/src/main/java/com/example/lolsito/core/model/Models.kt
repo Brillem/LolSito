@@ -18,6 +18,8 @@ data class Team(
     val imageUrl: String?,
     val outcome: MatchOutcome?,
     val gameWins: Int?,
+    /** Team id; only present in event details (the schedule does not send it). */
+    val id: String? = null,
 )
 
 data class Match(

@@ -1,6 +1,8 @@
 package com.example.lolsito.core.di
 
 import com.example.lolsito.core.network.NetworkModule
+import com.example.lolsito.feature.match.data.MatchDetailRepositoryImpl
+import com.example.lolsito.feature.match.domain.MatchDetailRepository
 import com.example.lolsito.feature.schedule.data.ScheduleRepositoryImpl
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import java.time.ZoneId
@@ -11,6 +13,7 @@ class AppContainer {
     private val api by lazy { NetworkModule.createApi(client = okHttpClient) }
 
     val scheduleRepository: ScheduleRepository by lazy { ScheduleRepositoryImpl(api) }
+    val matchDetailRepository: MatchDetailRepository by lazy { MatchDetailRepositoryImpl(api) }
 
     fun zoneId(): ZoneId = ZoneId.systemDefault()
 }

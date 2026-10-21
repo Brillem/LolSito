@@ -1,5 +1,6 @@
 package com.example.lolsito.core.network
 
+import com.example.lolsito.core.network.dto.EventDetailsResponse
 import com.example.lolsito.core.network.dto.LeaguesResponse
 import com.example.lolsito.core.network.dto.ScheduleResponse
 import retrofit2.http.GET
@@ -15,4 +16,8 @@ interface LolEsportsApi {
         @Query("leagueId") leagueIds: String,
         @Query("pageToken") pageToken: String? = null,
     ): ScheduleResponse
+
+    /** [id] is the match id (the event id of a match event). */
+    @GET("getEventDetails")
+    suspend fun getEventDetails(@Query("id") id: String): EventDetailsResponse
 }

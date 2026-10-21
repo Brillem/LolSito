@@ -2,6 +2,7 @@ package com.example.lolsito.feature.schedule.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,14 +25,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
+import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.model.TeamEmphasis
+import com.example.lolsito.core.model.formatMatchResult
 import com.example.lolsito.core.ui.ErrorView
 import com.example.lolsito.core.ui.LoadingView
 import com.example.lolsito.core.ui.MessageView
@@ -46,7 +51,12 @@ import java.time.format.FormatStyle
 
 /** Container: wires the ViewModel to the stateless [ScheduleContent]. */
 @Composable
-fun ScheduleScreen(viewModel: ScheduleViewModel, zoneId: ZoneId, modifier: Modifier = Modifier) {
+fun ScheduleScreen(
+    viewModel: ScheduleViewModel,
+    zoneId: ZoneId,
+    onMatchClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     ScheduleContent(
         state = state,
@@ -55,6 +65,7 @@ fun ScheduleScreen(viewModel: ScheduleViewModel, zoneId: ZoneId, modifier: Modif
         onRetry = viewModel::retry,
         onLoadOlder = viewModel::loadOlder,
         onLoadNewer = viewModel::loadNewer,
+        onMatchClick = onMatchClick,
         modifier = modifier,
     )
 }
@@ -67,6 +78,7 @@ fun ScheduleContent(
     onRetry: () -> Unit,
     onLoadOlder: () -> Unit,
     onLoadNewer: () -> Unit,
+    onMatchClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -80,7 +92,7 @@ fun ScheduleContent(
                 if (state.selectedLeagueIds.isEmpty()) "Select a league to see its matches"
                 else "No matches scheduled"
             )
-            ScheduleStatus.Content -> ScheduleList(state, zoneId, onLoadOlder, onLoadNewer)
+            ScheduleStatus.Content -> ScheduleList(state, zoneId, onLoadOlder, onLoadNewer, onMatchClick)
         }
     }
 }
@@ -114,6 +126,7 @@ private fun ScheduleList(
     zoneId: ZoneId,
     onLoadOlder: () -> Unit,
     onLoadNewer: () -> Unit,
+    onMatchClick: (String) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "older") {
@@ -121,7 +134,9 @@ private fun ScheduleList(
         }
         state.days.forEach { day ->
             stickyHeader(key = "day-${day.date}") { DayHeader(day.date) }
-            itemsIndexed(day.events, key = { index, _ -> day.keys[index] }) { _, event -> EventRow(event, zoneId) }
+            itemsIndexed(day.events, key = { index, _ -> day.keys[index] }) { _, event ->
+                EventRow(event, zoneId, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+            }
         }
         item(key = "newer") {
             PagingButton("Load newer", state.canLoadNewer, state.isLoadingNewer, onLoadNewer)
@@ -161,9 +176,20 @@ fun DayHeader(date: LocalDate, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun EventRow(event: ScheduleEvent, zoneId: ZoneId, modifier: Modifier = Modifier) {
+fun EventRow(
+    event: ScheduleEvent,
+    zoneId: ZoneId,
+    modifier: Modifier = Modifier,
+    /** Null for rows without a match, which are not clickable. */
+    onClick: (() -> Unit)? = null,
+) {
+    val teams = event.match?.teams.orEmpty()
+    val result = formatMatchResult(event.state, teams, event.match?.bestOf)
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.width(64.dp)) {
@@ -172,13 +198,16 @@ fun EventRow(event: ScheduleEvent, zoneId: ZoneId, modifier: Modifier = Modifier
                 Text("LIVE", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
             }
         }
-        val teams = event.match?.teams.orEmpty()
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (teams.size >= 2) {
-                    TeamCell(teams[0])
-                    Text(" vs ", style = MaterialTheme.typography.bodyMedium)
-                    TeamCell(teams[1])
+                    TeamCell(teams[0], result.emphasisFor(0))
+                    Text(
+                        text = result.score?.let { " $it " } ?: " vs ",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (result.score != null) FontWeight.Bold else null,
+                    )
+                    TeamCell(teams[1], result.emphasisFor(1))
                 } else {
                     Text("TBD", style = MaterialTheme.typography.bodyMedium)
                 }
@@ -186,7 +215,7 @@ fun EventRow(event: ScheduleEvent, zoneId: ZoneId, modifier: Modifier = Modifier
             val meta = listOfNotNull(
                 event.leagueName.takeIf { it.isNotBlank() },
                 event.blockName,
-                event.match?.bestOf?.let { "Bo$it" },
+                result.bestOf,
             ).joinToString(" · ")
             Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -194,13 +223,23 @@ fun EventRow(event: ScheduleEvent, zoneId: ZoneId, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun TeamCell(team: Team) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+internal fun TeamCell(team: Team, emphasis: TeamEmphasis = TeamEmphasis.NEUTRAL) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
+    ) {
         TeamLogo(team.imageUrl, contentDescription = team.name)
         Spacer(Modifier.width(6.dp))
-        Text(team.code, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+        Text(
+            team.code,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (emphasis == TeamEmphasis.WINNER) FontWeight.ExtraBold else FontWeight.SemiBold,
+        )
     }
 }
+
+/** Alpha applied to the losing team of a completed match. */
+internal const val LOSER_ALPHA = 0.45f
 
 private val previewEvent = ScheduleEvent(
     startTime = Instant.parse("2026-10-20T07:00:00Z"),
@@ -228,12 +267,30 @@ private fun ScheduleContentPreview() {
             canLoadNewer = true,
         ),
         zoneId = ZoneId.of("UTC"),
-        onToggleLeague = {}, onRetry = {}, onLoadOlder = {}, onLoadNewer = {},
+        onToggleLeague = {}, onRetry = {}, onLoadOlder = {}, onLoadNewer = {}, onMatchClick = {},
     )
 }
 
 @Preview(showBackground = true)
 @Composable
 private fun EventRowPreview() {
-    EventRow(previewEvent, ZoneId.of("UTC"))
+    EventRow(previewEvent, ZoneId.of("UTC"), onClick = {})
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun CompletedEventRowPreview() {
+    EventRow(
+        previewEvent.copy(
+            state = MatchState.COMPLETED,
+            match = previewEvent.match!!.copy(
+                teams = listOf(
+                    Team("T1", "T1", null, MatchOutcome.LOSS, 1),
+                    Team("Gen.G", "GEN", null, MatchOutcome.WIN, 2),
+                ),
+            ),
+        ),
+        ZoneId.of("UTC"),
+        onClick = {},
+    )
 }

@@ -184,7 +184,7 @@ fun StandingsList(rows: List<StandingsRow>, onMatchClick: (String) -> Unit, modi
                 is StandingsRow.TableHeader -> TableHeader()
                 is StandingsRow.RankingRow -> RankingRow(row)
                 is StandingsRow.EmptySection -> InfoText("No standings for this section yet")
-                is StandingsRow.EliminationNotice -> EliminationNotice(row.hasMatches)
+                is StandingsRow.EliminationNotice -> EliminationNotice()
                 is StandingsRow.MatchRow -> SectionMatchRow(row, onClick = { onMatchClick(row.sectionMatch.match.id) })
             }
         }
@@ -250,12 +250,11 @@ fun RankingRow(row: StandingsRow.RankingRow, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun EliminationNotice(hasMatches: Boolean) {
+private fun EliminationNotice() {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text("Elimination stage", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         Text(
-            if (hasMatches) "Bracket and Swiss stages have no standings table. Matches:"
-            else "Bracket and Swiss stages have no standings table. Check the Schedule tab for its matches.",
+            "Bracket and Swiss stages have no standings table. Matches:",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -272,15 +271,19 @@ private fun InfoText(text: String) {
     )
 }
 
+/** Undecided (TBD) matches are not clickable: see [StandingsRow.MatchRow.isNavigable]. */
 @Composable
 fun SectionMatchRow(row: StandingsRow.MatchRow, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val teams = row.sectionMatch.match.teams
     val result = row.result
     Row(
-        modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier
+            .fillMaxWidth()
+            .then(if (row.isNavigable) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (teams.size >= 2) {
+        if (row.hasBothTeams) {
             MatchTeam(teams[0], result.emphasisFor(0), Modifier.weight(1f), alignEnd = true)
             Text(
                 text = result.score ?: "vs",
@@ -319,20 +322,6 @@ private fun MatchTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier, al
         if (alignEnd) logo() else code()
     }
 }
-
-/** "worlds_2026" -> "Worlds 2026"; falls back to the id when the slug is blank. */
-val Tournament.label: String
-    get() = slug.split('_', '-')
-        .filter { it.isNotBlank() }
-        .joinToString(" ") { word -> word.replaceFirstChar { it.uppercaseChar() } }
-        .ifBlank { id }
-
-val Tournament.dateRange: String?
-    get() {
-        val start = startDate ?: return null
-        val end = endDate ?: return null
-        return "$start – $end"
-    }
 
 private val POSITION_WIDTH = 32.dp
 private val RECORD_WIDTH = 48.dp

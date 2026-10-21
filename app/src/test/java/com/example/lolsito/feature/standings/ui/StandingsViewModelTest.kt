@@ -1,6 +1,8 @@
 package com.example.lolsito.feature.standings.ui
 
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.feature.standings.domain.Standings
 import com.example.lolsito.feature.standings.domain.StandingsRepository
@@ -52,14 +54,17 @@ class StandingsViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun viewModel() = StandingsViewModel(
+    private val leaguesRepository = LeaguesRepository {
+        leaguesRequests++
+        leaguesError?.let { throw it }
+        listOf(League(LCK, "lck", "LCK", "KOREA", null), League(WORLDS, "worlds", "Worlds", null, null))
+    }
+
+    private fun viewModel(savedStateHandle: SavedStateHandle = SavedStateHandle()) = StandingsViewModel(
         repository = repository,
-        loadLeagues = {
-            leaguesRequests++
-            leaguesError?.let { throw it }
-            listOf(League(LCK, "lck", "LCK", "KOREA", null), League(WORLDS, "worlds", "Worlds", null, null))
-        },
+        leaguesRepository = leaguesRepository,
         clock = clock,
+        savedStateHandle = savedStateHandle,
         defaultLeagueId = LCK,
     )
 
@@ -159,7 +164,7 @@ class StandingsViewModelTest {
         val state = vm.uiState.value
         assertEquals(LoadStatus.Error("leagues down"), state.leaguesStatus)
         assertTrue(state.leagues.isEmpty())
-        assertEquals("LCK", state.selectedLeagueLabel)
+        assertEquals("a neutral label while the leagues are unavailable", "League", state.selectedLeagueLabel)
         assertEquals(LoadStatus.Content, state.tournamentsStatus)
         assertEquals(LCK_SUMMER, state.selectedTournamentId)
         assertEquals(LoadStatus.Content, state.standingsStatus)
@@ -293,6 +298,52 @@ class StandingsViewModelTest {
         advanceUntilIdle()
 
         assertEquals(listOf(WORLDS_2026), vm.uiState.value.stageNames)
+    }
+
+    @Test
+    fun `selection is written to the saved state handle`() = runTest(dispatcher) {
+        val handle = SavedStateHandle()
+        val vm = viewModel(handle)
+        advanceUntilIdle()
+        assertEquals(LCK, handle.get<String>(StandingsViewModel.KEY_LEAGUE_ID))
+        assertEquals(LCK_SUMMER, handle.get<String>(StandingsViewModel.KEY_TOURNAMENT_ID))
+
+        vm.selectTournament(LCK_SPRING)
+        assertEquals(LCK_SPRING, handle.get<String>(StandingsViewModel.KEY_TOURNAMENT_ID))
+
+        vm.selectLeague(WORLDS)
+        assertEquals(WORLDS, handle.get<String>(StandingsViewModel.KEY_LEAGUE_ID))
+        assertNull("a league change drops the old tournament", handle.get<String>(StandingsViewModel.KEY_TOURNAMENT_ID))
+        advanceUntilIdle()
+        assertEquals(WORLDS_2026, handle.get<String>(StandingsViewModel.KEY_TOURNAMENT_ID))
+    }
+
+    @Test
+    fun `restored league and tournament are used on init`() = runTest(dispatcher) {
+        val handle = SavedStateHandle(
+            mapOf(StandingsViewModel.KEY_LEAGUE_ID to WORLDS, StandingsViewModel.KEY_TOURNAMENT_ID to WORLDS_2025)
+        )
+        val vm = viewModel(handle)
+        assertEquals(WORLDS, vm.uiState.value.selectedLeagueId)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(WORLDS_2025, state.selectedTournamentId)
+        assertEquals(listOf(WORLDS_2025), state.stageNames)
+        assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2025"), repository.requests)
+    }
+
+    @Test
+    fun `restored tournament missing from the list falls back to the default`() = runTest(dispatcher) {
+        val handle = SavedStateHandle(
+            mapOf(StandingsViewModel.KEY_LEAGUE_ID to LCK, StandingsViewModel.KEY_TOURNAMENT_ID to "gone")
+        )
+        val vm = viewModel(handle)
+        advanceUntilIdle()
+
+        assertEquals(LCK_SUMMER, vm.uiState.value.selectedTournamentId)
+        assertEquals(LCK_SUMMER, handle.get<String>(StandingsViewModel.KEY_TOURNAMENT_ID))
+        assertEquals(listOf("t:$LCK", "s:$LCK_SUMMER"), repository.requests)
     }
 
     private fun tournament(id: String, start: String, end: String) =

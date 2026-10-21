@@ -46,21 +46,88 @@ class StandingsRowsTest {
 
         rows.assertUniqueKeys()
         assertTrue(rows.none { it is StandingsRow.TableHeader || it is StandingsRow.RankingRow })
-        val notices = rows.filterIsInstance<StandingsRow.EliminationNotice>()
-        assertEquals(3, notices.size)
-        assertTrue(notices.all { it.hasMatches })
+        assertEquals(3, rows.count { it is StandingsRow.EliminationNotice })
+        assertTrue(rows.none { it is StandingsRow.EmptySection })
         val matches = rows.filterIsInstance<StandingsRow.MatchRow>()
         assertEquals(46, matches.size)
         assertEquals("3 - 0", matches.first().result.score)
     }
 
     @Test
-    fun `elimination stage without matches shows a notice that has no matches`() {
+    fun `stage without sections shows an empty row instead of an elimination notice`() {
         val rows = buildStandingsRows(Standings(listOf(StandingsStage("Knockouts", "knockouts", emptyList()))))
 
-        val notice = rows.filterIsInstance<StandingsRow.EliminationNotice>().single()
-        assertFalse(notice.hasMatches)
-        assertTrue(rows.none { it is StandingsRow.MatchRow })
+        assertEquals(1, rows.count { it is StandingsRow.EmptySection })
+        assertTrue(rows.none { it is StandingsRow.EliminationNotice || it is StandingsRow.MatchRow })
+        assertFalse(rows.filterIsInstance<StandingsRow.StageHeader>().single().isElimination)
+    }
+
+    @Test
+    fun `mixed stage shows the ranked table and the bracket matches`() {
+        val stage = StandingsStage(
+            "Groups", "groups",
+            listOf(
+                section("Group A", rankings = listOf(ranking(1, "x"), ranking(2, "y"))),
+                section("Bracket", matches = listOf(match("m1"), match("m2"))),
+            ),
+        )
+        val rows = buildStandingsRows(Standings(listOf(stage)))
+
+        rows.assertUniqueKeys()
+        assertEquals(
+            listOf(
+                StandingsRow.StageHeader::class,
+                StandingsRow.SectionHeader::class,
+                StandingsRow.TableHeader::class,
+                StandingsRow.RankingRow::class,
+                StandingsRow.RankingRow::class,
+                StandingsRow.SectionHeader::class,
+                StandingsRow.MatchRow::class,
+                StandingsRow.MatchRow::class,
+            ),
+            rows.map { it::class },
+        )
+        assertEquals(listOf("m1", "m2"), rows.filterIsInstance<StandingsRow.MatchRow>().map { it.sectionMatch.match.id })
+        assertFalse(rows.filterIsInstance<StandingsRow.StageHeader>().single().isElimination)
+    }
+
+    @Test
+    fun `all-bracket stage shows one elimination notice and every section's matches`() {
+        val stage = StandingsStage(
+            "Knockouts", "knockouts",
+            listOf(section("Quarterfinals", matches = listOf(match("q1"), match("q2"))), section("Final", matches = listOf(match("f1")))),
+        )
+        val rows = buildStandingsRows(Standings(listOf(stage)))
+
+        rows.assertUniqueKeys()
+        assertEquals(1, rows.count { it is StandingsRow.EliminationNotice })
+        assertEquals(listOf("q1", "q2", "f1"), rows.filterIsInstance<StandingsRow.MatchRow>().map { it.sectionMatch.match.id })
+        assertEquals(listOf("Quarterfinals", "Final"), rows.filterIsInstance<StandingsRow.SectionHeader>().map { it.name })
+        assertTrue(rows.none { it is StandingsRow.EmptySection })
+        assertTrue(rows.filterIsInstance<StandingsRow.StageHeader>().single().isElimination)
+    }
+
+    @Test
+    fun `unstarted stage without rankings or matches shows empty sections, not an elimination notice`() {
+        val stage = StandingsStage("Groups", "groups", listOf(section("Group A"), section("Group B")))
+        val rows = buildStandingsRows(Standings(listOf(stage)))
+
+        rows.assertUniqueKeys()
+        assertEquals(2, rows.count { it is StandingsRow.EmptySection })
+        assertTrue(rows.none { it is StandingsRow.EliminationNotice })
+        assertFalse(rows.filterIsInstance<StandingsRow.StageHeader>().single().isElimination)
+    }
+
+    @Test
+    fun `match row is navigable only when both teams are known`() {
+        val a = Team("a", "AAA", null, null, null, id = "a")
+        val b = Team("b", "BBB", null, null, null, id = "b")
+        fun row(vararg teams: Team) =
+            StandingsRow.MatchRow("k", SectionMatch(MatchState.UNSTARTED, Match("m", teams.toList(), bestOf = 3)))
+
+        assertTrue(row(a, b).isNavigable)
+        assertFalse(row(a).isNavigable)
+        assertFalse(row().isNavigable)
     }
 
     @Test

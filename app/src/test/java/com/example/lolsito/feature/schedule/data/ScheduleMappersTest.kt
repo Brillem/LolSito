@@ -4,7 +4,6 @@ import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.network.LolEsportsJson
 import com.example.lolsito.core.network.dto.EventDto
-import com.example.lolsito.core.network.dto.LeaguesResponse
 import com.example.lolsito.core.network.dto.ScheduleResponse
 import com.example.lolsito.testutil.Fixtures
 import org.junit.Assert.assertEquals
@@ -18,10 +17,6 @@ class ScheduleMappersTest {
     private val schedule = LolEsportsJson.decodeFromString<ScheduleResponse>(
         Fixtures.read("getSchedule_worlds.json")
     ).data.schedule
-
-    private val leagues = LolEsportsJson.decodeFromString<LeaguesResponse>(
-        Fixtures.read("getLeagues.json")
-    ).data.leagues
 
     @Test
     fun `schedule maps all events and page tokens`() {
@@ -81,15 +76,5 @@ class ScheduleMappersTest {
     fun `event with unparseable start time is dropped`() {
         val dto = LolEsportsJson.decodeFromString<EventDto>("""{"state":"unstarted"}""")
         assertNull(dto.toDomain())
-    }
-
-    @Test
-    fun `leagues exclude hidden and are sorted with worlds first`() {
-        val mapped = leagues.toDomainLeagues()
-        assertTrue(mapped.isNotEmpty())
-        assertTrue(mapped.size < 51)
-        assertEquals("worlds", mapped.first().slug)
-        assertEquals("98767975604431411", mapped.first().id)
-        assertTrue(mapped.first().imageUrl!!.startsWith("https://"))
     }
 }

@@ -30,19 +30,26 @@ data class SectionMatch(
     val match: Match,
 )
 
+/** A ranked section shows a table; a match-only one (bracket, Swiss) lists its matches instead. */
 data class StandingsSection(
     val name: String,
     val rankings: List<Ranking>,
     val matches: List<SectionMatch>,
-)
+) {
+    val isRanked: Boolean get() = rankings.isNotEmpty()
+    val isMatchOnly: Boolean get() = rankings.isEmpty() && matches.isNotEmpty()
+}
 
 data class StandingsStage(
     val name: String,
     val slug: String?,
     val sections: List<StandingsSection>,
 ) {
-    /** Bracket and Swiss stages come without rankings in every section. */
-    val isElimination: Boolean get() = sections.all { it.rankings.isEmpty() }
+    /**
+     * Bracket and Swiss stages: every section lists matches without rankings. A stage with no
+     * sections, or with a section that has neither (e.g. a round robin not started yet), is not.
+     */
+    val isElimination: Boolean get() = sections.isNotEmpty() && sections.all { it.isMatchOnly }
 }
 
 data class Standings(val stages: List<StandingsStage>)

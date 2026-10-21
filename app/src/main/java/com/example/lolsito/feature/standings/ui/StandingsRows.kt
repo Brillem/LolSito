@@ -23,15 +23,21 @@ sealed interface StandingsRow {
         val record: String get() = formatRecord(ranking.wins, ranking.losses)
     }
 
-    /** Ranked stage section that has no rankings yet. */
+    /** Section (or section-less stage) with neither rankings nor matches yet. */
     data class EmptySection(override val key: String) : StandingsRow
 
-    /** Bracket/Swiss stage. Without [hasMatches] the UI points to the Schedule tab instead. */
-    data class EliminationNotice(override val key: String, val hasMatches: Boolean) : StandingsRow
+    /** Bracket/Swiss stage: every section lists matches instead of a table. */
+    data class EliminationNotice(override val key: String) : StandingsRow
 
     data class MatchRow(override val key: String, val sectionMatch: SectionMatch) : StandingsRow {
         val result: MatchResultDisplay
             get() = formatMatchResult(sectionMatch.state, sectionMatch.match.teams, sectionMatch.match.bestOf)
+
+        /** Both teams are known, so the row shows them; otherwise it reads "TBD". */
+        val hasBothTeams: Boolean get() = sectionMatch.match.teams.size >= 2
+
+        /** An undecided match (TBD) has no detail worth opening. */
+        val isNavigable: Boolean get() = hasBothTeams
     }
 }
 
@@ -46,8 +52,9 @@ fun formatRecord(wins: Int?, losses: Int?): String = when {
 }
 
 /**
- * Stages in API order. Ranked stages show a table per section; stages without any rankings
- * (bracket or Swiss) show an elimination notice followed by their section matches.
+ * Stages in API order. Each section decides on its own: rankings show a table, matches without
+ * rankings show the match list, and a section with neither shows an empty row. Stages where every
+ * section is match-only (bracket or Swiss) also get an elimination notice.
  */
 fun buildStandingsRows(standings: Standings): List<StandingsRow> {
     val rows = mutableListOf<Pair<String, (String) -> StandingsRow>>()
@@ -55,28 +62,28 @@ fun buildStandingsRows(standings: Standings): List<StandingsRow> {
         val stageBase = "stage:${stage.slug ?: stage.name}"
         rows += stageBase to { key -> StandingsRow.StageHeader(key, stage.name, stage.isElimination) }
         if (stage.isElimination) {
-            val hasMatches = stage.sections.any { it.matches.isNotEmpty() }
-            rows += "notice:$stageBase" to { key -> StandingsRow.EliminationNotice(key, hasMatches) }
+            rows += "notice:$stageBase" to { key -> StandingsRow.EliminationNotice(key) }
+        }
+        if (stage.sections.isEmpty()) {
+            rows += "empty:$stageBase" to { key -> StandingsRow.EmptySection(key) }
         }
         stage.sections.forEach { section ->
             val sectionBase = "$stageBase/${section.name}"
-            if (stage.isElimination && section.matches.isEmpty()) return@forEach
             if (stage.showsSectionHeaders()) {
                 rows += "section:$sectionBase" to { key -> StandingsRow.SectionHeader(key, section.name) }
             }
             when {
-                stage.isElimination -> section.matches.forEach { match ->
-                    rows += "match:$sectionBase/${match.match.id}" to { key -> StandingsRow.MatchRow(key, match) }
-                }
-                section.rankings.isEmpty() ->
-                    rows += "empty:$sectionBase" to { key -> StandingsRow.EmptySection(key) }
-                else -> {
+                section.isRanked -> {
                     rows += "table:$sectionBase" to { key -> StandingsRow.TableHeader(key) }
                     section.rankings.forEach { ranking ->
                         val teamId = ranking.team.id ?: ranking.team.code
                         rows += "rank:$sectionBase/$teamId" to { key -> StandingsRow.RankingRow(key, ranking) }
                     }
                 }
+                section.isMatchOnly -> section.matches.forEach { match ->
+                    rows += "match:$sectionBase/${match.match.id}" to { key -> StandingsRow.MatchRow(key, match) }
+                }
+                else -> rows += "empty:$sectionBase" to { key -> StandingsRow.EmptySection(key) }
             }
         }
     }

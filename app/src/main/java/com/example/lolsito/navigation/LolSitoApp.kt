@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -49,12 +50,23 @@ private enum class TopLevelDestination(val route: String, val label: String, @Dr
     STANDINGS(Routes.STANDINGS, "Standings", R.drawable.ic_tab_standings),
 }
 
+internal const val START_ROUTE = Routes.SCHEDULE
+
+/**
+ * Route that drives the bottom bar. On the first frame there is no back stack entry yet, so the
+ * start destination stands in for it; otherwise the bar would pop in and the content would jump.
+ */
+internal fun bottomBarRoute(currentRoute: String?): String = currentRoute ?: START_ROUTE
+
+internal fun showsBottomBar(route: String): Boolean = TopLevelDestination.entries.any { it.route == route }
+
 @Composable
 fun LolSitoApp(container: AppContainer) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
-    val showBottomBar = TopLevelDestination.entries.any { it.route == currentDestination?.route }
+    val barRoute = bottomBarRoute(currentDestination?.route)
+    val showBottomBar = showsBottomBar(barRoute)
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
@@ -62,7 +74,8 @@ fun LolSitoApp(container: AppContainer) {
                 NavigationBar {
                     TopLevelDestination.entries.forEach { destination ->
                         NavigationBarItem(
-                            selected = currentDestination?.hierarchy?.any { it.route == destination.route } == true,
+                            selected = currentDestination?.hierarchy?.any { it.route == destination.route }
+                                ?: (destination.route == barRoute),
                             onClick = { navController.navigateToTopLevel(destination.route) },
                             icon = { Icon(painterResource(destination.icon), contentDescription = null) },
                             label = { Text(destination.label) },
@@ -74,14 +87,14 @@ fun LolSitoApp(container: AppContainer) {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Routes.SCHEDULE,
+            startDestination = START_ROUTE,
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(Routes.SCHEDULE) {
                 val zoneId = container.zoneId()
                 val vm: ScheduleViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { ScheduleViewModel(container.scheduleRepository, zoneId) }
+                        initializer { ScheduleViewModel(container.scheduleRepository, container.leaguesRepository, zoneId) }
                     }
                 )
                 ScheduleScreen(
@@ -96,8 +109,9 @@ fun LolSitoApp(container: AppContainer) {
                         initializer {
                             StandingsViewModel(
                                 repository = container.standingsRepository,
-                                loadLeagues = container.scheduleRepository::getLeagues,
+                                leaguesRepository = container.leaguesRepository,
                                 clock = container.clock(),
+                                savedStateHandle = createSavedStateHandle(),
                             )
                         }
                     }

@@ -2,6 +2,7 @@ package com.example.lolsito.feature.schedule.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
@@ -38,6 +39,7 @@ data class ScheduleUiState(
 
 class ScheduleViewModel(
     private val repository: ScheduleRepository,
+    private val leaguesRepository: LeaguesRepository,
     private val zoneId: ZoneId,
     defaultLeagueIds: Set<String> = setOf(DEFAULT_LEAGUE_ID),
 ) : ViewModel() {
@@ -90,7 +92,7 @@ class ScheduleViewModel(
         loadJob = viewModelScope.launch {
             try {
                 if (_uiState.value.leagues.isEmpty()) {
-                    val leagues = repository.getLeagues()
+                    val leagues = leaguesRepository.getLeagues()
                     _uiState.update { it.copy(leagues = leagues) }
                 }
                 val selected = _uiState.value.selectedLeagueIds

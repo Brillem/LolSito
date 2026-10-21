@@ -1,8 +1,9 @@
 package com.example.lolsito.feature.standings.ui
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.lolsito.core.model.KnownLeagues
+import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.Tournament
@@ -34,9 +35,12 @@ data class StandingsUiState(
     val standingsStatus: LoadStatus = LoadStatus.Loading,
     val rows: List<StandingsRow> = emptyList(),
 ) {
-    /** Name of the selected league; a known name (or a generic label) while the leagues are not loaded. */
+    /**
+     * Name of the selected league, or a neutral label until the leagues load. A leagues retry keeps
+     * the loaded list, so a name once shown stays while it reloads.
+     */
     val selectedLeagueLabel: String
-        get() = selectedLeague?.name ?: KnownLeagues.nameFor(selectedLeagueId) ?: "League"
+        get() = selectedLeague?.name ?: "League"
     val selectedLeague: League? get() = leagues.firstOrNull { it.id == selectedLeagueId }
     val selectedTournament: Tournament? get() = tournaments.firstOrNull { it.id == selectedTournamentId }
 }
@@ -45,16 +49,20 @@ data class StandingsUiState(
  * Loads the leagues for the picker and, independently, the selected league's tournaments followed
  * by the standings of the selected tournament. A leagues failure only affects the picker. Every
  * selection change cancels the in-flight load it supersedes, so stale results never overwrite
- * newer ones.
+ * newer ones. The selected league and tournament live in [savedStateHandle], so they survive process
+ * death: a restored tournament wins over the default pick while it is still in the loaded list.
  */
 class StandingsViewModel(
     private val repository: StandingsRepository,
-    private val loadLeagues: suspend () -> List<League>,
+    private val leaguesRepository: LeaguesRepository,
     private val clock: Clock,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     defaultLeagueId: String = DEFAULT_LEAGUE_ID,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(StandingsUiState(selectedLeagueId = defaultLeagueId))
+    private val _uiState = MutableStateFlow(
+        StandingsUiState(selectedLeagueId = savedStateHandle[KEY_LEAGUE_ID] ?: defaultLeagueId)
+    )
     val uiState: StateFlow<StandingsUiState> = _uiState.asStateFlow()
 
     private var leaguesJob: Job? = null
@@ -69,12 +77,15 @@ class StandingsViewModel(
     fun selectLeague(leagueId: String) {
         if (leagueId == _uiState.value.selectedLeagueId) return
         _uiState.update { it.copy(selectedLeagueId = leagueId) }
+        savedStateHandle[KEY_LEAGUE_ID] = leagueId
+        savedStateHandle.remove<String>(KEY_TOURNAMENT_ID)
         loadTournaments()
     }
 
     fun selectTournament(tournamentId: String) {
         if (tournamentId == _uiState.value.selectedTournamentId) return
         _uiState.update { it.copy(selectedTournamentId = tournamentId) }
+        savedStateHandle[KEY_TOURNAMENT_ID] = tournamentId
         loadStandings()
     }
 
@@ -90,7 +101,7 @@ class StandingsViewModel(
         _uiState.update { it.copy(leaguesStatus = LoadStatus.Loading) }
         leaguesJob = viewModelScope.launch {
             try {
-                val leagues = loadLeagues()
+                val leagues = leaguesRepository.getLeagues()
                 _uiState.update {
                     it.copy(
                         leagues = leagues,
@@ -118,10 +129,14 @@ class StandingsViewModel(
             )
         }
         val leagueId = _uiState.value.selectedLeagueId
+        savedStateHandle[KEY_LEAGUE_ID] = leagueId
         tournamentsJob = viewModelScope.launch {
             try {
                 val tournaments = repository.getTournaments(leagueId)
-                val selected = pickDefaultTournament(tournaments, LocalDate.now(clock))
+                val restoredId = savedStateHandle.get<String>(KEY_TOURNAMENT_ID)
+                val selected = tournaments.firstOrNull { it.id == restoredId }
+                    ?: pickDefaultTournament(tournaments, LocalDate.now(clock))
+                savedStateHandle[KEY_TOURNAMENT_ID] = selected?.id
                 _uiState.update {
                     it.copy(
                         tournamentsStatus = if (tournaments.isEmpty()) LoadStatus.Empty else LoadStatus.Content,
@@ -166,5 +181,8 @@ class StandingsViewModel(
     companion object {
         /** LCK: a round-robin league, so the default view shows real standings tables. */
         const val DEFAULT_LEAGUE_ID = "98767991310872058"
+
+        const val KEY_LEAGUE_ID = "standings.leagueId"
+        const val KEY_TOURNAMENT_ID = "standings.tournamentId"
     }
 }

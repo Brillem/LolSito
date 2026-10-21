@@ -1,6 +1,5 @@
 package com.example.lolsito.feature.schedule.domain
 
-import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
 import java.time.Instant
@@ -44,7 +43,6 @@ data class ScheduleDay(val date: LocalDate, val events: List<ScheduleEvent>) {
 }
 
 interface ScheduleRepository {
-    suspend fun getLeagues(): List<League>
     suspend fun getSchedule(leagueIds: List<String>, pageToken: String?): SchedulePage
 }
 

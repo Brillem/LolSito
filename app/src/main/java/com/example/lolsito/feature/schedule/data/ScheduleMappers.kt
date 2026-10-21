@@ -1,13 +1,11 @@
 package com.example.lolsito.feature.schedule.data
 
-import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.network.dto.EventDto
 import com.example.lolsito.core.network.toHttps
-import com.example.lolsito.core.network.dto.LeagueDto
 import com.example.lolsito.core.network.dto.MatchDto
 import com.example.lolsito.core.network.dto.ScheduleDto
 import com.example.lolsito.core.network.dto.TeamDto
@@ -28,19 +26,6 @@ private fun String?.toOutcome(): MatchOutcome? = when (this) {
     "loss" -> MatchOutcome.LOSS
     else -> null
 }
-
-private val statusRank = mapOf("force_selected" to 0, "selected" to 1, "not_selected" to 2)
-
-/** Drops hidden leagues and sorts by display status, position, priority, then name. */
-fun List<LeagueDto>.toDomainLeagues(): List<League> =
-    filter { it.id.isNotBlank() && it.displayPriority?.status != "hidden" }
-        .sortedWith(
-            compareBy<LeagueDto> { statusRank[it.displayPriority?.status] ?: Int.MAX_VALUE }
-                .thenBy { it.displayPriority?.position ?: Int.MAX_VALUE }
-                .thenBy { it.priority ?: Int.MAX_VALUE }
-                .thenBy { it.name }
-        )
-        .map { League(it.id, it.slug, it.name, it.region, it.image.toHttps()) }
 
 fun ScheduleDto.toSchedulePage(): SchedulePage = SchedulePage(
     events = events.mapNotNull { it.toDomain() },

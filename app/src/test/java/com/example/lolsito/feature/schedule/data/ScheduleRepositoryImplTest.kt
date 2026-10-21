@@ -43,13 +43,4 @@ class ScheduleRepositoryImplTest {
         assertEquals("a,b", request.url.queryParameter("leagueId"))
         assertNull(request.url.queryParameter("pageToken"))
     }
-
-    @Test
-    fun `getLeagues returns sorted domain leagues`() = runTest {
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("getLeagues.json")).build())
-
-        val leagues = repository.getLeagues()
-
-        assertEquals("worlds", leagues.first().slug)
-    }
 }

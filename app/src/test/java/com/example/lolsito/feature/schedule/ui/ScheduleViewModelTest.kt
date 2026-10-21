@@ -1,6 +1,7 @@
 package com.example.lolsito.feature.schedule.ui
 
 import app.cash.turbine.test
+import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
@@ -31,6 +32,14 @@ class ScheduleViewModelTest {
 
     private val dispatcher = StandardTestDispatcher()
     private val repository = FakeScheduleRepository()
+    private var leaguesError: Throwable? = null
+    private val leaguesRepository = LeaguesRepository {
+        leaguesError?.let { throw it }
+        listOf(
+            League(WORLDS, "worlds", "Worlds", "INTERNATIONAL", null),
+            League(LCK, "lck", "LCK", "KOREA", null),
+        )
+    }
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -40,6 +49,7 @@ class ScheduleViewModelTest {
 
     private fun viewModel() = ScheduleViewModel(
         repository = repository,
+        leaguesRepository = leaguesRepository,
         zoneId = ZoneId.of("UTC"),
         defaultLeagueIds = setOf(WORLDS),
     )
@@ -79,7 +89,7 @@ class ScheduleViewModelTest {
 
     @Test
     fun `leagues failure shows error`() = runTest(dispatcher) {
-        repository.leaguesError = IOException("down")
+        leaguesError = IOException("down")
         val vm = viewModel()
         advanceUntilIdle()
         assertTrue(vm.uiState.value.status is ScheduleStatus.Error)
@@ -280,19 +290,10 @@ class ScheduleViewModelTest {
         val pages = mutableMapOf<Pair<Set<String>, String?>, SchedulePage>()
         val requests = mutableListOf<Pair<Set<String>, String?>>()
         var scheduleError: Throwable? = null
-        var leaguesError: Throwable? = null
         var scheduleCalls = 0
 
         /** When set, getSchedule suspends on it after counting the call. */
         var gate: CompletableDeferred<Unit>? = null
-
-        override suspend fun getLeagues(): List<League> {
-            leaguesError?.let { throw it }
-            return listOf(
-                League(WORLDS, "worlds", "Worlds", "INTERNATIONAL", null),
-                League(LCK, "lck", "LCK", "KOREA", null),
-            )
-        }
 
         override suspend fun getSchedule(leagueIds: List<String>, pageToken: String?): SchedulePage {
             scheduleCalls++

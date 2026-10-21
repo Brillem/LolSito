@@ -1,0 +1,7 @@
+package com.example.lolsito.core.network
+
+object ApiConfig {
+    const val BASE_URL = "https://esports-api.lolesports.com/persisted/gw/"
+    const val API_KEY = "0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z"
+    const val LOCALE = "en-US"
+}

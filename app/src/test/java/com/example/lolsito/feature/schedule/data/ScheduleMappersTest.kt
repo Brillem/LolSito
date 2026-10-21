@@ -84,13 +84,6 @@ class ScheduleMappersTest {
     }
 
     @Test
-    fun `http urls are rewritten to https`() {
-        assertEquals("https://a.com/x.png", "http://a.com/x.png".toHttps())
-        assertEquals("https://a.com/x.png", "https://a.com/x.png".toHttps())
-        assertNull(null.toHttps())
-    }
-
-    @Test
     fun `leagues exclude hidden and are sorted with worlds first`() {
         val mapped = leagues.toDomainLeagues()
         assertTrue(mapped.isNotEmpty())

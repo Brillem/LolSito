@@ -6,6 +6,7 @@ import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.network.dto.EventDto
+import com.example.lolsito.core.network.toHttps
 import com.example.lolsito.core.network.dto.LeagueDto
 import com.example.lolsito.core.network.dto.MatchDto
 import com.example.lolsito.core.network.dto.ScheduleDto
@@ -14,8 +15,6 @@ import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.SchedulePage
 import java.time.Instant
 import java.time.format.DateTimeParseException
-
-fun String?.toHttps(): String? = this?.replaceFirst(Regex("^http://"), "https://")
 
 fun String?.toMatchState(): MatchState = when (this) {
     "unstarted" -> MatchState.UNSTARTED

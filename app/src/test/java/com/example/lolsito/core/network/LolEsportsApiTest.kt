@@ -68,4 +68,32 @@ class LolEsportsApiTest {
         assertEquals("115660588583040710", request.url.queryParameter("id"))
         assertEquals(5, response.data.event?.match?.games?.size)
     }
+
+    @Test
+    fun `getTournamentsForLeague sends api key, locale and league id`() = runTest {
+        server.enqueue(MockResponse.Builder().body(Fixtures.read("getTournamentsForLeague_worlds.json")).build())
+
+        val response = api.getTournamentsForLeague(leagueId = "98767975604431411")
+
+        val request = server.takeRequest()
+        assertEquals(ApiConfig.API_KEY, request.headers["x-api-key"])
+        assertEquals("/persisted/gw/getTournamentsForLeague", request.url.encodedPath)
+        assertEquals("en-US", request.url.queryParameter("hl"))
+        assertEquals("98767975604431411", request.url.queryParameter("leagueId"))
+        assertEquals(11, response.data.leagues.single().tournaments.size)
+    }
+
+    @Test
+    fun `getStandings sends api key, locale and tournament id`() = runTest {
+        server.enqueue(MockResponse.Builder().body(Fixtures.read("getStandings_worlds2026.json")).build())
+
+        val response = api.getStandings(tournamentId = "115660540725177488")
+
+        val request = server.takeRequest()
+        assertEquals(ApiConfig.API_KEY, request.headers["x-api-key"])
+        assertEquals("/persisted/gw/getStandings", request.url.encodedPath)
+        assertEquals("en-US", request.url.queryParameter("hl"))
+        assertEquals("115660540725177488", request.url.queryParameter("tournamentId"))
+        assertEquals(3, response.data.standings.single().stages.size)
+    }
 }

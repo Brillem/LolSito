@@ -6,11 +6,11 @@ import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.network.dto.EventDetailTeamDto
 import com.example.lolsito.core.network.dto.EventDetailsResponse
 import com.example.lolsito.core.network.dto.GameDto
+import com.example.lolsito.core.network.toHttps
 import com.example.lolsito.feature.match.domain.GameSide
 import com.example.lolsito.feature.match.domain.GameState
 import com.example.lolsito.feature.match.domain.MatchDetail
 import com.example.lolsito.feature.match.domain.MatchGame
-import com.example.lolsito.feature.schedule.data.toHttps
 
 /** Returns null when the response has no event, no event id, or no match. */
 fun EventDetailsResponse.toMatchDetail(): MatchDetail? {

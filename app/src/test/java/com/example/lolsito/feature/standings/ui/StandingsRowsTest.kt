@@ -110,6 +110,22 @@ class StandingsRowsTest {
     }
 
     @Test
+    fun `bracket stage keeps its notice and skips sections that are not scheduled yet`() {
+        val stage = StandingsStage(
+            "Knockouts", "knockouts",
+            listOf(section("Quarterfinals", matches = listOf(match("q1"))), section("Final")),
+        )
+        val rows = buildStandingsRows(Standings(listOf(stage)))
+
+        rows.assertUniqueKeys()
+        assertEquals(1, rows.count { it is StandingsRow.EliminationNotice })
+        assertEquals(listOf("q1"), rows.filterIsInstance<StandingsRow.MatchRow>().map { it.sectionMatch.match.id })
+        assertTrue(rows.none { it is StandingsRow.EmptySection })
+        assertEquals(listOf("Quarterfinals"), rows.filterIsInstance<StandingsRow.SectionHeader>().map { it.name })
+        assertTrue(rows.filterIsInstance<StandingsRow.StageHeader>().single().isElimination)
+    }
+
+    @Test
     fun `unstarted stage without rankings or matches shows empty sections, not an elimination notice`() {
         val stage = StandingsStage("Groups", "groups", listOf(section("Group A"), section("Group B")))
         val rows = buildStandingsRows(Standings(listOf(stage)))

@@ -46,10 +46,11 @@ data class StandingsStage(
     val sections: List<StandingsSection>,
 ) {
     /**
-     * Bracket and Swiss stages: every section lists matches without rankings. A stage with no
-     * sections, or with a section that has neither (e.g. a round robin not started yet), is not.
+     * Bracket and Swiss stages: no section has rankings and at least one lists matches; the
+     * remaining sections are rounds not scheduled yet. A stage with no sections, or whose sections
+     * all have neither (e.g. a round robin not started yet), is not.
      */
-    val isElimination: Boolean get() = sections.isNotEmpty() && sections.all { it.isMatchOnly }
+    val isElimination: Boolean get() = sections.none { it.isRanked } && sections.any { it.isMatchOnly }
 }
 
 data class Standings(val stages: List<StandingsStage>)

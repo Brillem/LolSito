@@ -53,8 +53,8 @@ fun formatRecord(wins: Int?, losses: Int?): String = when {
 
 /**
  * Stages in API order. Each section decides on its own: rankings show a table, matches without
- * rankings show the match list, and a section with neither shows an empty row. Stages where every
- * section is match-only (bracket or Swiss) also get an elimination notice.
+ * rankings show the match list, and a section with neither shows an empty row. Elimination stages
+ * (bracket or Swiss) also get a notice, and skip their rounds that are not scheduled yet.
  */
 fun buildStandingsRows(standings: Standings): List<StandingsRow> {
     val rows = mutableListOf<Pair<String, (String) -> StandingsRow>>()
@@ -67,7 +67,8 @@ fun buildStandingsRows(standings: Standings): List<StandingsRow> {
         if (stage.sections.isEmpty()) {
             rows += "empty:$stageBase" to { key -> StandingsRow.EmptySection(key) }
         }
-        stage.sections.forEach { section ->
+        val sections = if (stage.isElimination) stage.sections.filter { it.isMatchOnly } else stage.sections
+        sections.forEach { section ->
             val sectionBase = "$stageBase/${section.name}"
             if (stage.showsSectionHeaders()) {
                 rows += "section:$sectionBase" to { key -> StandingsRow.SectionHeader(key, section.name) }

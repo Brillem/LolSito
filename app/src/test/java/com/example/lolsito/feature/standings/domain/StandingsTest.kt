@@ -40,6 +40,15 @@ class StandingsTest {
     }
 
     @Test
+    fun `bracket stage with a match-only section and a not-yet-scheduled section is an elimination stage`() {
+        val stage = StandingsStage(
+            "Knockouts", "knockouts",
+            listOf(section("Quarterfinals", matches = listOf(match("q1"))), section("Final")),
+        )
+        assertTrue(stage.isElimination)
+    }
+
+    @Test
     fun `unstarted stage without rankings or matches is not an elimination stage`() {
         val stage = StandingsStage("Groups", "groups", listOf(section("A"), section("B")))
         assertFalse(stage.isElimination)

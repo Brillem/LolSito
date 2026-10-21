@@ -75,7 +75,7 @@ private fun SectionMatchDto.toDomain(): SectionMatch? {
     return SectionMatch(
         state = state.toMatchState(),
         // getStandings sends no best-of strategy.
-        match = Match(id = matchId, teams = teams.map { it.toDomain() }, bestOf = null),
+        match = Match(id = matchId, teams = teams.map { it.toDomain() }, format = null),
     )
 }
 

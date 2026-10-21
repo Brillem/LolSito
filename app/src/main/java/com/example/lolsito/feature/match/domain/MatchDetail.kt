@@ -2,6 +2,7 @@ package com.example.lolsito.feature.match.domain
 
 import com.example.lolsito.core.model.MatchResultDisplay
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.formatMatchResult
 
@@ -28,7 +29,7 @@ data class MatchDetail(
     val leagueImageUrl: String?,
     val blockName: String?,
     val teams: List<Team>,
-    val bestOf: Int?,
+    val format: SeriesFormat?,
     val games: List<MatchGame>,
 ) {
     /** Games that were or will be played; `unneeded` games are hidden. */
@@ -48,7 +49,7 @@ data class MatchDetail(
         }
     }
 
-    val result: MatchResultDisplay get() = formatMatchResult(state, teams, bestOf)
+    val result: MatchResultDisplay get() = formatMatchResult(state, teams, format)
 }
 
 interface MatchDetailRepository {

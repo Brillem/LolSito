@@ -31,7 +31,7 @@ sealed interface StandingsRow {
 
     data class MatchRow(override val key: String, val sectionMatch: SectionMatch) : StandingsRow {
         val result: MatchResultDisplay
-            get() = formatMatchResult(sectionMatch.state, sectionMatch.match.teams, sectionMatch.match.bestOf)
+            get() = formatMatchResult(sectionMatch.state, sectionMatch.match.teams, sectionMatch.match.format)
 
         /** Both teams are known, so the row shows them; otherwise it reads "TBD". */
         val hasBothTeams: Boolean get() = sectionMatch.match.teams.size >= 2

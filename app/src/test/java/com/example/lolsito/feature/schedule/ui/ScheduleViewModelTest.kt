@@ -47,10 +47,10 @@ class ScheduleViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun viewModel() = ScheduleViewModel(
+    private fun viewModel(zoneId: ZoneId = ZoneId.of("UTC")) = ScheduleViewModel(
         repository = repository,
         leaguesRepository = leaguesRepository,
-        zoneId = ZoneId.of("UTC"),
+        zoneId = zoneId,
         defaultLeagueIds = setOf(WORLDS),
     )
 
@@ -96,11 +96,55 @@ class ScheduleViewModelTest {
     }
 
     @Test
-    fun `empty page shows empty state`() = runTest(dispatcher) {
+    fun `empty page without cursors shows empty state`() = runTest(dispatcher) {
         repository.pages[key(setOf(WORLDS), null)] = page(emptyList())
         val vm = viewModel()
         advanceUntilIdle()
-        assertEquals(ScheduleStatus.Empty, vm.uiState.value.status)
+        val state = vm.uiState.value
+        assertEquals(ScheduleStatus.Empty, state.status)
+        assertFalse(state.canLoadOlder)
+        assertFalse(state.canLoadNewer)
+    }
+
+    @Test
+    fun `empty page with an older cursor still offers paging back`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(emptyList(), older = "o1")
+        repository.pages[key(setOf(WORLDS), "o1")] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val empty = vm.uiState.value
+        assertEquals(ScheduleStatus.Content, empty.status)
+        assertTrue(empty.days.isEmpty())
+        assertTrue(empty.canLoadOlder)
+        assertFalse(empty.canLoadNewer)
+
+        vm.loadOlder()
+        advanceUntilIdle()
+        assertEquals(listOf("1"), vm.uiState.value.days.flatMap { d -> d.events.map { it.matchId } })
+    }
+
+    @Test
+    fun `empty page with a newer cursor still offers paging forward`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(emptyList(), newer = "n1")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val empty = vm.uiState.value
+        assertEquals(ScheduleStatus.Content, empty.status)
+        assertTrue(empty.days.isEmpty())
+        assertFalse(empty.canLoadOlder)
+        assertTrue(empty.canLoadNewer)
+    }
+
+    @Test
+    fun `ui state exposes the zone the view model groups days with`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(emptyList())
+        val caracas = ZoneId.of("America/Caracas")
+        val vm = viewModel(zoneId = caracas)
+        assertEquals(caracas, vm.uiState.value.zoneId)
+        advanceUntilIdle()
+        assertEquals(caracas, vm.uiState.value.zoneId)
     }
 
     @Test
@@ -138,7 +182,9 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val failed = vm.uiState.value
-        assertEquals("older down", failed.pagingError)
+        assertEquals("older down", failed.olderError)
+        assertNull(failed.newerError)
+        assertFalse(failed.isPaging)
         assertFalse(failed.isLoadingOlder)
         assertFalse(failed.isLoadingNewer)
         assertEquals(ScheduleStatus.Content, failed.status)
@@ -152,7 +198,7 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val recovered = vm.uiState.value
-        assertNull(recovered.pagingError)
+        assertNull(recovered.olderError)
         assertEquals(listOf("1", "2"), recovered.days.flatMap { d -> d.events.map { it.matchId } })
         assertFalse(recovered.canLoadOlder)
         assertTrue(recovered.canLoadNewer)
@@ -170,7 +216,9 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val failed = vm.uiState.value
-        assertEquals("newer down", failed.pagingError)
+        assertEquals("newer down", failed.newerError)
+        assertNull(failed.olderError)
+        assertFalse(failed.isPaging)
         assertFalse(failed.isLoadingOlder)
         assertFalse(failed.isLoadingNewer)
         assertEquals(ScheduleStatus.Content, failed.status)
@@ -184,7 +232,7 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val recovered = vm.uiState.value
-        assertNull(recovered.pagingError)
+        assertNull(recovered.newerError)
         assertEquals(listOf("2", "3"), recovered.days.flatMap { d -> d.events.map { it.matchId } })
         assertTrue(recovered.canLoadOlder)
         assertFalse(recovered.canLoadNewer)
@@ -203,6 +251,8 @@ class ScheduleViewModelTest {
         vm.loadOlder()
         advanceUntilIdle()
         assertTrue(vm.uiState.value.isLoadingOlder)
+        assertFalse(vm.uiState.value.isLoadingNewer)
+        assertTrue(vm.uiState.value.isPaging)
         val callsInFlight = repository.scheduleCalls
 
         vm.loadOlder()
@@ -215,6 +265,56 @@ class ScheduleViewModelTest {
         assertEquals(callsInFlight, repository.scheduleCalls)
         assertEquals(listOf("1", "2"), vm.uiState.value.days.flatMap { d -> d.events.map { it.matchId } })
         assertFalse(vm.uiState.value.isLoadingOlder)
+        assertFalse(vm.uiState.value.isPaging)
+    }
+
+    @Test
+    fun `a paging error stays with its direction until that direction is retried`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("2", 2)), older = "o1", newer = "n1")
+        repository.pages[key(setOf(WORLDS), "n1")] = page(listOf(event("3", 3)), newer = "n2")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        repository.scheduleError = IOException("older down")
+        vm.loadOlder()
+        advanceUntilIdle()
+        assertEquals("older down", vm.uiState.value.olderError)
+
+        repository.scheduleError = null
+        vm.loadNewer()
+        advanceUntilIdle()
+        assertEquals("older down", vm.uiState.value.olderError)
+        assertNull(vm.uiState.value.newerError)
+
+        val gate = CompletableDeferred<Unit>()
+        repository.gate = gate
+        repository.pages[key(setOf(WORLDS), "o1")] = page(listOf(event("1", 1)))
+        vm.loadOlder()
+        advanceUntilIdle()
+        assertNull(vm.uiState.value.olderError)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertNull(vm.uiState.value.olderError)
+    }
+
+    @Test
+    fun `reloading clears paging errors in both directions`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("2", 2)), older = "o1", newer = "n1")
+        val vm = viewModel()
+        advanceUntilIdle()
+        repository.scheduleError = IOException("down")
+        vm.loadOlder()
+        advanceUntilIdle()
+        vm.loadNewer()
+        advanceUntilIdle()
+        assertEquals("down", vm.uiState.value.olderError)
+        assertEquals("down", vm.uiState.value.newerError)
+
+        repository.scheduleError = null
+        vm.retry()
+        advanceUntilIdle()
+        assertNull(vm.uiState.value.olderError)
+        assertNull(vm.uiState.value.newerError)
     }
 
     @Test
@@ -283,7 +383,7 @@ class ScheduleViewModelTest {
         blockName = null,
         leagueName = "Worlds",
         leagueSlug = "worlds",
-        match = Match(id = id, teams = emptyList(), bestOf = null),
+        match = Match(id = id, teams = emptyList(), format = null),
     )
 
     private class FakeScheduleRepository : ScheduleRepository {

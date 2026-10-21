@@ -1,6 +1,8 @@
 package com.example.lolsito.feature.match.domain
 
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
+import com.example.lolsito.core.model.SeriesType
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -17,7 +19,7 @@ class MatchDetailTest {
         leagueImageUrl = null,
         blockName = null,
         teams = emptyList(),
-        bestOf = 5,
+        format = SeriesFormat(SeriesType.BEST_OF, 5),
         games = games.toList(),
     )
 

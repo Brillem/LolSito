@@ -2,6 +2,8 @@ package com.example.lolsito.feature.standings.ui
 
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
+import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.network.LolEsportsJson
 import com.example.lolsito.core.network.dto.StandingsResponse
@@ -123,7 +125,7 @@ class StandingsRowsTest {
         val a = Team("a", "AAA", null, null, null, id = "a")
         val b = Team("b", "BBB", null, null, null, id = "b")
         fun row(vararg teams: Team) =
-            StandingsRow.MatchRow("k", SectionMatch(MatchState.UNSTARTED, Match("m", teams.toList(), bestOf = 3)))
+            StandingsRow.MatchRow("k", SectionMatch(MatchState.UNSTARTED, Match("m", teams.toList(), format = SeriesFormat(SeriesType.BEST_OF, 3))))
 
         assertTrue(row(a, b).isNavigable)
         assertFalse(row(a).isNavigable)
@@ -183,5 +185,5 @@ class StandingsRowsTest {
     private fun ranking(ordinal: Int?, id: String) =
         Ranking(ordinal, Team(id, id.uppercase(), null, null, null, id = id), wins = 1, losses = 2)
 
-    private fun match(id: String) = SectionMatch(MatchState.UNSTARTED, Match(id, emptyList(), bestOf = null))
+    private fun match(id: String) = SectionMatch(MatchState.UNSTARTED, Match(id, emptyList(), format = null))
 }

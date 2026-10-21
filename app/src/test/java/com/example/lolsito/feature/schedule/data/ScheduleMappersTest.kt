@@ -2,6 +2,8 @@ package com.example.lolsito.feature.schedule.data
 
 import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
+import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.network.LolEsportsJson
 import com.example.lolsito.core.network.dto.EventDto
 import com.example.lolsito.core.network.dto.ScheduleResponse
@@ -35,7 +37,7 @@ class ScheduleMappersTest {
         assertEquals("Worlds", event.leagueName)
         val match = event.match!!
         assertEquals("113475798006664574", match.id)
-        assertEquals(1, match.bestOf)
+        assertEquals(SeriesFormat(SeriesType.BEST_OF, 1), match.format)
         assertEquals(listOf("MKOI", "KT"), match.teams.map { it.code })
         assertEquals(MatchOutcome.WIN, match.teams[1].outcome)
         assertEquals(1, match.teams[1].gameWins)
@@ -51,7 +53,7 @@ class ScheduleMappersTest {
         assertEquals(MatchState.UNSTARTED, event.state)
         val teams = event.match!!.teams
         assertTrue(teams.all { it.code == "TBD" && it.outcome == null && it.gameWins == null })
-        assertEquals(5, event.match!!.bestOf)
+        assertEquals(SeriesFormat(SeriesType.BEST_OF, 5), event.match!!.format)
     }
 
     @Test
@@ -70,6 +72,15 @@ class ScheduleMappersTest {
         assertNull(event.match)
         assertEquals("LCK", event.leagueName)
         assertNull(event.matchId)
+    }
+
+    @Test
+    fun `play all strategy maps to a play all series format`() {
+        val dto = LolEsportsJson.decodeFromString<EventDto>(
+            """{"startTime":"2026-01-01T10:00:00Z","state":"unstarted",""" +
+                """"match":{"id":"m1","teams":[],"strategy":{"type":"playAll","count":2}}}"""
+        )
+        assertEquals(SeriesFormat(SeriesType.PLAY_ALL, 2), dto.toDomain()!!.match!!.format)
     }
 
     @Test

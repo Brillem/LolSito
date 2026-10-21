@@ -1,6 +1,8 @@
 package com.example.lolsito.feature.match.data
 
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
+import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.network.LolEsportsJson
 import com.example.lolsito.core.network.dto.EventDetailsResponse
 import com.example.lolsito.feature.match.domain.GameSide
@@ -22,7 +24,7 @@ class MatchDetailMappersTest {
         assertEquals("115660588583040710", detail.matchId)
         assertEquals("Worlds", detail.leagueName)
         assertEquals("worlds", detail.leagueSlug)
-        assertEquals(5, detail.bestOf)
+        assertEquals(SeriesFormat(SeriesType.BEST_OF, 5), detail.format)
         assertEquals(
             "https://static.lolesports.com/leagues/1592594612171_WorldsDarkBG.png",
             detail.leagueImageUrl,
@@ -75,10 +77,11 @@ class MatchDetailMappersTest {
         games: List<String>,
         bestOf: Int? = null,
         results: List<String> = emptyList(),
+        strategyType: String = "bestOf",
     ): com.example.lolsito.feature.match.domain.MatchDetail {
         val gamesJson = games.mapIndexed { i, s -> """{"number":${i + 1},"id":"g$i","state":"$s"}""" }
         val teamsJson = results.mapIndexed { i, r -> """{"id":"t$i","name":"Team $i","code":"T$i","result":$r}""" }
-        val strategy = bestOf?.let { """{"type":"bestOf","count":$it}""" } ?: "null"
+        val strategy = bestOf?.let { """{"type":"$strategyType","count":$it}""" } ?: "null"
         return decode(
             """{"data":{"event":{"id":"1","match":{"strategy":$strategy,"teams":[${teamsJson.joinToString(",")}],""" +
                 """"games":[${gamesJson.joinToString(",")}]}}}}"""
@@ -168,6 +171,62 @@ class MatchDetailMappersTest {
     }
 
     @Test
+    fun `maps the play all strategy type`() {
+        val series = seriesOf(games = listOf("unstarted", "unstarted"), bestOf = 2, strategyType = "playAll")
+        assertEquals(SeriesFormat(SeriesType.PLAY_ALL, 2), series.format)
+        assertEquals("2 games", series.result.formatLabel)
+    }
+
+    @Test
+    fun `play all series is not decided early by a best of threshold`() {
+        val series = seriesOf(
+            games = listOf("completed", "completed", "inProgress"),
+            bestOf = 3,
+            strategyType = "playAll",
+            results = listOf("""{"gameWins":2}""", """{"gameWins":0}"""),
+        )
+        assertEquals(MatchState.IN_PROGRESS, series.state)
+        assertNull(series.result.score)
+        assertNull(series.result.winnerIndex)
+    }
+
+    @Test
+    fun `play all series is completed once game wins add up to the game count`() {
+        val series = seriesOf(
+            games = listOf("completed", "completed", "unstarted"),
+            bestOf = 2,
+            strategyType = "playAll",
+            results = listOf("""{"gameWins":1}""", """{"gameWins":1}"""),
+        )
+        assertEquals(MatchState.COMPLETED, series.state)
+        assertEquals("1 - 1", series.result.score)
+        assertNull(series.result.winnerIndex)
+    }
+
+    @Test
+    fun `play all series is completed when every game is completed`() {
+        val series = seriesOf(
+            games = listOf("completed", "completed"),
+            bestOf = 2,
+            strategyType = "playAll",
+            results = listOf("""{"gameWins":2}""", """{"gameWins":0}"""),
+        )
+        assertEquals(MatchState.COMPLETED, series.state)
+        assertEquals(0, series.result.winnerIndex)
+    }
+
+    @Test
+    fun `unknown series type uses no early threshold`() {
+        val series = seriesOf(
+            games = listOf("completed", "completed", "unstarted"),
+            bestOf = 3,
+            strategyType = "swiss",
+            results = listOf("""{"gameWins":2}""", """{"gameWins":0}"""),
+        )
+        assertEquals(MatchState.IN_PROGRESS, series.state)
+    }
+
+    @Test
     fun `tolerates missing and null fields`() {
         val minimal = decode(
             """{"data":{"event":{"id":"42","league":null,"match":{"strategy":null,
@@ -177,7 +236,7 @@ class MatchDetailMappersTest {
 
         assertEquals("42", minimal.matchId)
         assertEquals("", minimal.leagueName)
-        assertNull(minimal.bestOf)
+        assertNull(minimal.format)
         assertNull(minimal.blockName)
         assertEquals("TBD", minimal.teams.single().code)
         assertNull(minimal.teams.single().imageUrl)

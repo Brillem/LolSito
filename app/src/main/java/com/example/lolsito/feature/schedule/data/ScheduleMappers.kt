@@ -6,6 +6,7 @@ import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.network.dto.EventDto
 import com.example.lolsito.core.network.toHttps
+import com.example.lolsito.core.network.toSeriesFormat
 import com.example.lolsito.core.network.dto.MatchDto
 import com.example.lolsito.core.network.dto.ScheduleDto
 import com.example.lolsito.core.network.dto.TeamDto
@@ -57,7 +58,7 @@ private fun MatchDto.toDomain(): Match? {
     return Match(
         id = matchId,
         teams = teams.orEmpty().map { it.toDomain() },
-        bestOf = strategy?.count,
+        format = strategy.toSeriesFormat(),
     )
 }
 

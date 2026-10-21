@@ -34,6 +34,8 @@ import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
+import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.model.formatMatchResult
@@ -53,14 +55,12 @@ import java.time.format.FormatStyle
 @Composable
 fun ScheduleScreen(
     viewModel: ScheduleViewModel,
-    zoneId: ZoneId,
     onMatchClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     ScheduleContent(
         state = state,
-        zoneId = zoneId,
         onToggleLeague = viewModel::toggleLeague,
         onRetry = viewModel::retry,
         onLoadOlder = viewModel::loadOlder,
@@ -73,7 +73,6 @@ fun ScheduleScreen(
 @Composable
 fun ScheduleContent(
     state: ScheduleUiState,
-    zoneId: ZoneId,
     onToggleLeague: (String) -> Unit,
     onRetry: () -> Unit,
     onLoadOlder: () -> Unit,
@@ -92,7 +91,7 @@ fun ScheduleContent(
                 if (state.selectedLeagueIds.isEmpty()) "Select a league to see its matches"
                 else "No matches scheduled"
             )
-            ScheduleStatus.Content -> ScheduleList(state, zoneId, onLoadOlder, onLoadNewer, onMatchClick)
+            ScheduleStatus.Content -> ScheduleList(state, onLoadOlder, onLoadNewer, onMatchClick)
         }
     }
 }
@@ -123,40 +122,66 @@ fun LeagueFilterRow(
 @Composable
 private fun ScheduleList(
     state: ScheduleUiState,
-    zoneId: ZoneId,
     onLoadOlder: () -> Unit,
     onLoadNewer: () -> Unit,
     onMatchClick: (String) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "older") {
-            PagingButton("Load older", state.canLoadOlder, state.isLoadingOlder, onLoadOlder)
+            PagingButton(
+                "Load older",
+                available = state.canLoadOlder,
+                enabled = !state.isPaging,
+                loading = state.isLoadingOlder,
+                onClick = onLoadOlder,
+            )
+            state.olderError?.let { PagingError(it) }
+        }
+        if (state.days.isEmpty()) {
+            item(key = "empty-range") {
+                Text(
+                    "No matches in this range",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                )
+            }
         }
         state.days.forEach { day ->
             stickyHeader(key = "day-${day.date}") { DayHeader(day.date) }
             itemsIndexed(day.events, key = { index, _ -> day.keys[index] }) { _, event ->
-                EventRow(event, zoneId, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+                EventRow(event, state.zoneId, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
             }
         }
         item(key = "newer") {
-            PagingButton("Load newer", state.canLoadNewer, state.isLoadingNewer, onLoadNewer)
-            state.pagingError?.let {
-                Text(
-                    it,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
+            PagingButton(
+                "Load newer",
+                available = state.canLoadNewer,
+                enabled = !state.isPaging,
+                loading = state.isLoadingNewer,
+                onClick = onLoadNewer,
+            )
+            state.newerError?.let { PagingError(it) }
         }
     }
 }
 
+/** Hidden when there is no cursor; disabled while any page loads, since only one loads at a time. */
 @Composable
-private fun PagingButton(label: String, enabled: Boolean, loading: Boolean, onClick: () -> Unit) {
-    if (!enabled && !loading) return
+private fun PagingButton(label: String, available: Boolean, enabled: Boolean, loading: Boolean, onClick: () -> Unit) {
+    if (!available && !loading) return
     Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
-        if (loading) CircularProgressIndicator() else TextButton(onClick = onClick) { Text(label) }
+        if (loading) CircularProgressIndicator() else TextButton(onClick = onClick, enabled = enabled) { Text(label) }
     }
+}
+
+@Composable
+private fun PagingError(message: String) {
+    Text(
+        message,
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
 }
 
 private val dayFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
@@ -184,7 +209,7 @@ fun EventRow(
     onClick: (() -> Unit)? = null,
 ) {
     val teams = event.match?.teams.orEmpty()
-    val result = formatMatchResult(event.state, teams, event.match?.bestOf)
+    val result = formatMatchResult(event.state, teams, event.match?.format)
     Row(
         modifier
             .fillMaxWidth()
@@ -215,7 +240,7 @@ fun EventRow(
             val meta = listOfNotNull(
                 event.leagueName.takeIf { it.isNotBlank() },
                 event.blockName,
-                result.bestOf,
+                result.formatLabel,
             ).joinToString(" · ")
             Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -250,7 +275,7 @@ private val previewEvent = ScheduleEvent(
     match = Match(
         id = "1",
         teams = listOf(Team("T1", "T1", null, null, null), Team("Gen.G", "GEN", null, null, null)),
-        bestOf = 3,
+        format = SeriesFormat(SeriesType.BEST_OF, 3),
     ),
 )
 
@@ -265,8 +290,8 @@ private fun ScheduleContentPreview() {
             days = listOf(ScheduleDay(LocalDate.of(2026, 10, 20), listOf(previewEvent))),
             canLoadOlder = true,
             canLoadNewer = true,
+            zoneId = ZoneId.of("UTC"),
         ),
-        zoneId = ZoneId.of("UTC"),
         onToggleLeague = {}, onRetry = {}, onLoadOlder = {}, onLoadNewer = {}, onMatchClick = {},
     )
 }

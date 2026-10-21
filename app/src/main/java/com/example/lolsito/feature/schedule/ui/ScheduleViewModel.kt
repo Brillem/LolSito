@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.ZoneId
+import java.time.ZoneOffset
 
 sealed interface ScheduleStatus {
     data object Loading : ScheduleStatus
@@ -34,8 +35,15 @@ data class ScheduleUiState(
     val canLoadNewer: Boolean = false,
     val isLoadingOlder: Boolean = false,
     val isLoadingNewer: Boolean = false,
-    val pagingError: String? = null,
-)
+    /** Last failure of each paging direction, shown next to its button until that direction is retried. */
+    val olderError: String? = null,
+    val newerError: String? = null,
+    /** Zone used to group days; the screen formats times with it so both always agree. */
+    val zoneId: ZoneId = ZoneOffset.UTC,
+) {
+    /** Only one page loads at a time, so both paging buttons are disabled while one is in flight. */
+    val isPaging: Boolean get() = isLoadingOlder || isLoadingNewer
+}
 
 class ScheduleViewModel(
     private val repository: ScheduleRepository,
@@ -44,7 +52,7 @@ class ScheduleViewModel(
     defaultLeagueIds: Set<String> = setOf(DEFAULT_LEAGUE_ID),
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ScheduleUiState(selectedLeagueIds = defaultLeagueIds))
+    private val _uiState = MutableStateFlow(ScheduleUiState(selectedLeagueIds = defaultLeagueIds, zoneId = zoneId))
     val uiState: StateFlow<ScheduleUiState> = _uiState.asStateFlow()
 
     private var events: List<ScheduleEvent> = emptyList()
@@ -86,7 +94,8 @@ class ScheduleViewModel(
                 canLoadNewer = false,
                 isLoadingOlder = false,
                 isLoadingNewer = false,
-                pagingError = null,
+                olderError = null,
+                newerError = null,
             )
         }
         loadJob = viewModelScope.launch {
@@ -118,7 +127,8 @@ class ScheduleViewModel(
         if (pagingJob?.isActive == true || loadJob?.isActive == true) return
         val selected = _uiState.value.selectedLeagueIds.sorted()
         _uiState.update {
-            it.copy(isLoadingOlder = older, isLoadingNewer = !older, pagingError = null)
+            if (older) it.copy(isLoadingOlder = true, olderError = null)
+            else it.copy(isLoadingNewer = true, newerError = null)
         }
         pagingJob = viewModelScope.launch {
             try {
@@ -129,17 +139,21 @@ class ScheduleViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                val message = e.toMessage()
                 _uiState.update {
-                    it.copy(isLoadingOlder = false, isLoadingNewer = false, pagingError = e.toMessage())
+                    val idle = it.copy(isLoadingOlder = false, isLoadingNewer = false)
+                    if (older) idle.copy(olderError = message) else idle.copy(newerError = message)
                 }
             }
         }
     }
 
+    /** An empty range that still has a cursor stays Content, so the user can page past it. */
     private fun publish() {
+        val canPage = olderToken != null || newerToken != null
         _uiState.update {
             it.copy(
-                status = if (events.isEmpty()) ScheduleStatus.Empty else ScheduleStatus.Content,
+                status = if (events.isEmpty() && !canPage) ScheduleStatus.Empty else ScheduleStatus.Content,
                 days = groupEventsByDay(events, zoneId),
                 canLoadOlder = olderToken != null,
                 canLoadNewer = newerToken != null,

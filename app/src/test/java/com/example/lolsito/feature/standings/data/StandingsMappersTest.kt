@@ -89,7 +89,7 @@ class StandingsMappersTest {
         assertEquals(MatchState.COMPLETED, first.state)
         assertEquals(listOf("BRO", "KT"), first.match.teams.map { it.code })
         assertTrue(first.match.teams.all { it.imageUrl!!.startsWith("https://") })
-        val result = formatMatchResult(first.state, first.match.teams, first.match.bestOf)
+        val result = formatMatchResult(first.state, first.match.teams, first.match.format)
         assertEquals("2 - 3", result.score)
         assertEquals(1, result.winnerIndex)
     }
@@ -104,7 +104,7 @@ class StandingsMappersTest {
         assertEquals(listOf(6, 33, 7), mapped.stages.map { stage -> stage.sections.sumOf { it.matches.size } })
 
         val opener = mapped.stages.first().sections.single().matches.first()
-        assertEquals("3 - 0", formatMatchResult(opener.state, opener.match.teams, opener.match.bestOf).score)
+        assertEquals("3 - 0", formatMatchResult(opener.state, opener.match.teams, opener.match.format).score)
         val swiss = mapped.stages[1].sections.single().matches.first()
         assertEquals(MatchState.UNSTARTED, swiss.state)
         assertEquals(listOf("TBD", "TBD"), swiss.match.teams.map { it.code })

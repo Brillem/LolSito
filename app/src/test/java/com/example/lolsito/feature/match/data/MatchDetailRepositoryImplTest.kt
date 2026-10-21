@@ -45,7 +45,7 @@ class MatchDetailRepositoryImplTest {
         assertEquals("115660588583040710", detail.matchId)
         assertEquals(listOf("MVK", "FUR"), detail.teams.map { it.code })
         assertEquals("3 - 0", detail.result.score)
-        assertEquals("Bo5", detail.result.bestOf)
+        assertEquals("Bo5", detail.result.formatLabel)
     }
 
     @Test

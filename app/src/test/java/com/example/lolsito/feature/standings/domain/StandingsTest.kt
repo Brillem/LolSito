@@ -60,5 +60,5 @@ class StandingsTest {
     private fun ranking(ordinal: Int, code: String) =
         Ranking(ordinal, Team(code, code, null, null, null, id = code), wins = 1, losses = 0)
 
-    private fun match(id: String) = SectionMatch(MatchState.UNSTARTED, Match(id, emptyList(), bestOf = null))
+    private fun match(id: String) = SectionMatch(MatchState.UNSTARTED, Match(id, emptyList(), format = null))
 }

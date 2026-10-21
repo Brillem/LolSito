@@ -2,6 +2,8 @@ package com.example.lolsito.feature.match.ui
 
 import app.cash.turbine.test
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
+import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.feature.match.domain.MatchDetail
 import com.example.lolsito.feature.match.domain.MatchDetailRepository
 import kotlinx.coroutines.Dispatchers
@@ -78,7 +80,7 @@ class MatchDetailViewModelTest {
         leagueImageUrl = null,
         blockName = null,
         teams = emptyList(),
-        bestOf = 5,
+        format = SeriesFormat(SeriesType.BEST_OF, 5),
         games = emptyList(),
     )
 

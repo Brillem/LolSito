@@ -13,12 +13,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -58,6 +60,9 @@ internal const val START_ROUTE = Routes.SCHEDULE
  */
 internal fun bottomBarRoute(currentRoute: String?): String = currentRoute ?: START_ROUTE
 
+/** Only a resumed entry may navigate, so a double tap during the transition pushes a single screen. */
+internal fun canNavigateFrom(state: Lifecycle.State): Boolean = state == Lifecycle.State.RESUMED
+
 internal fun showsBottomBar(route: String): Boolean = TopLevelDestination.entries.any { it.route == route }
 
 @Composable
@@ -90,20 +95,20 @@ fun LolSitoApp(container: AppContainer) {
             startDestination = START_ROUTE,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable(Routes.SCHEDULE) {
-                val zoneId = container.zoneId()
+            composable(Routes.SCHEDULE) { entry ->
                 val vm: ScheduleViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { ScheduleViewModel(container.scheduleRepository, container.leaguesRepository, zoneId) }
+                        initializer {
+                            ScheduleViewModel(container.scheduleRepository, container.leaguesRepository, container.zoneId())
+                        }
                     }
                 )
                 ScheduleScreen(
                     viewModel = vm,
-                    zoneId = zoneId,
-                    onMatchClick = { matchId -> navController.navigate(Routes.match(matchId)) },
+                    onMatchClick = { matchId -> navController.navigateToMatch(from = entry, matchId = matchId) },
                 )
             }
-            composable(Routes.STANDINGS) {
+            composable(Routes.STANDINGS) { entry ->
                 val vm: StandingsViewModel = viewModel(
                     factory = viewModelFactory {
                         initializer {
@@ -118,7 +123,7 @@ fun LolSitoApp(container: AppContainer) {
                 )
                 StandingsScreen(
                     viewModel = vm,
-                    onMatchClick = { matchId -> navController.navigate(Routes.match(matchId)) },
+                    onMatchClick = { matchId -> navController.navigateToMatch(from = entry, matchId = matchId) },
                 )
             }
             composable(
@@ -135,6 +140,15 @@ fun LolSitoApp(container: AppContainer) {
             }
         }
     }
+}
+
+/**
+ * Opens match detail from [from]. A double tap would otherwise push it twice: the first navigate
+ * moves [from] out of RESUMED, so the second tap is dropped; single top guards the rest.
+ */
+private fun NavHostController.navigateToMatch(from: NavBackStackEntry, matchId: String) {
+    if (!canNavigateFrom(from.lifecycle.currentState)) return
+    navigate(Routes.match(matchId)) { launchSingleTop = true }
 }
 
 /** Switches tabs keeping one back stack per tab: state is saved on leave and restored on return. */

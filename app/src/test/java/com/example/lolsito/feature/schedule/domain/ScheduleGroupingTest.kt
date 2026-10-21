@@ -1,7 +1,11 @@
 package com.example.lolsito.feature.schedule.domain
 
 import com.example.lolsito.core.model.Match
+import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
+import com.example.lolsito.core.model.SeriesType
+import com.example.lolsito.core.model.Team
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.time.Instant
@@ -16,7 +20,7 @@ class ScheduleGroupingTest {
         blockName = null,
         leagueName = "Worlds",
         leagueSlug = "worlds",
-        match = Match(id = id, teams = emptyList(), bestOf = null),
+        match = Match(id = id, teams = emptyList(), format = null),
     )
 
     private fun matchless(time: String, state: MatchState = MatchState.UNSTARTED, block: String? = "Finals") =
@@ -57,6 +61,27 @@ class ScheduleGroupingTest {
         val merged = mergeEvents(existing, incoming)
 
         assertEquals(listOf("a", "b", "c"), merged.map { it.matchId })
+    }
+
+    @Test
+    fun `merge replaces an existing match with the fresher incoming copy`() {
+        val stale = event("x", "2026-10-20T06:00:00Z")
+        val fresh = stale.copy(
+            state = MatchState.COMPLETED,
+            match = Match(
+                id = "x",
+                teams = listOf(
+                    Team("T1", "T1", null, MatchOutcome.WIN, 2),
+                    Team("Gen.G", "GEN", null, MatchOutcome.LOSS, 1),
+                ),
+                format = SeriesFormat(SeriesType.BEST_OF, 3),
+            ),
+        )
+        val other = event("y", "2026-10-21T06:00:00Z")
+
+        val merged = mergeEvents(listOf(stale, other), listOf(fresh))
+
+        assertEquals(listOf(fresh, other), merged)
     }
 
     @Test

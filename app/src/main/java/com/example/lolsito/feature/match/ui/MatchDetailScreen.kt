@@ -30,6 +30,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
+import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.ui.ErrorView
@@ -115,7 +117,7 @@ fun MatchHeader(detail: MatchDetail, modifier: Modifier = Modifier) {
         val meta = listOfNotNull(
             detail.leagueName.takeIf { it.isNotBlank() },
             detail.blockName,
-            result.bestOf,
+            result.formatLabel,
         ).joinToString(" · ")
         if (meta.isNotEmpty()) {
             Text(meta, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -213,7 +215,7 @@ private val previewDetail = MatchDetail(
         Team("MVK Esports", "MVK", null, null, 3, id = "a"),
         Team("FURIA", "FUR", null, null, 0, id = "b"),
     ),
-    bestOf = 5,
+    format = SeriesFormat(SeriesType.BEST_OF, 5),
     games = (1..5).map { n ->
         MatchGame(
             number = n,

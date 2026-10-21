@@ -10,7 +10,7 @@ enum class TeamEmphasis { WINNER, LOSER, NEUTRAL }
 data class MatchResultDisplay(
     val score: String?,
     val winnerIndex: Int?,
-    val bestOf: String?,
+    val formatLabel: String?,
 ) {
     fun emphasisFor(index: Int): TeamEmphasis = when (winnerIndex) {
         null -> TeamEmphasis.NEUTRAL
@@ -19,18 +19,26 @@ data class MatchResultDisplay(
     }
 }
 
-/** Formats score, winner and best-of label. The outcome decides the winner; game wins are the fallback. */
-fun formatMatchResult(state: MatchState, teams: List<Team>, bestOf: Int?): MatchResultDisplay {
-    val bestOfLabel = bestOf?.takeIf { it > 0 }?.let { "Bo$it" }
-    if (teams.size < 2 || state != MatchState.COMPLETED) {
-        return MatchResultDisplay(score = null, winnerIndex = null, bestOf = bestOfLabel)
+/**
+ * Formats score, winner and series format label. The outcome decides the winner; game wins are the
+ * fallback. A play-all series without outcomes is only shown as decided once every game has a winner.
+ */
+fun formatMatchResult(state: MatchState, teams: List<Team>, format: SeriesFormat?): MatchResultDisplay {
+    val formatLabel = format?.label
+    if (teams.size < 2 || state != MatchState.COMPLETED || isUnfinishedPlayAll(teams, format)) {
+        return MatchResultDisplay(score = null, winnerIndex = null, formatLabel = formatLabel)
     }
     val (first, second) = teams
     val firstWins = first.gameWins
     val secondWins = second.gameWins
     val score = if (firstWins != null && secondWins != null) "$firstWins - $secondWins" else null
-    return MatchResultDisplay(score, winnerFromOutcome(first, second) ?: winnerFromGameWins(firstWins, secondWins), bestOfLabel)
+    return MatchResultDisplay(score, winnerFromOutcome(first, second) ?: winnerFromGameWins(firstWins, secondWins), formatLabel)
 }
+
+private fun isUnfinishedPlayAll(teams: List<Team>, format: SeriesFormat?): Boolean =
+    format?.type == SeriesType.PLAY_ALL &&
+        teams.none { it.outcome != null } &&
+        !format.isDecidedBy(teams.map { it.gameWins })
 
 private fun winnerFromOutcome(first: Team, second: Team): Int? {
     val firstWon = first.outcome == MatchOutcome.WIN || second.outcome == MatchOutcome.LOSS

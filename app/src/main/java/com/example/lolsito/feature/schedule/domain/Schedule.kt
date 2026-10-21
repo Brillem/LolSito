@@ -52,8 +52,12 @@ fun groupEventsByDay(events: List<ScheduleEvent>, zoneId: ZoneId): List<Schedule
         .map { (date, dayEvents) -> ScheduleDay(date, dayEvents) }
 
 /**
- * Events with a match are deduplicated by match id (first occurrence wins); match-less events
- * only collapse when fully equal. The result is sorted chronologically.
+ * Events with a match are deduplicated by match id, and an incoming copy replaces the existing
+ * one because it is fresher; match-less events only collapse when fully equal. The result is
+ * sorted chronologically.
  */
-fun mergeEvents(existing: List<ScheduleEvent>, incoming: List<ScheduleEvent>): List<ScheduleEvent> =
-    (existing + incoming).distinctBy { it.matchId ?: it }.sortedBy { it.startTime }
+fun mergeEvents(existing: List<ScheduleEvent>, incoming: List<ScheduleEvent>): List<ScheduleEvent> {
+    val incomingIds = incoming.mapNotNullTo(HashSet()) { it.matchId }
+    val kept = existing.filter { it.matchId == null || it.matchId !in incomingIds }
+    return (kept + incoming).distinctBy { it.matchId ?: it }.sortedBy { it.startTime }
+}

@@ -39,9 +39,9 @@ import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.model.formatMatchResult
-import com.example.lolsito.core.ui.ErrorView
-import com.example.lolsito.core.ui.LoadingView
-import com.example.lolsito.core.ui.MessageView
+import com.example.lolsito.core.ui.LOSER_ALPHA
+import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
@@ -84,14 +84,13 @@ fun ScheduleContent(
         if (state.leagues.isNotEmpty()) {
             LeagueFilterRow(state.leagues, state.selectedLeagueIds, onToggleLeague)
         }
-        when (val status = state.status) {
-            ScheduleStatus.Loading -> LoadingView()
-            is ScheduleStatus.Error -> ErrorView(status.message, onRetry)
-            ScheduleStatus.Empty -> MessageView(
-                if (state.selectedLeagueIds.isEmpty()) "Select a league to see its matches"
-                else "No matches scheduled"
-            )
-            ScheduleStatus.Content -> ScheduleList(state, onLoadOlder, onLoadNewer, onMatchClick)
+        LoadStatusView(
+            status = state.status,
+            emptyMessage = if (state.selectedLeagueIds.isEmpty()) "Select a league to see its matches"
+            else "No matches scheduled",
+            onRetry = onRetry,
+        ) {
+            ScheduleList(state, onLoadOlder, onLoadNewer, onMatchClick)
         }
     }
 }
@@ -263,9 +262,6 @@ internal fun TeamCell(team: Team, emphasis: TeamEmphasis = TeamEmphasis.NEUTRAL)
     }
 }
 
-/** Alpha applied to the losing team of a completed match. */
-internal const val LOSER_ALPHA = 0.45f
-
 private val previewEvent = ScheduleEvent(
     startTime = Instant.parse("2026-10-20T07:00:00Z"),
     state = MatchState.UNSTARTED,
@@ -286,7 +282,7 @@ private fun ScheduleContentPreview() {
         state = ScheduleUiState(
             leagues = listOf(League("1", "worlds", "Worlds", null, null), League("2", "lck", "LCK", null, null)),
             selectedLeagueIds = setOf("1"),
-            status = ScheduleStatus.Content,
+            status = LoadStatus.Content,
             days = listOf(ScheduleDay(LocalDate.of(2026, 10, 20), listOf(previewEvent))),
             canLoadOlder = true,
             canLoadNewer = true,

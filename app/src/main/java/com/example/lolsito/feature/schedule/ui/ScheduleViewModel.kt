@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
@@ -19,17 +20,10 @@ import kotlinx.coroutines.launch
 import java.time.ZoneId
 import java.time.ZoneOffset
 
-sealed interface ScheduleStatus {
-    data object Loading : ScheduleStatus
-    data object Content : ScheduleStatus
-    data object Empty : ScheduleStatus
-    data class Error(val message: String) : ScheduleStatus
-}
-
 data class ScheduleUiState(
     val leagues: List<League> = emptyList(),
     val selectedLeagueIds: Set<String> = emptySet(),
-    val status: ScheduleStatus = ScheduleStatus.Loading,
+    val status: LoadStatus = LoadStatus.Loading,
     val days: List<ScheduleDay> = emptyList(),
     val canLoadOlder: Boolean = false,
     val canLoadNewer: Boolean = false,
@@ -88,7 +82,7 @@ class ScheduleViewModel(
         newerToken = null
         _uiState.update {
             it.copy(
-                status = ScheduleStatus.Loading,
+                status = LoadStatus.Loading,
                 days = emptyList(),
                 canLoadOlder = false,
                 canLoadNewer = false,
@@ -117,7 +111,7 @@ class ScheduleViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(status = ScheduleStatus.Error(e.toMessage())) }
+                _uiState.update { it.copy(status = LoadStatus.Error(e.toMessage())) }
             }
         }
     }
@@ -153,7 +147,7 @@ class ScheduleViewModel(
         val canPage = olderToken != null || newerToken != null
         _uiState.update {
             it.copy(
-                status = if (events.isEmpty() && !canPage) ScheduleStatus.Empty else ScheduleStatus.Content,
+                status = if (events.isEmpty() && !canPage) LoadStatus.Empty else LoadStatus.Content,
                 days = groupEventsByDay(events, zoneId),
                 canLoadOlder = olderToken != null,
                 canLoadNewer = newerToken != null,

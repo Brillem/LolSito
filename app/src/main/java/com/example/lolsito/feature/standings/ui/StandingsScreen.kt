@@ -39,9 +39,9 @@ import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
-import com.example.lolsito.core.ui.ErrorView
-import com.example.lolsito.core.ui.LoadingView
-import com.example.lolsito.core.ui.MessageView
+import com.example.lolsito.core.ui.LOSER_ALPHA
+import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
@@ -108,15 +108,9 @@ fun StandingsContent(
         if (state.leaguesStatus is LoadStatus.Error) {
             LeaguesError(onRetryLeagues)
         }
-        when (val status = state.tournamentsStatus) {
-            LoadStatus.Loading -> LoadingView()
-            is LoadStatus.Error -> ErrorView(status.message, onRetryTournaments)
-            LoadStatus.Empty -> MessageView("No tournaments for this league")
-            LoadStatus.Content -> when (val standings = state.standingsStatus) {
-                LoadStatus.Loading -> LoadingView()
-                is LoadStatus.Error -> ErrorView(standings.message, onRetryStandings)
-                LoadStatus.Empty -> MessageView("No standings for this tournament yet")
-                LoadStatus.Content -> StandingsList(state.rows, onMatchClick)
+        LoadStatusView(state.tournamentsStatus, "No tournaments for this league", onRetryTournaments) {
+            LoadStatusView(state.standingsStatus, "No standings for this tournament yet", onRetryStandings) {
+                StandingsList(state.rows, onMatchClick)
             }
         }
     }
@@ -305,7 +299,7 @@ fun SectionMatchRow(row: StandingsRow.MatchRow, onClick: () -> Unit, modifier: M
 @Composable
 private fun MatchTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier, alignEnd: Boolean) {
     Row(
-        modifier.alpha(if (emphasis == TeamEmphasis.LOSER) 0.45f else 1f),
+        modifier.alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
     ) {

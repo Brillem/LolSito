@@ -40,6 +40,25 @@ fun ErrorView(message: String, onRetry: () -> Unit, modifier: Modifier = Modifie
     }
 }
 
+/**
+ * Shows the view for [status]: a spinner while loading, an error with retry, [emptyMessage] when
+ * there is nothing to show, and [content] once loaded.
+ */
+@Composable
+fun LoadStatusView(
+    status: LoadStatus,
+    emptyMessage: String,
+    onRetry: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    when (status) {
+        LoadStatus.Loading -> LoadingView()
+        is LoadStatus.Error -> ErrorView(status.message, onRetry)
+        LoadStatus.Empty -> MessageView(emptyMessage)
+        LoadStatus.Content -> content()
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 private fun ErrorViewPreview() {

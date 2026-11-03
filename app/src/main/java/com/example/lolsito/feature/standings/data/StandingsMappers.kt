@@ -1,18 +1,15 @@
 package com.example.lolsito.feature.standings.data
 
 import com.example.lolsito.core.model.Match
-import com.example.lolsito.core.model.MatchOutcome
-import com.example.lolsito.core.model.MatchState
-import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.network.dto.RankingDto
 import com.example.lolsito.core.network.dto.SectionDto
 import com.example.lolsito.core.network.dto.SectionMatchDto
 import com.example.lolsito.core.network.dto.StageDto
 import com.example.lolsito.core.network.dto.StandingsResponse
-import com.example.lolsito.core.network.dto.StandingsTeamDto
 import com.example.lolsito.core.network.dto.TournamentDto
 import com.example.lolsito.core.network.dto.TournamentsResponse
-import com.example.lolsito.core.network.toHttps
+import com.example.lolsito.core.network.toMatchState
+import com.example.lolsito.core.network.toTeam
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
@@ -62,7 +59,7 @@ private fun RankingDto.toDomain(): List<Ranking> {
     return teams.map { team ->
         Ranking(
             ordinal = ordinal,
-            team = team.toDomain(),
+            team = team.toTeam(),
             // Unknown stays null so the UI never shows a missing record as a real 0-0.
             wins = team.record?.wins,
             losses = team.record?.losses,
@@ -75,28 +72,6 @@ private fun SectionMatchDto.toDomain(): SectionMatch? {
     return SectionMatch(
         state = state.toMatchState(),
         // getStandings sends no best-of strategy.
-        match = Match(id = matchId, teams = teams.map { it.toDomain() }, format = null),
+        match = Match(id = matchId, teams = teams.map { it.toTeam() }, format = null),
     )
-}
-
-private fun StandingsTeamDto.toDomain(): Team = Team(
-    name = name ?: "TBD",
-    code = code?.takeIf { it.isNotBlank() } ?: "TBD",
-    imageUrl = image.toHttps(),
-    outcome = result?.outcome.toOutcome(),
-    gameWins = result?.gameWins,
-    id = id?.takeIf { it.isNotBlank() },
-)
-
-private fun String?.toMatchState(): MatchState = when (this) {
-    "unstarted" -> MatchState.UNSTARTED
-    "inProgress" -> MatchState.IN_PROGRESS
-    "completed" -> MatchState.COMPLETED
-    else -> MatchState.UNKNOWN
-}
-
-private fun String?.toOutcome(): MatchOutcome? = when (this) {
-    "win" -> MatchOutcome.WIN
-    "loss" -> MatchOutcome.LOSS
-    else -> null
 }

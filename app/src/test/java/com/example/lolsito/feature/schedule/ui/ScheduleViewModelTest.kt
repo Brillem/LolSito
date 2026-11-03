@@ -5,6 +5,7 @@ import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.SchedulePage
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
@@ -60,10 +61,10 @@ class ScheduleViewModelTest {
 
         val vm = viewModel()
         vm.uiState.test {
-            assertEquals(ScheduleStatus.Loading, awaitItem().status)
+            assertEquals(LoadStatus.Loading, awaitItem().status)
             var content = awaitItem()
-            while (content.status == ScheduleStatus.Loading) content = awaitItem()
-            assertEquals(ScheduleStatus.Content, content.status)
+            while (content.status == LoadStatus.Loading) content = awaitItem()
+            assertEquals(LoadStatus.Content, content.status)
             assertEquals(listOf("1", "2"), content.days.flatMap { d -> d.events.map { it.matchId } })
             assertEquals(2, content.leagues.size)
             assertEquals(setOf(WORLDS), content.selectedLeagueIds)
@@ -77,14 +78,14 @@ class ScheduleViewModelTest {
         repository.scheduleError = IOException("boom")
         val vm = viewModel()
         advanceUntilIdle()
-        assertTrue(vm.uiState.value.status is ScheduleStatus.Error)
+        assertTrue(vm.uiState.value.status is LoadStatus.Error)
 
         repository.scheduleError = null
         repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
         vm.retry()
         advanceUntilIdle()
 
-        assertEquals(ScheduleStatus.Content, vm.uiState.value.status)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
     }
 
     @Test
@@ -92,7 +93,7 @@ class ScheduleViewModelTest {
         leaguesError = IOException("down")
         val vm = viewModel()
         advanceUntilIdle()
-        assertTrue(vm.uiState.value.status is ScheduleStatus.Error)
+        assertTrue(vm.uiState.value.status is LoadStatus.Error)
     }
 
     @Test
@@ -101,7 +102,7 @@ class ScheduleViewModelTest {
         val vm = viewModel()
         advanceUntilIdle()
         val state = vm.uiState.value
-        assertEquals(ScheduleStatus.Empty, state.status)
+        assertEquals(LoadStatus.Empty, state.status)
         assertFalse(state.canLoadOlder)
         assertFalse(state.canLoadNewer)
     }
@@ -114,7 +115,7 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val empty = vm.uiState.value
-        assertEquals(ScheduleStatus.Content, empty.status)
+        assertEquals(LoadStatus.Content, empty.status)
         assertTrue(empty.days.isEmpty())
         assertTrue(empty.canLoadOlder)
         assertFalse(empty.canLoadNewer)
@@ -131,7 +132,7 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val empty = vm.uiState.value
-        assertEquals(ScheduleStatus.Content, empty.status)
+        assertEquals(LoadStatus.Content, empty.status)
         assertTrue(empty.days.isEmpty())
         assertFalse(empty.canLoadOlder)
         assertTrue(empty.canLoadNewer)
@@ -187,7 +188,7 @@ class ScheduleViewModelTest {
         assertFalse(failed.isPaging)
         assertFalse(failed.isLoadingOlder)
         assertFalse(failed.isLoadingNewer)
-        assertEquals(ScheduleStatus.Content, failed.status)
+        assertEquals(LoadStatus.Content, failed.status)
         assertEquals(listOf("2"), failed.days.flatMap { d -> d.events.map { it.matchId } })
         assertTrue(failed.canLoadOlder)
         assertTrue(failed.canLoadNewer)
@@ -221,7 +222,7 @@ class ScheduleViewModelTest {
         assertFalse(failed.isPaging)
         assertFalse(failed.isLoadingOlder)
         assertFalse(failed.isLoadingNewer)
-        assertEquals(ScheduleStatus.Content, failed.status)
+        assertEquals(LoadStatus.Content, failed.status)
         assertEquals(listOf("2"), failed.days.flatMap { d -> d.events.map { it.matchId } })
         assertTrue(failed.canLoadOlder)
         assertTrue(failed.canLoadNewer)
@@ -337,7 +338,7 @@ class ScheduleViewModelTest {
         gate.complete(Unit)
         advanceUntilIdle()
         assertEquals(callsInFlight, repository.scheduleCalls)
-        assertEquals(ScheduleStatus.Content, vm.uiState.value.status)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
     }
 
     @Test
@@ -368,7 +369,7 @@ class ScheduleViewModelTest {
         vm.toggleLeague(WORLDS)
         advanceUntilIdle()
 
-        assertEquals(ScheduleStatus.Empty, vm.uiState.value.status)
+        assertEquals(LoadStatus.Empty, vm.uiState.value.status)
         assertEquals(requestsBefore, repository.requests.size)
     }
 

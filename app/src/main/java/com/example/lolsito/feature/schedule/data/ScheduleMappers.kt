@@ -1,32 +1,16 @@
 package com.example.lolsito.feature.schedule.data
 
 import com.example.lolsito.core.model.Match
-import com.example.lolsito.core.model.MatchOutcome
-import com.example.lolsito.core.model.MatchState
-import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.network.dto.EventDto
-import com.example.lolsito.core.network.toHttps
-import com.example.lolsito.core.network.toSeriesFormat
 import com.example.lolsito.core.network.dto.MatchDto
 import com.example.lolsito.core.network.dto.ScheduleDto
-import com.example.lolsito.core.network.dto.TeamDto
+import com.example.lolsito.core.network.toMatchState
+import com.example.lolsito.core.network.toSeriesFormat
+import com.example.lolsito.core.network.toTeam
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.SchedulePage
 import java.time.Instant
 import java.time.format.DateTimeParseException
-
-fun String?.toMatchState(): MatchState = when (this) {
-    "unstarted" -> MatchState.UNSTARTED
-    "inProgress" -> MatchState.IN_PROGRESS
-    "completed" -> MatchState.COMPLETED
-    else -> MatchState.UNKNOWN
-}
-
-private fun String?.toOutcome(): MatchOutcome? = when (this) {
-    "win" -> MatchOutcome.WIN
-    "loss" -> MatchOutcome.LOSS
-    else -> null
-}
 
 fun ScheduleDto.toSchedulePage(): SchedulePage = SchedulePage(
     events = events.mapNotNull { it.toDomain() },
@@ -57,15 +41,7 @@ private fun MatchDto.toDomain(): Match? {
     val matchId = id?.takeIf { it.isNotBlank() } ?: return null
     return Match(
         id = matchId,
-        teams = teams.orEmpty().map { it.toDomain() },
+        teams = teams.orEmpty().map { it.toTeam() },
         format = strategy.toSeriesFormat(),
     )
 }
-
-private fun TeamDto.toDomain(): Team = Team(
-    name = name ?: "TBD",
-    code = code?.takeIf { it.isNotBlank() } ?: "TBD",
-    imageUrl = image.toHttps(),
-    outcome = result?.outcome.toOutcome(),
-    gameWins = result?.gameWins,
-)

@@ -1,14 +1,13 @@
 package com.example.lolsito.feature.match.data
 
-import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.Team
-import com.example.lolsito.core.network.dto.EventDetailTeamDto
 import com.example.lolsito.core.network.dto.EventDetailsResponse
 import com.example.lolsito.core.network.dto.GameDto
 import com.example.lolsito.core.network.toHttps
 import com.example.lolsito.core.network.toSeriesFormat
+import com.example.lolsito.core.network.toTeam
 import com.example.lolsito.feature.match.domain.GameSide
 import com.example.lolsito.feature.match.domain.GameState
 import com.example.lolsito.feature.match.domain.MatchDetail
@@ -20,7 +19,7 @@ fun EventDetailsResponse.toMatchDetail(): MatchDetail? {
     val id = event.id?.takeIf { it.isNotBlank() } ?: return null
     val match = event.match ?: return null
     val games = match.games.orEmpty().mapIndexed { index, game -> game.toDomain(index) }
-    val teams = match.teams.orEmpty().map { it.toDomain() }
+    val teams = match.teams.orEmpty().map { it.toTeam() }
     val format = match.strategy.toSeriesFormat()
     return MatchDetail(
         matchId = id,
@@ -49,12 +48,6 @@ private fun String?.toSide(): GameSide? = when (this) {
     else -> null
 }
 
-private fun String?.toOutcome(): MatchOutcome? = when (this) {
-    "win" -> MatchOutcome.WIN
-    "loss" -> MatchOutcome.LOSS
-    else -> null
-}
-
 private fun GameDto.toDomain(index: Int): MatchGame = MatchGame(
     number = number ?: (index + 1),
     id = id?.takeIf { it.isNotBlank() },
@@ -64,15 +57,6 @@ private fun GameDto.toDomain(index: Int): MatchGame = MatchGame(
         val side = team.side.toSide() ?: return@mapNotNull null
         teamId to side
     }.toMap(),
-)
-
-private fun EventDetailTeamDto.toDomain(): Team = Team(
-    name = name ?: "TBD",
-    code = code?.takeIf { it.isNotBlank() } ?: "TBD",
-    imageUrl = image.toHttps(),
-    outcome = result?.outcome.toOutcome(),
-    gameWins = result?.gameWins,
-    id = id?.takeIf { it.isNotBlank() },
 )
 
 /**

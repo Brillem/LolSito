@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.example.lolsito.ui.theme.LolSitoTheme
 
 @Composable
 fun LoadingView(modifier: Modifier = Modifier) {
@@ -59,8 +60,8 @@ fun LoadStatusView(
     }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun ErrorViewPreview() {
-    ErrorView(message = "Could not load the schedule", onRetry = {})
+    LolSitoTheme { ErrorView(message = "Could not load the schedule", onRetry = {}) }
 }

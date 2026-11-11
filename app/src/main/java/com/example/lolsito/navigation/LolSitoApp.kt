@@ -5,13 +5,16 @@ import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.createSavedStateHandle
@@ -121,6 +124,11 @@ fun LolSitoApp(container: AppContainer) {
                             onClick = { navController.navigateToTopLevel(destination.route) },
                             icon = { Icon(painterResource(destination.icon), contentDescription = null) },
                             label = { Text(destination.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.inversePrimary,
+                                selectedTextColor = MaterialTheme.colorScheme.inversePrimary,
+                                indicatorColor = Color.Transparent,
+                            ),
                         )
                     }
                 }

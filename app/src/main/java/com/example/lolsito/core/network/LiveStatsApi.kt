@@ -1,5 +1,6 @@
 package com.example.lolsito.core.network
 
+import com.example.lolsito.core.network.dto.LiveStatsDetailsResponse
 import com.example.lolsito.core.network.dto.LiveStatsWindowResponse
 import retrofit2.Response
 import retrofit2.http.GET
@@ -18,4 +19,14 @@ interface LiveStatsApi {
         @Path("gameId") gameId: String,
         @Query("startingTime") startingTime: String,
     ): Response<LiveStatsWindowResponse>
+
+    /**
+     * Per-player items, runes and damage of game [gameId] in the same 10-second window as
+     * [getWindow]; [startingTime] follows the same rules and the feed answers 204 the same way.
+     */
+    @GET("details/{gameId}")
+    suspend fun getDetails(
+        @Path("gameId") gameId: String,
+        @Query("startingTime") startingTime: String,
+    ): Response<LiveStatsDetailsResponse>
 }

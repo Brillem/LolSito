@@ -5,6 +5,8 @@ import com.example.lolsito.core.polling.GAME_STATS_POLL_INTERVAL
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.GameStatsRepository
+import com.example.lolsito.feature.game.domain.PlayerDetails
+import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -244,6 +246,101 @@ class GameStatsViewModelTest {
         assertEquals(GameStatsUiState(LoadStatus.Empty), vm.uiState.value)
         assertEquals(1, repository.requests.size)
         polling.cancel()
+    }
+
+    @Test
+    fun `a refresh brings fresh details along with the stats`() = runTest(dispatcher) {
+        repository.stats = withDetails(live(kills = 1), gold = 1000)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+
+        repository.stats = withDetails(live(kills = 2), gold = 2000)
+        advance(GAME_STATS_POLL_INTERVAL)
+
+        assertEquals(
+            GameStatsUiState(LoadStatus.Content, withDetails(live(kills = 2), gold = 2000)),
+            vm.uiState.value,
+        )
+        polling.cancel()
+    }
+
+    @Test
+    fun `a refresh without details keeps the last good details but takes the new stats`() = runTest(dispatcher) {
+        repository.stats = withDetails(live(kills = 1), gold = 1000)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+
+        repository.stats = playersOnly(live(kills = 2)) // details feed failed or answered 204
+        advance(GAME_STATS_POLL_INTERVAL)
+
+        assertEquals(
+            GameStatsUiState(LoadStatus.Content, withDetails(live(kills = 2), gold = 1000)),
+            vm.uiState.value,
+        )
+
+        repository.stats = withDetails(live(kills = 3), gold = 3000) // and it recovers
+        advance(GAME_STATS_POLL_INTERVAL)
+
+        assertEquals(
+            GameStatsUiState(LoadStatus.Content, withDetails(live(kills = 3), gold = 3000)),
+            vm.uiState.value,
+        )
+        polling.cancel()
+    }
+
+    @Test
+    fun `a game whose details never loaded stays as the window stats said`() = runTest(dispatcher) {
+        repository.stats = playersOnly(live(kills = 1))
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+
+        repository.stats = playersOnly(live(kills = 2))
+        advance(GAME_STATS_POLL_INTERVAL)
+
+        assertEquals(GameStatsUiState(LoadStatus.Content, playersOnly(live(kills = 2))), vm.uiState.value)
+        polling.cancel()
+    }
+
+    @Test
+    fun `a retry does not carry details over from before it`() = runTest(dispatcher) {
+        repository.stats = withDetails(live(kills = 1), gold = 1000)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+
+        repository.stats = playersOnly(live(kills = 2))
+        vm.retry()
+        advanceUntilIdle()
+
+        assertEquals(GameStatsUiState(LoadStatus.Content, playersOnly(live(kills = 2))), vm.uiState.value)
+    }
+
+    private fun player(id: Int, details: PlayerDetails? = null) =
+        PlayerStats(id, "P$id", "Olaf", kills = 0, deaths = 0, assists = 0, creepScore = 0, level = 1, details = details)
+
+    private fun playersOnly(base: GameStats) = base.copy(
+        blueTeam = base.blueTeam.copy(players = listOf(player(1), player(2))),
+        redTeam = base.redTeam.copy(players = listOf(player(6))),
+    )
+
+    private fun withDetails(base: GameStats, gold: Int): GameStats {
+        fun details(id: Int) = PlayerDetails(
+            itemIds = listOf(3047),
+            primaryStyleId = 8000,
+            secondaryStyleId = 8300,
+            keystoneId = 8010,
+            damageShare = 0.25,
+            killParticipation = 0.5,
+            totalGold = gold + id,
+            wardsPlaced = 1,
+            wardsDestroyed = 2,
+        )
+        return base.copy(
+            blueTeam = base.blueTeam.copy(players = listOf(player(1, details(1)), player(2, details(2)))),
+            redTeam = base.redTeam.copy(players = listOf(player(6, details(6)))),
+        )
     }
 
     private suspend fun TestScope.advance(duration: kotlin.time.Duration) {

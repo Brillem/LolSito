@@ -1,6 +1,7 @@
 package com.example.lolsito.feature.game.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -22,8 +24,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -33,10 +40,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.SubcomposeAsyncImage
+import com.example.lolsito.core.datadragon.itemIconUrl
+import com.example.lolsito.core.datadragon.runeName
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.game.domain.GameStats
+import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
 
@@ -92,6 +103,12 @@ fun GameStatsContent(
 /** The team [code] when known, otherwise [fallback] (the side). */
 fun teamLabel(code: String?, fallback: String): String = code?.takeIf { it.isNotBlank() } ?: fallback
 
+/** A 0 to 1 share as a whole percent ("29%"); values outside that range are clamped. */
+fun formatPercent(share: Double): String {
+    val clamped = if (share.isNaN()) 0.0 else share.coerceIn(0.0, 1.0)
+    return "${Math.round(clamped * 100)}%"
+}
+
 /** Gold as broadcasts show it: from a thousand up, in thousands rounded to one decimal ("31.9k"). */
 fun formatGold(gold: Int): String {
     if (gold < 1000) return gold.toString()
@@ -114,12 +131,15 @@ private val teamRows: List<Pair<String, (TeamStats) -> String>> = listOf(
 
 @Composable
 private fun GameStatsBody(stats: GameStats, blueTeamCode: String?, redTeamCode: String?) {
+    // Keys of the expanded player rows: by participant, so polling refreshes and scrolling keep them open.
+    var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    val toggle = { key: String -> expanded = if (key in expanded) expanded - key else expanded + key }
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "teams") {
             TeamComparison(stats, blueLabel = teamLabel(blueTeamCode, "Blue"), redLabel = teamLabel(redTeamCode, "Red"))
         }
-        players(Side.BLUE, teamLabel(blueTeamCode, Side.BLUE.label), stats.blueTeam)
-        players(Side.RED, teamLabel(redTeamCode, Side.RED.label), stats.redTeam)
+        players(Side.BLUE, teamLabel(blueTeamCode, Side.BLUE.label), stats.blueTeam, stats.dataDragonVersion, expanded, toggle)
+        players(Side.RED, teamLabel(redTeamCode, Side.RED.label), stats.redTeam, stats.dataDragonVersion, expanded, toggle)
     }
 }
 
@@ -167,7 +187,14 @@ private fun ComparisonRow(blue: String, label: String, red: String, header: Bool
     }
 }
 
-private fun LazyListScope.players(side: Side, title: String, team: TeamStats) {
+private fun LazyListScope.players(
+    side: Side,
+    title: String,
+    team: TeamStats,
+    version: String?,
+    expanded: List<String>,
+    onToggle: (String) -> Unit,
+) {
     item(key = "${side.name}-title") {
         Column {
             HorizontalDivider()
@@ -191,14 +218,19 @@ private fun LazyListScope.players(side: Side, title: String, team: TeamStats) {
     }
     val keys = team.playerKeys
     items(team.players.size, key = { "${side.name}:${keys[it]}" }) { index ->
-        PlayerRow(team.players[index], side)
+        val player = team.players[index]
+        val key = "${side.name}:${keys[index]}"
+        Column {
+            PlayerRow(player, side, onClick = { onToggle(key) })
+            if (key in expanded) PlayerDetailsPanel(player.details, version)
+        }
     }
 }
 
 @Composable
-private fun PlayerRow(player: PlayerStats, side: Side) {
+private fun PlayerRow(player: PlayerStats, side: Side, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(4.dp).height(36.dp).background(side.color))
@@ -213,6 +245,66 @@ private fun PlayerRow(player: PlayerStats, side: Side) {
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+/** What opening a player row shows; "Details unavailable" when the details feed had nothing. */
+@Composable
+private fun PlayerDetailsPanel(details: PlayerDetails?, version: String?) {
+    Column(
+        Modifier.fillMaxWidth().padding(start = 28.dp, end = 16.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (details == null) {
+            Text("Details unavailable", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            return@Column
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            details.itemIds.forEach { ItemSlot(it, version) }
+        }
+        DetailLine("Runes", runesLabel(details))
+        DetailLine("Damage share", formatPercent(details.damageShare))
+        DetailLine("Kill participation", formatPercent(details.killParticipation))
+        DetailLine("Gold earned", formatGold(details.totalGold))
+        DetailLine("Wards", "${details.wardsPlaced} placed / ${details.wardsDestroyed} destroyed")
+    }
+}
+
+/** "Precision / Inspiration - Conqueror"; a part the feed did not send is left out. */
+fun runesLabel(details: PlayerDetails): String {
+    val trees = listOfNotNull(details.primaryStyleId, details.secondaryStyleId).joinToString(" / ") { runeName(it) }
+    val keystone = details.keystoneId?.let { runeName(it) }
+    return listOfNotNull(trees.takeIf { it.isNotEmpty() }, keystone).joinToString(" - ").ifEmpty { "-" }
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
+    }
+}
+
+/** An item icon; the item id as text when there is no icon url or it fails to load. */
+@Composable
+private fun ItemSlot(itemId: Int, version: String?) {
+    val shape = RoundedCornerShape(4.dp)
+    val idText: @Composable () -> Unit = {
+        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+            Text(itemId.toString(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        }
+    }
+    val url = itemIconUrl(version, itemId)
+    if (url == null) {
+        idText()
+        return
+    }
+    SubcomposeAsyncImage(
+        model = url,
+        contentDescription = "Item $itemId",
+        modifier = Modifier.size(32.dp).clip(shape),
+        loading = { Box(Modifier.size(32.dp).background(MaterialTheme.colorScheme.surfaceVariant)) },
+        error = { idText() },
+    )
 }
 
 /** One player line, shared with the column headers so values line up under their labels. */

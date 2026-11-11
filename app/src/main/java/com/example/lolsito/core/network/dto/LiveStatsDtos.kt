@@ -11,6 +11,8 @@ data class LiveStatsWindowResponse(
 
 @Serializable
 data class LiveStatsGameMetadataDto(
+    /** Game build such as "16.20.826.3891", not a Data Dragon version. */
+    val patchVersion: String? = null,
     val blueTeamMetadata: LiveStatsTeamMetadataDto? = null,
     val redTeamMetadata: LiveStatsTeamMetadataDto? = null,
 )
@@ -51,4 +53,36 @@ data class LiveStatsParticipantFrameDto(
     val deaths: Int? = null,
     val assists: Int? = null,
     val creepScore: Int? = null,
+)
+
+@Serializable
+data class LiveStatsDetailsResponse(val frames: List<LiveStatsDetailsFrameDto>? = null)
+
+@Serializable
+data class LiveStatsDetailsFrameDto(
+    val rfc460Timestamp: String? = null,
+    val participants: List<LiveStatsParticipantDetailsDto>? = null,
+)
+
+@Serializable
+data class LiveStatsParticipantDetailsDto(
+    val participantId: Int? = null,
+    /** Item ids in slot order; 0 is an empty slot. */
+    val items: List<Int>? = null,
+    val perkMetadata: LiveStatsPerkMetadataDto? = null,
+    val totalGoldEarned: Int? = null,
+    /** Share (0 to 1) of the team's kills this player took part in. */
+    val killParticipation: Double? = null,
+    /** Share (0 to 1) of the team's damage to champions. */
+    val championDamageShare: Double? = null,
+    val wardsPlaced: Int? = null,
+    val wardsDestroyed: Int? = null,
+)
+
+@Serializable
+data class LiveStatsPerkMetadataDto(
+    val styleId: Int? = null,
+    val subStyleId: Int? = null,
+    /** The keystone first, then the other runes and stat shards. */
+    val perks: List<Int>? = null,
 )

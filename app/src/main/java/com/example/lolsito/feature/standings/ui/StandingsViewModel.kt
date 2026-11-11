@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.preferences.StandingsSelection
+import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.Tournament
@@ -45,10 +47,19 @@ data class StandingsUiState(
  * selection change cancels the in-flight load it supersedes, so stale results never overwrite
  * newer ones. The selected league and tournament live in [savedStateHandle], so they survive process
  * death: a restored tournament wins over the default pick while it is still in the loaded list.
+ *
+ * The user's picks are also saved in [preferences] to survive a fresh launch. When both sources
+ * exist, [savedStateHandle] wins: it holds the latest selection of this very session (a process-death
+ * restore), while preferences only seed a launch whose handle is empty. The stored selection is read
+ * before the first request, so no data is loaded for the default and then reloaded. A stored league
+ * missing from the leagues list is dropped (if the list cannot be loaded it is trusted), and a stored
+ * tournament missing from its league falls back to the default pick. Preferences failures are
+ * ignored: the screen works with the defaults.
  */
 class StandingsViewModel(
     private val repository: StandingsRepository,
     private val leaguesRepository: LeaguesRepository,
+    private val preferences: UserPreferences,
     private val clock: Clock,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     defaultLeagueId: String = DEFAULT_LEAGUE_ID,
@@ -64,8 +75,11 @@ class StandingsViewModel(
     private var standingsJob: Job? = null
 
     init {
-        fetchLeagues()
-        loadTournaments()
+        viewModelScope.launch {
+            restoreStoredSelection()
+            fetchLeagues()
+            loadTournaments()
+        }
     }
 
     fun selectLeague(leagueId: String) {
@@ -73,6 +87,7 @@ class StandingsViewModel(
         _uiState.update { it.copy(selectedLeagueId = leagueId) }
         savedStateHandle[KEY_LEAGUE_ID] = leagueId
         savedStateHandle.remove<String>(KEY_TOURNAMENT_ID)
+        save(StandingsSelection(leagueId, tournamentId = null))
         loadTournaments()
     }
 
@@ -80,6 +95,7 @@ class StandingsViewModel(
         if (tournamentId == _uiState.value.selectedTournamentId) return
         _uiState.update { it.copy(selectedTournamentId = tournamentId) }
         savedStateHandle[KEY_TOURNAMENT_ID] = tournamentId
+        save(StandingsSelection(_uiState.value.selectedLeagueId, tournamentId))
         loadStandings()
     }
 
@@ -89,6 +105,46 @@ class StandingsViewModel(
     fun retryTournaments() = loadTournaments()
 
     fun retryStandings() = loadStandings()
+
+    /**
+     * Seeds the selection from [preferences] through the saved state handle, which the tournament
+     * load already reads. Does nothing when the handle holds a selection (it wins).
+     */
+    private suspend fun restoreStoredSelection() {
+        if (savedStateHandle.contains(KEY_LEAGUE_ID)) return
+        val stored = try {
+            preferences.getStandingsSelection()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        } ?: return
+        if (!isListed(stored.leagueId)) return
+        savedStateHandle[KEY_LEAGUE_ID] = stored.leagueId
+        savedStateHandle[KEY_TOURNAMENT_ID] = stored.tournamentId
+        _uiState.update { it.copy(selectedLeagueId = stored.leagueId) }
+    }
+
+    /** True unless the leagues load and [leagueId] is not among them; unknown counts as listed. */
+    private suspend fun isListed(leagueId: String): Boolean = try {
+        leaguesRepository.getLeagues().any { it.id == leagueId }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        true
+    }
+
+    private fun save(selection: StandingsSelection) {
+        viewModelScope.launch {
+            try {
+                preferences.saveStandingsSelection(selection)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Not remembering the selection is better than failing the pick.
+            }
+        }
+    }
 
     private fun fetchLeagues() {
         leaguesJob?.cancel()

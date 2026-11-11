@@ -1,0 +1,52 @@
+package com.example.lolsito.core.preferences
+
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class DataStoreUserPreferencesTest {
+
+    @get:Rule
+    val folder = TemporaryFolder()
+
+    private fun TestScope.preferences(name: String = "prefs"): UserPreferences {
+        val file = folder.root.resolve("$name.preferences_pb")
+        val dataStore = PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
+        return DataStoreUserPreferences(dataStore)
+    }
+
+    @Test
+    fun `nothing stored reads as null`() = runTest(UnconfinedTestDispatcher()) {
+        val preferences = preferences()
+        assertNull(preferences.getScheduleLeagueIds())
+        assertNull(preferences.getStandingsSelection())
+    }
+
+    @Test
+    fun `schedule league ids round trip including the empty set`() = runTest(UnconfinedTestDispatcher()) {
+        val preferences = preferences()
+        preferences.saveScheduleLeagueIds(setOf("a", "b"))
+        assertEquals(setOf("a", "b"), preferences.getScheduleLeagueIds())
+
+        preferences.saveScheduleLeagueIds(emptySet())
+        assertEquals(emptySet<String>(), preferences.getScheduleLeagueIds())
+    }
+
+    @Test
+    fun `standings selection round trips and a null tournament clears the stored one`() = runTest(UnconfinedTestDispatcher()) {
+        val preferences = preferences()
+        preferences.saveStandingsSelection(StandingsSelection("lck", "spring"))
+        assertEquals(StandingsSelection("lck", "spring"), preferences.getStandingsSelection())
+
+        preferences.saveStandingsSelection(StandingsSelection("worlds", null))
+        assertEquals(StandingsSelection("worlds", null), preferences.getStandingsSelection())
+    }
+}

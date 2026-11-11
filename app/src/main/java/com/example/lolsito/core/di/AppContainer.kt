@@ -1,9 +1,12 @@
 package com.example.lolsito.core.di
 
+import android.content.Context
 import com.example.lolsito.core.leagues.CachedLeaguesRepository
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.leagues.RemoteLeaguesRepository
 import com.example.lolsito.core.network.NetworkModule
+import com.example.lolsito.core.preferences.DataStoreUserPreferences
+import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.feature.game.data.GameStatsRepositoryImpl
 import com.example.lolsito.feature.game.domain.GameStatsRepository
 import com.example.lolsito.feature.match.data.MatchDetailRepositoryImpl
@@ -17,7 +20,7 @@ import java.time.Clock
 import java.time.ZoneId
 
 /** Manual dependency container, created once by [com.example.lolsito.LolSitoApplication]. */
-class AppContainer {
+class AppContainer(private val context: Context) {
     /** Shares one connection pool; the livestats feed uses it as is, without the gateway API key. */
     private val baseOkHttpClient by lazy { OkHttpClient() }
     private val okHttpClient by lazy { NetworkModule.createOkHttpClient(baseOkHttpClient.newBuilder()) }
@@ -30,6 +33,8 @@ class AppContainer {
     val matchDetailRepository: MatchDetailRepository by lazy { MatchDetailRepositoryImpl(api) }
     val standingsRepository: StandingsRepository by lazy { StandingsRepositoryImpl(api) }
     val gameStatsRepository: GameStatsRepository by lazy { GameStatsRepositoryImpl(liveStatsApi, clock()) }
+
+    val userPreferences: UserPreferences by lazy { DataStoreUserPreferences.create(context) }
 
     fun zoneId(): ZoneId = ZoneId.systemDefault()
 

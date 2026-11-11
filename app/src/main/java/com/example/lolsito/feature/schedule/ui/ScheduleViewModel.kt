@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
@@ -39,9 +40,15 @@ data class ScheduleUiState(
     val isPaging: Boolean get() = isLoadingOlder || isLoadingNewer
 }
 
+/**
+ * Loads the schedule of the selected leagues. The selection is saved in [preferences] on every
+ * toggle and restored once, before the first schedule request, so a stored selection never costs a
+ * request for the default one. Preferences failures are ignored: the screen works with the defaults.
+ */
 class ScheduleViewModel(
     private val repository: ScheduleRepository,
     private val leaguesRepository: LeaguesRepository,
+    private val preferences: UserPreferences,
     private val zoneId: ZoneId,
     defaultLeagueIds: Set<String> = setOf(DEFAULT_LEAGUE_ID),
 ) : ViewModel() {
@@ -55,6 +62,9 @@ class ScheduleViewModel(
     private var loadJob: Job? = null
     private var pagingJob: Job? = null
 
+    /** True once the stored selection was applied or superseded (a user toggle, or nothing usable stored). */
+    private var selectionRestored = false
+
     init {
         reload()
     }
@@ -65,6 +75,17 @@ class ScheduleViewModel(
         _uiState.update { state ->
             val selected = state.selectedLeagueIds
             state.copy(selectedLeagueIds = if (leagueId in selected) selected - leagueId else selected + leagueId)
+        }
+        selectionRestored = true
+        val selected = _uiState.value.selectedLeagueIds
+        viewModelScope.launch {
+            try {
+                preferences.saveScheduleLeagueIds(selected)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Not remembering the selection is better than failing the toggle.
+            }
         }
         reload()
     }
@@ -96,7 +117,9 @@ class ScheduleViewModel(
             try {
                 if (_uiState.value.leagues.isEmpty()) {
                     val leagues = leaguesRepository.getLeagues()
-                    _uiState.update { it.copy(leagues = leagues) }
+                    // One update, so the chips never show the default selection next to the real leagues.
+                    val restored = if (selectionRestored) null else readStoredSelection(leagues)
+                    _uiState.update { it.copy(leagues = leagues, selectedLeagueIds = restored ?: it.selectedLeagueIds) }
                 }
                 val selected = _uiState.value.selectedLeagueIds
                 if (selected.isEmpty()) {
@@ -114,6 +137,26 @@ class ScheduleViewModel(
                 _uiState.update { it.copy(status = LoadStatus.Error(e.toMessage())) }
             }
         }
+    }
+
+    /**
+     * The stored selection restricted to ids that are still in [leagues], or null to keep the current
+     * one: nothing stored, unreadable, or none of the stored ids exist any more. A stored empty set
+     * (everything deselected) is kept as is. Runs before the first request, in the same job.
+     */
+    private suspend fun readStoredSelection(leagues: List<League>): Set<String>? {
+        val stored = try {
+            preferences.getScheduleLeagueIds()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        selectionRestored = true
+        if (stored == null) return null
+        val known = leagues.mapTo(HashSet()) { it.id }
+        val usable = stored.filterTo(HashSet()) { it in known }
+        return if (usable.isEmpty() && stored.isNotEmpty()) null else usable
     }
 
     private fun loadPage(older: Boolean) {

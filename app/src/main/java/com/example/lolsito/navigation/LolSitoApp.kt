@@ -118,7 +118,12 @@ fun LolSitoApp(container: AppContainer) {
                 val vm: ScheduleViewModel = viewModel(
                     factory = viewModelFactory {
                         initializer {
-                            ScheduleViewModel(container.scheduleRepository, container.leaguesRepository, container.zoneId())
+                            ScheduleViewModel(
+                                repository = container.scheduleRepository,
+                                leaguesRepository = container.leaguesRepository,
+                                preferences = container.userPreferences,
+                                zoneId = container.zoneId(),
+                            )
                         }
                     }
                 )
@@ -134,6 +139,7 @@ fun LolSitoApp(container: AppContainer) {
                             StandingsViewModel(
                                 repository = container.standingsRepository,
                                 leaguesRepository = container.leaguesRepository,
+                                preferences = container.userPreferences,
                                 clock = container.clock(),
                                 savedStateHandle = createSavedStateHandle(),
                             )

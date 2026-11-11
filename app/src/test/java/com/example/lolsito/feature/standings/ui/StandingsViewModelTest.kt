@@ -4,11 +4,13 @@ import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.preferences.StandingsSelection
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.standings.domain.Standings
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
+import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -61,9 +63,12 @@ class StandingsViewModelTest {
         listOf(League(LCK, "lck", "LCK", "KOREA", null), League(WORLDS, "worlds", "Worlds", null, null))
     }
 
+    private val preferences = FakeUserPreferences()
+
     private fun viewModel(savedStateHandle: SavedStateHandle = SavedStateHandle()) = StandingsViewModel(
         repository = repository,
         leaguesRepository = leaguesRepository,
+        preferences = preferences,
         clock = clock,
         savedStateHandle = savedStateHandle,
         defaultLeagueId = LCK,
@@ -345,6 +350,171 @@ class StandingsViewModelTest {
         assertEquals(LCK_SUMMER, vm.uiState.value.selectedTournamentId)
         assertEquals(LCK_SUMMER, handle.get<String>(StandingsViewModel.KEY_TOURNAMENT_ID))
         assertEquals(listOf("t:$LCK", "s:$LCK_SUMMER"), repository.requests)
+    }
+
+    @Test
+    fun `nothing stored keeps the default selection and saves nothing`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(LCK, vm.uiState.value.selectedLeagueId)
+        assertEquals(LCK_SUMMER, vm.uiState.value.selectedTournamentId)
+        assertEquals(listOf("t:$LCK", "s:$LCK_SUMMER"), repository.requests)
+        assertTrue(preferences.savedStandingsSelections.isEmpty())
+    }
+
+    @Test
+    fun `stored league and tournament are restored without loading the default first`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, WORLDS_2025)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(WORLDS, state.selectedLeagueId)
+        assertEquals("Worlds", state.selectedLeagueLabel)
+        assertEquals(WORLDS_2025, state.selectedTournamentId)
+        assertEquals(listOf(WORLDS_2025), state.stageNames)
+        assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2025"), repository.requests)
+        assertTrue("restoring does not write back", preferences.savedStandingsSelections.isEmpty())
+    }
+
+    @Test
+    fun `the stored league is never replaced by the default while it loads`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, WORLDS_2025)
+        val vm = viewModel()
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.standingsStatus != LoadStatus.Content) {
+                if (state.selectedTournamentId != null) assertEquals(WORLDS, state.selectedLeagueId)
+                state = awaitItem()
+            }
+            assertEquals(WORLDS, state.selectedLeagueId)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a stored tournament missing from the list falls back to the default of the stored league`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, "gone")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(WORLDS, vm.uiState.value.selectedLeagueId)
+        assertEquals(WORLDS_2026, vm.uiState.value.selectedTournamentId)
+        assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2026"), repository.requests)
+    }
+
+    @Test
+    fun `a stored league without a tournament uses the default tournament`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, null)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(WORLDS_2026, vm.uiState.value.selectedTournamentId)
+        assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2026"), repository.requests)
+    }
+
+    @Test
+    fun `a stored league that is no longer listed falls back to the default selection`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection("gone-league", "gone-tournament")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(LCK, vm.uiState.value.selectedLeagueId)
+        assertEquals(LCK_SUMMER, vm.uiState.value.selectedTournamentId)
+        assertEquals(listOf("t:$LCK", "s:$LCK_SUMMER"), repository.requests)
+    }
+
+    @Test
+    fun `a stored league is trusted when the leagues cannot be loaded`() = runTest(dispatcher) {
+        leaguesError = IOException("leagues down")
+        preferences.standingsSelection = StandingsSelection(WORLDS, WORLDS_2025)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(WORLDS_2025, vm.uiState.value.selectedTournamentId)
+        assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
+        assertEquals(LoadStatus.Error("leagues down"), vm.uiState.value.leaguesStatus)
+        assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2025"), repository.requests)
+    }
+
+    @Test
+    fun `the saved state handle wins over the stored selection`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, WORLDS_2025)
+        val handle = SavedStateHandle(
+            mapOf(StandingsViewModel.KEY_LEAGUE_ID to LCK, StandingsViewModel.KEY_TOURNAMENT_ID to LCK_SPRING)
+        )
+        val vm = viewModel(handle)
+        advanceUntilIdle()
+
+        assertEquals(LCK, vm.uiState.value.selectedLeagueId)
+        assertEquals(LCK_SPRING, vm.uiState.value.selectedTournamentId)
+        assertEquals(listOf("t:$LCK", "s:$LCK_SPRING"), repository.requests)
+        assertEquals("the stored selection is not even read", 0, preferences.reads)
+    }
+
+    @Test
+    fun `picking a tournament and a league saves the selection`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.selectTournament(LCK_SPRING)
+        advanceUntilIdle()
+        vm.selectLeague(WORLDS)
+        advanceUntilIdle()
+        vm.selectTournament(WORLDS_2025)
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                StandingsSelection(LCK, LCK_SPRING),
+                StandingsSelection(WORLDS, null),
+                StandingsSelection(WORLDS, WORLDS_2025),
+            ),
+            preferences.savedStandingsSelections,
+        )
+    }
+
+    @Test
+    fun `selecting the current league or tournament again saves nothing`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.selectLeague(LCK)
+        vm.selectTournament(LCK_SUMMER)
+        advanceUntilIdle()
+
+        assertTrue(preferences.savedStandingsSelections.isEmpty())
+    }
+
+    @Test
+    fun `a failure reading preferences falls back to the default selection`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, WORLDS_2025)
+        preferences.readFails = true
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(LCK, vm.uiState.value.selectedLeagueId)
+        assertEquals(LCK_SUMMER, vm.uiState.value.selectedTournamentId)
+        assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
+        assertEquals(listOf("t:$LCK", "s:$LCK_SUMMER"), repository.requests)
+    }
+
+    @Test
+    fun `a failure writing preferences does not stop the selection from loading`() = runTest(dispatcher) {
+        preferences.writeFails = true
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.selectTournament(LCK_SPRING)
+        advanceUntilIdle()
+        assertEquals(listOf(LCK_SPRING), vm.uiState.value.stageNames)
+
+        vm.selectLeague(WORLDS)
+        advanceUntilIdle()
+        assertEquals(WORLDS_2026, vm.uiState.value.selectedTournamentId)
+        assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
+        assertTrue(preferences.savedStandingsSelections.isEmpty())
     }
 
     private fun tournament(id: String, start: String, end: String) =

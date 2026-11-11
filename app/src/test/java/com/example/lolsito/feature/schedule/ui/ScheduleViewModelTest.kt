@@ -9,6 +9,7 @@ import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.SchedulePage
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
+import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -48,9 +49,12 @@ class ScheduleViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
+    private val preferences = FakeUserPreferences()
+
     private fun viewModel(zoneId: ZoneId = ZoneId.of("UTC")) = ScheduleViewModel(
         repository = repository,
         leaguesRepository = leaguesRepository,
+        preferences = preferences,
         zoneId = zoneId,
         defaultLeagueIds = setOf(WORLDS),
     )
@@ -371,6 +375,164 @@ class ScheduleViewModelTest {
 
         assertEquals(LoadStatus.Empty, vm.uiState.value.status)
         assertEquals(requestsBefore, repository.requests.size)
+    }
+
+    @Test
+    fun `nothing stored keeps the default selection and saves nothing`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(setOf(WORLDS), vm.uiState.value.selectedLeagueIds)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertEquals(listOf(setOf(WORLDS) to null), repository.requests)
+        assertTrue(preferences.savedScheduleLeagueIds.isEmpty())
+    }
+
+    @Test
+    fun `stored selection is restored and loaded without requesting the default first`() = runTest(dispatcher) {
+        preferences.scheduleLeagueIds = setOf(LCK)
+        repository.pages[key(setOf(LCK), null)] = page(listOf(event("7", 7)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(setOf(LCK), state.selectedLeagueIds)
+        assertEquals(LoadStatus.Content, state.status)
+        assertEquals(listOf("7"), state.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf(setOf(LCK) to null), repository.requests)
+        assertEquals(1, repository.scheduleCalls)
+        assertTrue("restoring does not write back", preferences.savedScheduleLeagueIds.isEmpty())
+    }
+
+    @Test
+    fun `the selection is never the default while the stored one is being restored`() = runTest(dispatcher) {
+        preferences.scheduleLeagueIds = setOf(LCK)
+        repository.pages[key(setOf(LCK), null)] = page(listOf(event("7", 7)))
+        val vm = viewModel()
+        vm.uiState.test {
+            var state = awaitItem()
+            while (state.status == LoadStatus.Loading && state.leagues.isEmpty()) {
+                assertEquals(setOf(WORLDS), state.selectedLeagueIds)
+                state = awaitItem()
+            }
+            // Once the league chips can be shown, they already carry the restored selection.
+            assertEquals(setOf(LCK), state.selectedLeagueIds)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `stored ids that are no longer leagues are ignored`() = runTest(dispatcher) {
+        preferences.scheduleLeagueIds = setOf(LCK, "gone")
+        repository.pages[key(setOf(LCK), null)] = page(listOf(event("7", 7)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(setOf(LCK), vm.uiState.value.selectedLeagueIds)
+        assertEquals(listOf(setOf(LCK) to null), repository.requests)
+    }
+
+    @Test
+    fun `a stored selection with no known league falls back to the default`() = runTest(dispatcher) {
+        preferences.scheduleLeagueIds = setOf("gone")
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(setOf(WORLDS), vm.uiState.value.selectedLeagueIds)
+        assertEquals(listOf(setOf(WORLDS) to null), repository.requests)
+    }
+
+    @Test
+    fun `a stored empty selection is restored as deselected without any request`() = runTest(dispatcher) {
+        preferences.scheduleLeagueIds = emptySet()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(emptySet<String>(), vm.uiState.value.selectedLeagueIds)
+        assertEquals(LoadStatus.Empty, vm.uiState.value.status)
+        assertEquals(0, repository.scheduleCalls)
+    }
+
+    @Test
+    fun `toggling a league saves the new selection each time`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        repository.pages[key(setOf(WORLDS, LCK), null)] = page(listOf(event("9", 9)))
+        repository.pages[key(setOf(LCK), null)] = page(listOf(event("8", 8)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleLeague(LCK)
+        advanceUntilIdle()
+        vm.toggleLeague(WORLDS)
+        advanceUntilIdle()
+        vm.toggleLeague(LCK)
+        advanceUntilIdle()
+
+        assertEquals(listOf(setOf(WORLDS, LCK), setOf(LCK), emptySet()), preferences.savedScheduleLeagueIds)
+        assertEquals(emptySet<String>(), vm.uiState.value.selectedLeagueIds)
+    }
+
+    @Test
+    fun `a toggle made before the stored selection is read wins over it`() = runTest(dispatcher) {
+        preferences.scheduleLeagueIds = setOf(LCK)
+        repository.pages[key(setOf(WORLDS, LCK), null)] = page(listOf(event("9", 9)))
+        val vm = viewModel()
+
+        vm.toggleLeague(LCK)
+        advanceUntilIdle()
+
+        assertEquals(setOf(WORLDS, LCK), vm.uiState.value.selectedLeagueIds)
+        assertEquals(listOf(setOf(WORLDS, LCK) to null), repository.requests)
+        assertEquals(listOf(setOf(WORLDS, LCK)), preferences.savedScheduleLeagueIds)
+    }
+
+    @Test
+    fun `a failure reading preferences falls back to the default selection`() = runTest(dispatcher) {
+        preferences.readFails = true
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(setOf(WORLDS), vm.uiState.value.selectedLeagueIds)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertEquals(listOf(setOf(WORLDS) to null), repository.requests)
+    }
+
+    @Test
+    fun `a failure writing preferences does not stop the toggle from loading`() = runTest(dispatcher) {
+        preferences.writeFails = true
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        repository.pages[key(setOf(WORLDS, LCK), null)] = page(listOf(event("9", 9)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleLeague(LCK)
+        advanceUntilIdle()
+
+        assertEquals(setOf(WORLDS, LCK), vm.uiState.value.selectedLeagueIds)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertEquals(listOf("9"), vm.uiState.value.days.flatMap { d -> d.events.map { it.matchId } })
+        assertTrue(preferences.savedScheduleLeagueIds.isEmpty())
+    }
+
+    @Test
+    fun `a restore that waits for the leagues still happens after a leagues retry`() = runTest(dispatcher) {
+        preferences.scheduleLeagueIds = setOf(LCK)
+        leaguesError = IOException("down")
+        repository.pages[key(setOf(LCK), null)] = page(listOf(event("7", 7)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.status is LoadStatus.Error)
+        assertEquals(0, repository.scheduleCalls)
+
+        leaguesError = null
+        vm.retry()
+        advanceUntilIdle()
+
+        assertEquals(setOf(LCK), vm.uiState.value.selectedLeagueIds)
+        assertEquals(listOf(setOf(LCK) to null), repository.requests)
     }
 
     private fun key(ids: Set<String>, token: String?) = ids to token

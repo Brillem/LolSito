@@ -11,7 +11,9 @@ import com.example.lolsito.feature.game.data.GameStatsRepositoryImpl
 import com.example.lolsito.feature.game.domain.GameStatsRepository
 import com.example.lolsito.feature.match.data.MatchDetailRepositoryImpl
 import com.example.lolsito.feature.match.domain.MatchDetailRepository
+import com.example.lolsito.feature.schedule.data.LiveMatchesRepositoryImpl
 import com.example.lolsito.feature.schedule.data.ScheduleRepositoryImpl
+import com.example.lolsito.feature.schedule.domain.LiveMatchesRepository
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import com.example.lolsito.feature.standings.data.StandingsRepositoryImpl
 import com.example.lolsito.feature.standings.domain.StandingsRepository
@@ -30,6 +32,7 @@ class AppContainer(private val context: Context) {
     /** One cached leagues list shared by Schedule and Standings. */
     val leaguesRepository: LeaguesRepository by lazy { CachedLeaguesRepository(RemoteLeaguesRepository(api)) }
     val scheduleRepository: ScheduleRepository by lazy { ScheduleRepositoryImpl(api) }
+    val liveMatchesRepository: LiveMatchesRepository by lazy { LiveMatchesRepositoryImpl(api) }
     val matchDetailRepository: MatchDetailRepository by lazy { MatchDetailRepositoryImpl(api) }
     val standingsRepository: StandingsRepository by lazy { StandingsRepositoryImpl(api) }
     val gameStatsRepository: GameStatsRepository by lazy { GameStatsRepositoryImpl(liveStatsApi, clock()) }

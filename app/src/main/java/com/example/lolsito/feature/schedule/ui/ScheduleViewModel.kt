@@ -4,8 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.UniqueKeys
+import com.example.lolsito.core.polling.LIVE_SECTION_POLL_INTERVAL
+import com.example.lolsito.core.polling.pollWhile
 import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.feature.schedule.domain.LiveMatchesRepository
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
@@ -35,18 +40,50 @@ data class ScheduleUiState(
     val newerError: String? = null,
     /** Zone used to group days; the screen formats times with it so both always agree. */
     val zoneId: ZoneId = ZoneOffset.UTC,
+    /**
+     * The "Live now" section: live matches of the selected leagues, earliest start first. Empty
+     * (section hidden) when nothing is live, nothing selected, or the live feed has not answered.
+     */
+    val liveEvents: List<ScheduleEvent> = emptyList(),
+    /** Every match the live feed currently reports, of any league; null until it answered once. */
+    val liveMatchIds: Set<String>? = null,
 ) {
     /** Only one page loads at a time, so both paging buttons are disabled while one is in flight. */
     val isPaging: Boolean get() = isLoadingOlder || isLoadingNewer
+
+    /** LazyColumn keys aligned with [liveEvents]; the prefix keeps them apart from the day list's keys. */
+    val liveKeys: List<String> by lazy {
+        val unique = UniqueKeys()
+        liveEvents.map { unique.next("live:${it.matchId}") }
+    }
+
+    /**
+     * Whether [event] gets the LIVE badge. A match is both in the "Live now" section and, with the
+     * badge, at its chronological place in the day list (see [ScheduleViewModel]). Once the live feed
+     * answered it decides, so a match that finished loses the badge even if the day list still holds
+     * its in-progress copy; until then (or if it never answers) the event's own state decides.
+     */
+    fun isLive(event: ScheduleEvent): Boolean =
+        liveMatchIds?.let { event.matchId in it } ?: (event.state == MatchState.IN_PROGRESS)
 }
 
 /**
- * Loads the schedule of the selected leagues. The selection is saved in [preferences] on every
+ * Loads the schedule of the selected leagues, plus a "Live now" section fed by [liveRepository].
+ *
+ * A live match stays in the day list too, badged: the list is the full chronological schedule and
+ * paging, merging and the day headers rely on it being stable, so matches never jump in and out of it
+ * as they start or end; the section is a shortcut to them. The live feed never blocks or fails the
+ * schedule: if it fails the section is hidden (or keeps its last content when refreshing) and
+ * the day list falls back to each event's own state. The feed covers every league, so the section is
+ * the feed filtered by the current selection and needs no request when the selection changes.
+ *
+ * The selection The selection is saved in [preferences] on every
  * toggle and restored once, before the first schedule request, so a stored selection never costs a
  * request for the default one. Preferences failures are ignored: the screen works with the defaults.
  */
 class ScheduleViewModel(
     private val repository: ScheduleRepository,
+    private val liveRepository: LiveMatchesRepository,
     private val leaguesRepository: LeaguesRepository,
     private val preferences: UserPreferences,
     private val zoneId: ZoneId,
@@ -62,19 +99,39 @@ class ScheduleViewModel(
     private var loadJob: Job? = null
     private var pagingJob: Job? = null
 
+    /** Last live matches the feed returned, of every league. */
+    private var lastLiveMatches: List<ScheduleEvent> = emptyList()
+    private var lastLiveIds: Set<String>? = null
+    private var liveLoading = false
+
     /** True once the stored selection was applied or superseded (a user toggle, or nothing usable stored). */
     private var selectionRestored = false
 
+    /** The live request does not depend on the selection, so it starts first and runs beside the schedule. */
     init {
+        loadLive()
         reload()
     }
 
-    fun retry() = reload()
+    fun retry() {
+        loadLive()
+        reload()
+    }
+
+    /**
+     * Refreshes the "Live now" section every [LIVE_SECTION_POLL_INTERVAL]. The screen runs it only
+     * while visible, so leaving the screen cancels it. The schedule itself is not reloaded; a failed
+     * refresh keeps the last section.
+     */
+    suspend fun pollWhileVisible() {
+        pollWhile(LIVE_SECTION_POLL_INTERVAL) { refreshLive() }
+    }
 
     fun toggleLeague(leagueId: String) {
         _uiState.update { state ->
             val selected = state.selectedLeagueIds
             state.copy(selectedLeagueIds = if (leagueId in selected) selected - leagueId else selected + leagueId)
+                .withLiveSection()
         }
         selectionRestored = true
         val selected = _uiState.value.selectedLeagueIds
@@ -119,7 +176,9 @@ class ScheduleViewModel(
                     val leagues = leaguesRepository.getLeagues()
                     // One update, so the chips never show the default selection next to the real leagues.
                     val restored = if (selectionRestored) null else readStoredSelection(leagues)
-                    _uiState.update { it.copy(leagues = leagues, selectedLeagueIds = restored ?: it.selectedLeagueIds) }
+                    _uiState.update {
+                        it.copy(leagues = leagues, selectedLeagueIds = restored ?: it.selectedLeagueIds).withLiveSection()
+                    }
                 }
                 val selected = _uiState.value.selectedLeagueIds
                 if (selected.isEmpty()) {
@@ -199,6 +258,32 @@ class ScheduleViewModel(
             )
         }
     }
+
+    private fun loadLive() {
+        viewModelScope.launch { refreshLive() }
+    }
+
+    /** Skipped while a live request is in flight, so requests never overlap. */
+    private suspend fun refreshLive() {
+        if (liveLoading) return
+        liveLoading = true
+        try {
+            lastLiveMatches = liveRepository.getLiveMatches()
+            lastLiveIds = lastLiveMatches.mapNotNullTo(HashSet()) { it.matchId }
+            _uiState.update { it.withLiveSection() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The section is secondary: keep whatever it showed (nothing, the first time).
+        } finally {
+            liveLoading = false
+        }
+    }
+
+    private fun ScheduleUiState.withLiveSection() = copy(
+        liveEvents = lastLiveMatches.filter { it.leagueId in selectedLeagueIds }.sortedBy { it.startTime },
+        liveMatchIds = lastLiveIds,
+    )
 
     private fun Exception.toMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Something went wrong"
 

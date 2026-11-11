@@ -19,6 +19,14 @@ interface LolEsportsApi {
         @Query("pageToken") pageToken: String? = null,
     ): ScheduleResponse
 
+    /**
+     * Events being played right now, of every league, with the same shape as a schedule page (no
+     * pagination). Empty when nothing is live. Entries of another `type` than `match` (shows) are
+     * possible, so callers must filter them.
+     */
+    @GET("getLive")
+    suspend fun getLive(): ScheduleResponse
+
     /** [id] is the match id (the event id of a match event). */
     @GET("getEventDetails")
     suspend fun getEventDetails(@Query("id") id: String): EventDetailsResponse

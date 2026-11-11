@@ -1,18 +1,28 @@
 package com.example.lolsito.feature.game.ui
 
 import app.cash.turbine.test
+import com.example.lolsito.core.polling.GAME_STATS_POLL_INTERVAL
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.GameStatsRepository
 import com.example.lolsito.feature.game.domain.TeamStats
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
@@ -82,6 +92,170 @@ class GameStatsViewModelTest {
         }
     }
 
+
+    @Test
+    fun `a finished game is loaded once however long the screen stays visible`() = runTest(dispatcher) {
+        repository.stats = stats
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+
+        val polling = launch { vm.pollWhileVisible() }
+        advance(GAME_STATS_POLL_INTERVAL * 10)
+
+        assertEquals(GameStatsUiState(LoadStatus.Content, stats), vm.uiState.value)
+        assertEquals(listOf("g1"), repository.requests)
+        polling.cancel()
+    }
+
+    @Test
+    fun `a live game reloads every interval while visible, without a spinner`() = runTest(dispatcher) {
+        repository.stats = live(kills = 1)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        val states = mutableListOf<GameStatsUiState>()
+        backgroundScope.launch { vm.uiState.toList(states) }
+        runCurrent() // the initial load is done; from here on only Content may follow
+        val polling = launch { vm.pollWhileVisible() }
+
+        repository.stats = live(kills = 2)
+        advance(GAME_STATS_POLL_INTERVAL)
+        repository.stats = live(kills = 3)
+        advance(GAME_STATS_POLL_INTERVAL)
+        polling.cancel()
+
+        assertEquals(
+            listOf(
+                GameStatsUiState(LoadStatus.Content, live(kills = 1)),
+                GameStatsUiState(LoadStatus.Content, live(kills = 2)),
+                GameStatsUiState(LoadStatus.Content, live(kills = 3)),
+            ),
+            states,
+        )
+        assertEquals(listOf("g1", "g1", "g1"), repository.requests)
+    }
+
+    @Test
+    fun `polling stops once the game is finished`() = runTest(dispatcher) {
+        repository.stats = live(kills = 1)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+
+        repository.stats = stats
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertEquals(GameStatsUiState(LoadStatus.Content, stats), vm.uiState.value)
+        assertEquals(2, repository.requests.size)
+
+        advance(GAME_STATS_POLL_INTERVAL * 10)
+
+        assertEquals(2, repository.requests.size)
+        polling.cancel()
+    }
+
+    @Test
+    fun `nothing is requested while the screen is not visible and polling resumes when it is again`() = runTest(dispatcher) {
+        repository.stats = live(kills = 1)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+
+        advance(GAME_STATS_POLL_INTERVAL * 5)
+        assertEquals(1, repository.requests.size)
+
+        var polling: Job = launch { vm.pollWhileVisible() }
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertEquals(2, repository.requests.size)
+
+        polling.cancel() // the screen goes to the background
+        advance(GAME_STATS_POLL_INTERVAL * 5)
+        assertEquals(2, repository.requests.size)
+
+        polling = launch { vm.pollWhileVisible() } // and comes back
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertEquals(3, repository.requests.size)
+        polling.cancel()
+    }
+
+    @Test
+    fun `a failed or empty background refresh keeps the last stats and is retried at the next tick`() = runTest(dispatcher) {
+        repository.stats = live(kills = 1)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+
+        repository.error = IOException("offline")
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertEquals(GameStatsUiState(LoadStatus.Content, live(kills = 1)), vm.uiState.value)
+
+        repository.error = null
+        repository.stats = null // the feed has no frames right now
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertEquals(GameStatsUiState(LoadStatus.Content, live(kills = 1)), vm.uiState.value)
+
+        repository.stats = live(kills = 4)
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertEquals(GameStatsUiState(LoadStatus.Content, live(kills = 4)), vm.uiState.value)
+        assertEquals(4, repository.requests.size)
+        polling.cancel()
+    }
+
+    @Test
+    fun `no refresh is requested while the initial load is still in flight`() = runTest(dispatcher) {
+        repository.stats = live(kills = 1)
+        repository.gate = CompletableDeferred()
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        val polling = launch { vm.pollWhileVisible() }
+
+        advance(GAME_STATS_POLL_INTERVAL * 3)
+        assertEquals(GameStatsUiState(LoadStatus.Loading), vm.uiState.value)
+        assertEquals(1, repository.requests.size)
+
+        repository.gate?.complete(Unit)
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertTrue(vm.uiState.value.status == LoadStatus.Content)
+        assertEquals(2, repository.requests.size)
+        polling.cancel()
+    }
+
+    @Test
+    fun `a slow refresh is never overlapped by the next tick`() = runTest(dispatcher) {
+        repository.stats = live(kills = 1)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+
+        repository.gate = CompletableDeferred()
+        advance(GAME_STATS_POLL_INTERVAL * 4)
+        assertEquals(2, repository.requests.size)
+
+        repository.gate?.complete(Unit)
+        repository.gate = null
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertEquals(3, repository.requests.size)
+        polling.cancel()
+    }
+
+    @Test
+    fun `an empty or failed initial load is not polled`() = runTest(dispatcher) {
+        repository.stats = null
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+
+        advance(GAME_STATS_POLL_INTERVAL * 3)
+        assertEquals(GameStatsUiState(LoadStatus.Empty), vm.uiState.value)
+        assertEquals(1, repository.requests.size)
+        polling.cancel()
+    }
+
+    private suspend fun TestScope.advance(duration: kotlin.time.Duration) {
+        advanceTimeBy(duration)
+        runCurrent()
+    }
+
+    private fun live(kills: Int) = stats.copy(
+        isFinished = false,
+        blueTeam = stats.blueTeam.copy(kills = kills),
+    )
+
     private val stats = GameStats(
         isFinished = true,
         blueTeam = TeamStats(70731, 11, 9, 3, 1, emptyList()),
@@ -93,8 +267,12 @@ class GameStatsViewModelTest {
         var error: Throwable? = null
         val requests = mutableListOf<String>()
 
+        /** When set, getGameStats suspends on it after counting the request. */
+        var gate: CompletableDeferred<Unit>? = null
+
         override suspend fun getGameStats(gameId: String): GameStats? {
             requests += gameId
+            gate?.await()
             error?.let { throw it }
             return stats
         }

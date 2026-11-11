@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
+import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
@@ -49,6 +50,7 @@ fun GameStatsScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    WhileStarted(viewModel) { viewModel.pollWhileVisible() }
     GameStatsContent(
         state = state,
         blueTeamCode = blueTeamCode,

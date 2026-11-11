@@ -39,6 +39,7 @@ import com.example.lolsito.core.ui.ErrorView
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadingView
 import com.example.lolsito.core.ui.TeamLogo
+import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.match.domain.GameSide
 import com.example.lolsito.feature.match.domain.GameState
 import com.example.lolsito.feature.match.domain.GameStatsLink
@@ -54,6 +55,7 @@ fun MatchDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    WhileStarted(viewModel) { viewModel.pollWhileVisible() }
     MatchDetailContent(
         state = state,
         onBack = onBack,

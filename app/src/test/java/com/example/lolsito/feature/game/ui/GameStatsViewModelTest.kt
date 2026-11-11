@@ -2,7 +2,11 @@ package com.example.lolsito.feature.game.ui
 
 import app.cash.turbine.test
 import com.example.lolsito.core.polling.GAME_STATS_POLL_INTERVAL
+import com.example.lolsito.core.network.dto.LiveStatsWindowResponse
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.feature.game.data.DETAILS_WAIT_LIMIT
+import com.example.lolsito.feature.game.data.GameStatsRepositoryImpl
+import com.example.lolsito.testutil.FakeLiveStatsApi
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.GameStatsRepository
 import com.example.lolsito.feature.game.domain.PlayerDetails
@@ -18,16 +22,22 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import retrofit2.Response
 import java.io.IOException
+import java.time.Clock
+import java.time.Instant
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class GameStatsViewModelTest {
@@ -316,6 +326,72 @@ class GameStatsViewModelTest {
 
         assertEquals(GameStatsUiState(LoadStatus.Content, playersOnly(live(kills = 2))), vm.uiState.value)
     }
+
+    @Test
+    fun `an initial load is not held back by details that never answer`() = runTest(dispatcher) {
+        val api = FakeLiveStatsApi(details = { FakeLiveStatsApi.never() })
+        val vm = GameStatsViewModel("g1", GameStatsRepositoryImpl(api, Clock.systemUTC()))
+
+        advance(DETAILS_WAIT_LIMIT - 1.milliseconds)
+        assertEquals(LoadStatus.Loading, vm.uiState.value.status)
+
+        advance(1.milliseconds)
+        val state = vm.uiState.value
+        assertEquals(LoadStatus.Content, state.status)
+        assertEquals(31850, state.stats?.blueTeam?.totalGold)
+        assertTrue(state.stats!!.blueTeam.players.all { it.details == null })
+        assertEquals(DETAILS_WAIT_LIMIT.inWholeMilliseconds, currentTime)
+    }
+
+    @Test
+    fun `a poll tick is not held back by details that never answer and keeps the earlier details`() = runTest(dispatcher) {
+        var gold = 31850
+        val api = FakeLiveStatsApi(window = { Response.success(FakeLiveStatsApi.windowResponse().body()!!.withBlueGold(gold)) })
+        val vm = GameStatsViewModel("g1", GameStatsRepositoryImpl(api, Clock.systemUTC()))
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.stats!!.blueTeam.players.all { it.details != null })
+        val polling = launch { vm.pollWhileVisible() }
+
+        gold = 32000
+        api.details = { FakeLiveStatsApi.never() }
+        advance(GAME_STATS_POLL_INTERVAL + DETAILS_WAIT_LIMIT - 1.milliseconds)
+        assertEquals(31850, vm.uiState.value.stats?.blueTeam?.totalGold)
+
+        advance(1.milliseconds)
+        val stats = vm.uiState.value.stats!!
+        assertEquals(32000, stats.blueTeam.totalGold)
+        assertTrue(stats.blueTeam.players.all { it.details != null })
+        assertTrue(api.detailsCancelled)
+        polling.cancel()
+    }
+
+    @Test
+    fun `details kept while the feed is down are marked as of their frame and dropped once too old`() = runTest(dispatcher) {
+        val t0 = Instant.parse("2026-11-11T12:00:00Z")
+        repository.stats = withDetails(live(kills = 1), gold = 1000).copy(frameTime = t0, detailsFrameTime = t0)
+        val vm = GameStatsViewModel(gameId = "g1", repository = repository)
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+
+        repository.stats = playersOnly(live(kills = 2)).copy(frameTime = t0.plusSeconds(20))
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertEquals(t0, vm.uiState.value.stats?.staleDetailsTime())
+        assertEquals(1001, vm.uiState.value.stats?.blueTeam?.players?.first()?.details?.totalGold)
+
+        repository.stats = playersOnly(live(kills = 3)).copy(frameTime = t0.plusSeconds(121))
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertTrue(vm.uiState.value.stats!!.blueTeam.players.all { it.details == null })
+        assertNull(vm.uiState.value.stats?.detailsFrameTime)
+
+        repository.stats = withDetails(live(kills = 4), gold = 4000).copy(frameTime = t0.plusSeconds(140), detailsFrameTime = t0.plusSeconds(140))
+        advance(GAME_STATS_POLL_INTERVAL)
+        assertNull(vm.uiState.value.stats?.staleDetailsTime())
+        assertEquals(4001, vm.uiState.value.stats?.blueTeam?.players?.first()?.details?.totalGold)
+        polling.cancel()
+    }
+
+    private fun LiveStatsWindowResponse.withBlueGold(gold: Int) =
+        copy(frames = frames!!.map { it.copy(blueTeam = it.blueTeam!!.copy(totalGold = gold)) })
 
     private fun player(id: Int, details: PlayerDetails? = null) =
         PlayerStats(id, "P$id", "Olaf", kills = 0, deaths = 0, assists = 0, creepScore = 0, level = 1, details = details)

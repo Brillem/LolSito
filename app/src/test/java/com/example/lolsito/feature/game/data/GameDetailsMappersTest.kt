@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 class GameDetailsMappersTest {
 
@@ -36,6 +37,39 @@ class GameDetailsMappersTest {
         assertEquals(listOf(1086, 3032, 3006, 3363, 3086, 1042, 1042, 2055), details.getValue(9).itemIds)
         assertEquals(8200, details.getValue(10).primaryStyleId)
         assertEquals(8214, details.getValue(10).keystoneId)
+    }
+
+    @Test
+    fun `the details frame time is the timestamp of the last frame`() {
+        val json = """
+            {"frames":[
+              {"rfc460Timestamp":"2026-10-15T23:30:09.414Z","participants":[{"participantId":1}]},
+              {"rfc460Timestamp":"2026-10-15T23:30:09.780Z","participants":[{"participantId":1}]}]}
+        """
+        assertEquals(Instant.parse("2026-10-15T23:30:09.780Z"), decode(json).toGameDetails()!!.frameTime)
+        assertEquals(setOf(1), decode(json).toGameDetails()!!.players.keys)
+    }
+
+    @Test
+    fun `a missing or unreadable details timestamp is no frame time`() {
+        assertNull(decode("""{"frames":[{"participants":[{"participantId":1}]}]}""").toGameDetails()!!.frameTime)
+        assertNull(decode("""{"frames":[{"rfc460Timestamp":"later","participants":[]}]}""").toGameDetails()!!.frameTime)
+        assertNull(decode("""{"frames":[]}""").toGameDetails())
+    }
+
+    @Test
+    fun `the window frame time is the timestamp of the last frame`() {
+        val window = LolEsportsJson.decodeFromString<LiveStatsWindowResponse>(Fixtures.read("livestats_window.json"))
+        val lastTimestamp = window.frames!!.last().rfc460Timestamp!!
+
+        assertEquals(Instant.parse(lastTimestamp), window.toGameStats()!!.frameTime)
+    }
+
+    @Test
+    fun `a window frame without a readable timestamp has no frame time`() {
+        val json = """{"frames":[{"rfc460Timestamp":"soon","blueTeam":{},"redTeam":{}}]}"""
+
+        assertNull(LolEsportsJson.decodeFromString<LiveStatsWindowResponse>(json).toGameStats()!!.frameTime)
     }
 
     @Test

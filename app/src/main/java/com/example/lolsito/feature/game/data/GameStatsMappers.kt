@@ -8,10 +8,12 @@ import com.example.lolsito.core.network.dto.LiveStatsParticipantMetadataDto
 import com.example.lolsito.core.network.dto.LiveStatsTeamFrameDto
 import com.example.lolsito.core.network.dto.LiveStatsTeamMetadataDto
 import com.example.lolsito.core.network.dto.LiveStatsWindowResponse
+import com.example.lolsito.feature.game.domain.GameDetails
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
+import java.time.Instant
 
 /**
  * Stats of the last frame, each team's players joined with that team's metadata by participant id.
@@ -27,6 +29,7 @@ fun LiveStatsWindowResponse.toGameStats(): GameStats? {
         dataDragonVersion = dataDragonVersion(gameMetadata?.patchVersion),
         blueTeamId = gameMetadata?.blueTeamMetadata?.esportsTeamId?.takeIf { it.isNotBlank() },
         redTeamId = gameMetadata?.redTeamMetadata?.esportsTeamId?.takeIf { it.isNotBlank() },
+        frameTime = frame.rfc460Timestamp.toInstantOrNull(),
     )
 }
 
@@ -63,15 +66,21 @@ private fun LiveStatsParticipantFrameDto.toPlayerStats(id: Int, metadata: LiveSt
     )
 
 /**
- * Details of the last frame by participant id. Returns null when there are no frames. Participants
- * without an id are skipped; missing numbers are 0 and empty item slots (id 0) are dropped.
+ * Details of the last frame by participant id, with that frame's time. Returns null when there are no
+ * frames. Participants without an id are skipped; missing numbers are 0 and empty item slots (id 0) are dropped.
  */
-fun LiveStatsDetailsResponse.toPlayerDetails(): Map<Int, PlayerDetails>? {
+fun LiveStatsDetailsResponse.toGameDetails(): GameDetails? {
     val frame = frames.orEmpty().lastOrNull() ?: return null
-    return frame.participants.orEmpty()
+    val players = frame.participants.orEmpty()
         .mapNotNull { participant -> participant.participantId?.let { it to participant.toPlayerDetails() } }
         .toMap()
+    return GameDetails(frame.rfc460Timestamp.toInstantOrNull(), players)
 }
+
+/** The details of [toGameDetails] without their frame time. */
+fun LiveStatsDetailsResponse.toPlayerDetails(): Map<Int, PlayerDetails>? = toGameDetails()?.players
+
+private fun String?.toInstantOrNull(): Instant? = this?.let { runCatching { Instant.parse(it) }.getOrNull() }
 
 private fun LiveStatsParticipantDetailsDto.toPlayerDetails() = PlayerDetails(
     itemIds = items.orEmpty().filter { it > 0 },

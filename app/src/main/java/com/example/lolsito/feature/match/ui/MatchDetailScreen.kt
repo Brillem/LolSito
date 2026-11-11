@@ -41,6 +41,7 @@ import com.example.lolsito.core.ui.LoadingView
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.feature.match.domain.GameSide
 import com.example.lolsito.feature.match.domain.GameState
+import com.example.lolsito.feature.match.domain.GameStatsLink
 import com.example.lolsito.feature.match.domain.MatchDetail
 import com.example.lolsito.feature.match.domain.MatchGame
 
@@ -49,7 +50,7 @@ import com.example.lolsito.feature.match.domain.MatchGame
 fun MatchDetailScreen(
     viewModel: MatchDetailViewModel,
     onBack: () -> Unit,
-    onGameClick: (gameId: String) -> Unit,
+    onGameClick: (GameStatsLink) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -68,7 +69,7 @@ fun MatchDetailContent(
     state: MatchDetailUiState,
     onBack: () -> Unit,
     onRetry: () -> Unit,
-    onGameClick: (gameId: String) -> Unit,
+    onGameClick: (GameStatsLink) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -91,7 +92,7 @@ fun MatchDetailContent(
 }
 
 @Composable
-private fun MatchDetailBody(detail: MatchDetail, onGameClick: (gameId: String) -> Unit) {
+private fun MatchDetailBody(detail: MatchDetail, onGameClick: (GameStatsLink) -> Unit) {
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "header") { MatchHeader(detail) }
         item(key = "games-title") {
@@ -115,8 +116,8 @@ private fun MatchDetailBody(detail: MatchDetail, onGameClick: (gameId: String) -
         val keys = detail.gameKeys
         items(games.size, key = { keys[it] }) { index ->
             val game = games[index]
-            val statsGameId = game.statsGameId
-            GameRow(game, detail.teams, onClick = statsGameId?.let { id -> { onGameClick(id) } })
+            val statsLink = game.statsLink(detail.teams)
+            GameRow(game, detail.teams, onClick = statsLink?.let { link -> { onGameClick(link) } })
             HorizontalDivider()
         }
     }

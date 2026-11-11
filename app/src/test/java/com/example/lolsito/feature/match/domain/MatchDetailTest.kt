@@ -3,6 +3,7 @@ package com.example.lolsito.feature.match.domain
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.SeriesType
+import com.example.lolsito.core.model.Team
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -68,5 +69,49 @@ class MatchDetailTest {
         assertNull(game(3, null, GameState.IN_PROGRESS).statsGameId)
         assertNull(game(4, "d", GameState.UNNEEDED).statsGameId)
         assertNull(game(5, "e", GameState.UNKNOWN).statsGameId)
+    }
+
+    private val teams = listOf(
+        Team("MVK Esports", "MVK", null, null, null, id = "mvk"),
+        Team("FURIA", "FUR", null, null, null, id = "fur"),
+    )
+
+    private fun sided(id: String?, state: GameState, vararg sides: Pair<String, GameSide>) =
+        MatchGame(number = 1, id = id, state = state, sides = sides.toMap())
+
+    @Test
+    fun `stats link carries the code of the team on each side`() {
+        val game = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.RED)
+        assertEquals(GameStatsLink("g1", blueTeamCode = "MVK", redTeamCode = "FUR"), game.statsLink(teams))
+    }
+
+    @Test
+    fun `stats link follows the sides of that game when teams swap`() {
+        val game = sided("g4", GameState.IN_PROGRESS, "fur" to GameSide.BLUE, "mvk" to GameSide.RED)
+        assertEquals(GameStatsLink("g4", blueTeamCode = "FUR", redTeamCode = "MVK"), game.statsLink(teams))
+    }
+
+    @Test
+    fun `stats link has no codes when sides or team ids are unknown`() {
+        assertEquals(GameStatsLink("g1", null, null), sided("g1", GameState.COMPLETED).statsLink(teams))
+        val noIds = teams.map { it.copy(id = null) }
+        val game = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.RED)
+        assertEquals(GameStatsLink("g1", null, null), game.statsLink(noIds))
+    }
+
+    @Test
+    fun `stats link skips a side shared by two teams or a blank code`() {
+        val bothBlue = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.BLUE)
+        assertEquals(GameStatsLink("g1", null, null), bothBlue.statsLink(teams))
+        val blank = listOf(teams[0].copy(code = " "), teams[1])
+        val game = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.RED)
+        assertEquals(GameStatsLink("g1", null, "FUR"), game.statsLink(blank))
+    }
+
+    @Test
+    fun `games without stats have no stats link`() {
+        val sides = arrayOf("mvk" to GameSide.BLUE, "fur" to GameSide.RED)
+        assertNull(sided("g1", GameState.UNSTARTED, *sides).statsLink(teams))
+        assertNull(sided(null, GameState.COMPLETED, *sides).statsLink(teams))
     }
 }

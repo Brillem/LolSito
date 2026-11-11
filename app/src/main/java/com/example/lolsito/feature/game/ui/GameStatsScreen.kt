@@ -41,15 +41,31 @@ import com.example.lolsito.feature.game.domain.TeamStats
 
 /** Container: wires the ViewModel to the stateless [GameStatsContent]. */
 @Composable
-fun GameStatsScreen(viewModel: GameStatsViewModel, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun GameStatsScreen(
+    viewModel: GameStatsViewModel,
+    blueTeamCode: String?,
+    redTeamCode: String?,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    GameStatsContent(state = state, onBack = onBack, onRetry = viewModel::retry, modifier = modifier)
+    GameStatsContent(
+        state = state,
+        blueTeamCode = blueTeamCode,
+        redTeamCode = redTeamCode,
+        onBack = onBack,
+        onRetry = viewModel::retry,
+        modifier = modifier,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GameStatsContent(
     state: GameStatsUiState,
+    /** Codes of the teams on each side; the side name is shown when a code is unknown. */
+    blueTeamCode: String?,
+    redTeamCode: String?,
     onBack: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -66,10 +82,13 @@ fun GameStatsContent(
             },
         )
         LoadStatusView(state.status, emptyMessage = "No stats available for this game", onRetry = onRetry) {
-            state.stats?.let { GameStatsBody(it) }
+            state.stats?.let { GameStatsBody(it, blueTeamCode, redTeamCode) }
         }
     }
 }
+
+/** The team [code] when known, otherwise [fallback] (the side). */
+fun teamLabel(code: String?, fallback: String): String = code?.takeIf { it.isNotBlank() } ?: fallback
 
 /** Gold as broadcasts show it: from a thousand up, in thousands rounded to one decimal ("31.9k"). */
 fun formatGold(gold: Int): String {
@@ -92,21 +111,23 @@ private val teamRows: List<Pair<String, (TeamStats) -> String>> = listOf(
 )
 
 @Composable
-private fun GameStatsBody(stats: GameStats) {
+private fun GameStatsBody(stats: GameStats, blueTeamCode: String?, redTeamCode: String?) {
     LazyColumn(Modifier.fillMaxSize()) {
-        item(key = "teams") { TeamComparison(stats) }
-        players(Side.BLUE, stats.blueTeam)
-        players(Side.RED, stats.redTeam)
+        item(key = "teams") {
+            TeamComparison(stats, blueLabel = teamLabel(blueTeamCode, "Blue"), redLabel = teamLabel(redTeamCode, "Red"))
+        }
+        players(Side.BLUE, teamLabel(blueTeamCode, Side.BLUE.label), stats.blueTeam)
+        players(Side.RED, teamLabel(redTeamCode, Side.RED.label), stats.redTeam)
     }
 }
 
 @Composable
-private fun TeamComparison(stats: GameStats, modifier: Modifier = Modifier) {
+private fun TeamComparison(stats: GameStats, blueLabel: String, redLabel: String, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ComparisonRow(
-            blue = "Blue",
+            blue = blueLabel,
             label = if (stats.isFinished) "Final" else "LIVE",
-            red = "Red",
+            red = redLabel,
             header = true,
         )
         teamRows.forEach { (label, value) ->
@@ -144,12 +165,12 @@ private fun ComparisonRow(blue: String, label: String, red: String, header: Bool
     }
 }
 
-private fun LazyListScope.players(side: Side, team: TeamStats) {
+private fun LazyListScope.players(side: Side, title: String, team: TeamStats) {
     item(key = "${side.name}-title") {
         Column {
             HorizontalDivider()
             Text(
-                side.label,
+                title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = side.color,
@@ -248,6 +269,8 @@ private fun GameStatsContentPreview() {
             LoadStatus.Content,
             GameStats(isFinished = true, blueTeam = previewTeam(1, "MVK"), redTeam = previewTeam(6, "FUR")),
         ),
+        blueTeamCode = "MVK",
+        redTeamCode = "FUR",
         onBack = {},
         onRetry = {},
     )
@@ -256,5 +279,11 @@ private fun GameStatsContentPreview() {
 @Preview(showBackground = true)
 @Composable
 private fun GameStatsEmptyPreview() {
-    GameStatsContent(state = GameStatsUiState(LoadStatus.Empty), onBack = {}, onRetry = {})
+    GameStatsContent(
+        state = GameStatsUiState(LoadStatus.Empty),
+        blueTeamCode = null,
+        redTeamCode = null,
+        onBack = {},
+        onRetry = {},
+    )
 }

@@ -48,9 +48,21 @@ object Routes {
     fun match(matchId: String): String = "match/${Uri.encode(matchId)}"
 
     const val GAME_ID_ARG = "gameId"
-    const val GAME = "game/{$GAME_ID_ARG}"
+    const val BLUE_CODE_ARG = "blueCode"
+    const val RED_CODE_ARG = "redCode"
+    /** The team codes are optional query arguments, so the route still matches `game/{gameId}`. */
+    const val GAME = "game/{$GAME_ID_ARG}?$BLUE_CODE_ARG={$BLUE_CODE_ARG}&$RED_CODE_ARG={$RED_CODE_ARG}"
 
-    fun game(gameId: String): String = "game/${Uri.encode(gameId)}"
+    fun game(gameId: String, blueCode: String?, redCode: String?): String = gameRoute(gameId, blueCode, redCode, Uri::encode)
+}
+
+/** Builds the game stats route; unknown codes are left out. [encode] is `Uri.encode` outside tests. */
+internal fun gameRoute(gameId: String, blueCode: String?, redCode: String?, encode: (String) -> String): String {
+    val query = listOfNotNull(
+        blueCode?.let { "${Routes.BLUE_CODE_ARG}=${encode(it)}" },
+        redCode?.let { "${Routes.RED_CODE_ARG}=${encode(it)}" },
+    )
+    return "game/${encode(gameId)}" + if (query.isEmpty()) "" else query.joinToString("&", prefix = "?")
 }
 
 /** Top-level destinations shown in the bottom bar. Pushed screens (match detail, game stats) hide the bar. */
@@ -146,20 +158,32 @@ fun LolSitoApp(container: AppContainer) {
                 MatchDetailScreen(
                     viewModel = vm,
                     onBack = { navController.navigateUp() },
-                    onGameClick = { gameId -> navController.navigateFrom(entry, Routes.game(gameId)) },
+                    onGameClick = { link ->
+                        navController.navigateFrom(entry, Routes.game(link.gameId, link.blueTeamCode, link.redTeamCode))
+                    },
                 )
             }
             composable(
                 Routes.GAME,
-                arguments = listOf(navArgument(Routes.GAME_ID_ARG) { type = NavType.StringType }),
+                arguments = listOf(
+                    navArgument(Routes.GAME_ID_ARG) { type = NavType.StringType },
+                    navArgument(Routes.BLUE_CODE_ARG) { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument(Routes.RED_CODE_ARG) { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
             ) { entry ->
-                val gameId = requireNotNull(entry.arguments?.getString(Routes.GAME_ID_ARG))
+                val arguments = entry.arguments
+                val gameId = requireNotNull(arguments?.getString(Routes.GAME_ID_ARG))
                 val vm: GameStatsViewModel = viewModel(
                     factory = viewModelFactory {
                         initializer { GameStatsViewModel(gameId, container.gameStatsRepository) }
                     }
                 )
-                GameStatsScreen(viewModel = vm, onBack = { navController.navigateUp() })
+                GameStatsScreen(
+                    viewModel = vm,
+                    blueTeamCode = arguments?.getString(Routes.BLUE_CODE_ARG),
+                    redTeamCode = arguments?.getString(Routes.RED_CODE_ARG),
+                    onBack = { navController.navigateUp() },
+                )
             }
         }
     }

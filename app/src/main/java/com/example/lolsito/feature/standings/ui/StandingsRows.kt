@@ -1,6 +1,7 @@
 package com.example.lolsito.feature.standings.ui
 
 import com.example.lolsito.core.model.MatchResultDisplay
+import com.example.lolsito.core.model.UniqueKeys
 import com.example.lolsito.core.model.formatMatchResult
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
@@ -57,44 +58,41 @@ fun formatRecord(wins: Int?, losses: Int?): String = when {
  * (bracket or Swiss) also get a notice, and skip their rounds that are not scheduled yet.
  */
 fun buildStandingsRows(standings: Standings): List<StandingsRow> {
-    val rows = mutableListOf<Pair<String, (String) -> StandingsRow>>()
+    // Same "#ordinal" suffix as ScheduleDay.keys, applied to the whole list.
+    val unique = UniqueKeys()
+    fun key(base: String) = unique.next(base)
+    val rows = mutableListOf<StandingsRow>()
     standings.stages.forEach { stage ->
         val stageBase = "stage:${stage.slug ?: stage.name}"
-        rows += stageBase to { key -> StandingsRow.StageHeader(key, stage.name, stage.isElimination) }
+        rows += StandingsRow.StageHeader(key(stageBase), stage.name, stage.isElimination)
         if (stage.isElimination) {
-            rows += "notice:$stageBase" to { key -> StandingsRow.EliminationNotice(key) }
+            rows += StandingsRow.EliminationNotice(key("notice:$stageBase"))
         }
         if (stage.sections.isEmpty()) {
-            rows += "empty:$stageBase" to { key -> StandingsRow.EmptySection(key) }
+            rows += StandingsRow.EmptySection(key("empty:$stageBase"))
         }
         val sections = if (stage.isElimination) stage.sections.filter { it.isMatchOnly } else stage.sections
         sections.forEach { section ->
             val sectionBase = "$stageBase/${section.name}"
             if (stage.showsSectionHeaders()) {
-                rows += "section:$sectionBase" to { key -> StandingsRow.SectionHeader(key, section.name) }
+                rows += StandingsRow.SectionHeader(key("section:$sectionBase"), section.name)
             }
             when {
                 section.isRanked -> {
-                    rows += "table:$sectionBase" to { key -> StandingsRow.TableHeader(key) }
+                    rows += StandingsRow.TableHeader(key("table:$sectionBase"))
                     section.rankings.forEach { ranking ->
                         val teamId = ranking.team.id ?: ranking.team.code
-                        rows += "rank:$sectionBase/$teamId" to { key -> StandingsRow.RankingRow(key, ranking) }
+                        rows += StandingsRow.RankingRow(key("rank:$sectionBase/$teamId"), ranking)
                     }
                 }
                 section.isMatchOnly -> section.matches.forEach { match ->
-                    rows += "match:$sectionBase/${match.match.id}" to { key -> StandingsRow.MatchRow(key, match) }
+                    rows += StandingsRow.MatchRow(key("match:$sectionBase/${match.match.id}"), match)
                 }
-                else -> rows += "empty:$sectionBase" to { key -> StandingsRow.EmptySection(key) }
+                else -> rows += StandingsRow.EmptySection(key("empty:$sectionBase"))
             }
         }
     }
-    // Same "#ordinal" suffix pattern as ScheduleDay.keys, applied to the whole list.
-    val seen = mutableMapOf<String, Int>()
-    return rows.map { (base, build) ->
-        val ordinal = seen.getOrDefault(base, 0)
-        seen[base] = ordinal + 1
-        build("$base#$ordinal")
-    }
+    return rows
 }
 
 /** A single section named like its stage adds nothing, so its header is skipped. */

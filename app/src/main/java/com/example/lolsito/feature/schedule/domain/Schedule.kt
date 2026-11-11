@@ -2,6 +2,7 @@ package com.example.lolsito.feature.schedule.domain
 
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.UniqueKeys
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -30,14 +31,10 @@ data class ScheduleDay(val date: LocalDate, val events: List<ScheduleEvent>) {
      * use time/league/block plus an occurrence ordinal, so keys never collide within a list.
      */
     val keys: List<String> by lazy {
-        val seen = mutableMapOf<String, Int>()
+        val unique = UniqueKeys()
         events.map { event ->
-            event.matchId?.let { "match:$it" } ?: run {
-                val base = "event:${event.startTime}|${event.leagueSlug ?: event.leagueName}|${event.blockName.orEmpty()}"
-                val ordinal = seen.getOrDefault(base, 0)
-                seen[base] = ordinal + 1
-                "$base#$ordinal"
-            }
+            event.matchId?.let { "match:$it" }
+                ?: unique.next("event:${event.startTime}|${event.leagueSlug ?: event.leagueName}|${event.blockName.orEmpty()}")
         }
     }
 }

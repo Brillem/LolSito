@@ -4,6 +4,7 @@ import com.example.lolsito.core.model.MatchResultDisplay
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.model.UniqueKeys
 import com.example.lolsito.core.model.formatMatchResult
 
 enum class GameState { UNSTARTED, IN_PROGRESS, COMPLETED, UNNEEDED, UNKNOWN }
@@ -40,13 +41,8 @@ data class MatchDetail(
      * is missing) plus an occurrence ordinal, so repeated API data never yields duplicate keys.
      */
     val gameKeys: List<String> by lazy {
-        val seen = mutableMapOf<String, Int>()
-        visibleGames.map { game ->
-            val base = game.id?.let { "game:$it" } ?: "game-number:${game.number}"
-            val ordinal = seen.getOrDefault(base, 0)
-            seen[base] = ordinal + 1
-            "$base#$ordinal"
-        }
+        val unique = UniqueKeys()
+        visibleGames.map { game -> unique.next(game.id?.let { "game:$it" } ?: "game-number:${game.number}") }
     }
 
     val result: MatchResultDisplay get() = formatMatchResult(state, teams, format)

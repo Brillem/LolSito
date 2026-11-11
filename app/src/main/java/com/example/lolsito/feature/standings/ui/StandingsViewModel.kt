@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.feature.standings.domain.pickDefaultTournament
@@ -17,13 +18,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Clock
 import java.time.LocalDate
-
-sealed interface LoadStatus {
-    data object Loading : LoadStatus
-    data object Content : LoadStatus
-    data object Empty : LoadStatus
-    data class Error(val message: String) : LoadStatus
-}
 
 data class StandingsUiState(
     val leagues: List<League> = emptyList(),

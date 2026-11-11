@@ -35,6 +35,7 @@ import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.ui.ErrorView
+import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadingView
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.feature.match.domain.GameSide
@@ -148,7 +149,7 @@ fun MatchHeader(detail: MatchDetail, modifier: Modifier = Modifier) {
 @Composable
 private fun HeaderTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier = Modifier) {
     Column(
-        modifier.alpha(if (emphasis == TeamEmphasis.LOSER) 0.45f else 1f),
+        modifier.alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         TeamLogo(team.imageUrl, contentDescription = team.name, size = 56.dp)

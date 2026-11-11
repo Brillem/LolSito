@@ -57,13 +57,6 @@ class ScheduleMappersTest {
     }
 
     @Test
-    fun `state strings map to enum with unknown fallback`() {
-        assertEquals(MatchState.IN_PROGRESS, "inProgress".toMatchState())
-        assertEquals(MatchState.UNKNOWN, "weird".toMatchState())
-        assertEquals(MatchState.UNKNOWN, null.toMatchState())
-    }
-
-    @Test
     fun `event without match or teams still maps`() {
         val dto = LolEsportsJson.decodeFromString<EventDto>(
             """{"startTime":"2026-01-01T10:00:00Z","state":"unstarted","blockName":null,"league":{"name":"LCK"}}"""

@@ -8,7 +8,25 @@ data class GameStats(
     val isFinished: Boolean,
     val blueTeam: TeamStats,
     val redTeam: TeamStats,
-)
+    /** Data Dragon version to load item icons from, null when the feed's patch is unknown. */
+    val dataDragonVersion: String? = null,
+) {
+    /** These stats with [details] (by participant id) attached to the players they belong to. */
+    fun withDetails(details: Map<Int, PlayerDetails>): GameStats = mapPlayers { it.copy(details = details[it.participantId]) }
+
+    /** These stats, where a player has no details, with the ones [previous] had for that participant. */
+    fun keepingDetailsFrom(previous: GameStats): GameStats {
+        val before = (previous.blueTeam.players + previous.redTeam.players)
+            .mapNotNull { player -> player.details?.let { player.participantId to it } }
+            .toMap()
+        return mapPlayers { it.copy(details = it.details ?: before[it.participantId]) }
+    }
+
+    private fun mapPlayers(transform: (PlayerStats) -> PlayerStats) = copy(
+        blueTeam = blueTeam.copy(players = blueTeam.players.map(transform)),
+        redTeam = redTeam.copy(players = redTeam.players.map(transform)),
+    )
+}
 
 data class TeamStats(
     val totalGold: Int,
@@ -37,6 +55,23 @@ data class PlayerStats(
     val assists: Int,
     val creepScore: Int,
     val level: Int,
+    /** Null when the details feed has nothing for this player (yet). */
+    val details: PlayerDetails? = null,
+)
+
+data class PlayerDetails(
+    /** Items in slot order, without empty slots. */
+    val itemIds: List<Int>,
+    val primaryStyleId: Int?,
+    val secondaryStyleId: Int?,
+    val keystoneId: Int?,
+    /** Share of the team's damage to champions, 0 to 1. */
+    val damageShare: Double,
+    /** Share of the team's kills this player took part in, 0 to 1. */
+    val killParticipation: Double,
+    val totalGold: Int,
+    val wardsPlaced: Int,
+    val wardsDestroyed: Int,
 )
 
 interface GameStatsRepository {

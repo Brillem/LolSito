@@ -41,9 +41,9 @@ class GameStatsViewModel(
 
     /**
      * Keeps live stats fresh. The screen runs it only while visible, so leaving the screen cancels it.
-     * A refresh that fails, or finds no frames, leaves the stats as they were; an initial load that is
-     * still running, empty, failed or finished is never polled, and [retry] pauses polling until its
-     * own load ends.
+     * A refresh that fails, or finds no frames, leaves the stats as they were, and one without details
+     * keeps the last details; an initial load that is still running, empty, failed or finished is never
+     * polled, and [retry] pauses polling until its own load ends.
      */
     suspend fun pollWhileVisible() {
         val live = uiState.map { it.status == LoadStatus.Content && it.stats?.isFinished == false }
@@ -53,7 +53,11 @@ class GameStatsViewModel(
     private suspend fun refresh() {
         val stats = repository.getGameStats(gameId) ?: return
         // Only replace content: a reload started meanwhile owns the state.
-        _uiState.update { if (it.status == LoadStatus.Content) GameStatsUiState(LoadStatus.Content, stats) else it }
+        // Details are secondary: a refresh that came back without them keeps the last ones.
+        _uiState.update {
+            if (it.status != LoadStatus.Content) it
+            else GameStatsUiState(LoadStatus.Content, it.stats?.let(stats::keepingDetailsFrom) ?: stats)
+        }
     }
 
     private fun load() {

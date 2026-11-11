@@ -1,11 +1,15 @@
 package com.example.lolsito.feature.game.data
 
+import com.example.lolsito.core.datadragon.dataDragonVersion
+import com.example.lolsito.core.network.dto.LiveStatsDetailsResponse
+import com.example.lolsito.core.network.dto.LiveStatsParticipantDetailsDto
 import com.example.lolsito.core.network.dto.LiveStatsParticipantFrameDto
 import com.example.lolsito.core.network.dto.LiveStatsParticipantMetadataDto
 import com.example.lolsito.core.network.dto.LiveStatsTeamFrameDto
 import com.example.lolsito.core.network.dto.LiveStatsTeamMetadataDto
 import com.example.lolsito.core.network.dto.LiveStatsWindowResponse
 import com.example.lolsito.feature.game.domain.GameStats
+import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
 
@@ -20,6 +24,7 @@ fun LiveStatsWindowResponse.toGameStats(): GameStats? {
         isFinished = frame.gameState == "finished",
         blueTeam = frame.blueTeam.toTeamStats(gameMetadata?.blueTeamMetadata),
         redTeam = frame.redTeam.toTeamStats(gameMetadata?.redTeamMetadata),
+        dataDragonVersion = dataDragonVersion(gameMetadata?.patchVersion),
     )
 }
 
@@ -53,3 +58,26 @@ private fun LiveStatsParticipantFrameDto.toPlayerStats(id: Int, metadata: LiveSt
         creepScore = creepScore ?: 0,
         level = level ?: 0,
     )
+
+/**
+ * Details of the last frame by participant id. Returns null when there are no frames. Participants
+ * without an id are skipped; missing numbers are 0 and empty item slots (id 0) are dropped.
+ */
+fun LiveStatsDetailsResponse.toPlayerDetails(): Map<Int, PlayerDetails>? {
+    val frame = frames.orEmpty().lastOrNull() ?: return null
+    return frame.participants.orEmpty()
+        .mapNotNull { participant -> participant.participantId?.let { it to participant.toPlayerDetails() } }
+        .toMap()
+}
+
+private fun LiveStatsParticipantDetailsDto.toPlayerDetails() = PlayerDetails(
+    itemIds = items.orEmpty().filter { it > 0 },
+    primaryStyleId = perkMetadata?.styleId,
+    secondaryStyleId = perkMetadata?.subStyleId,
+    keystoneId = perkMetadata?.perks?.firstOrNull(),
+    damageShare = championDamageShare ?: 0.0,
+    killParticipation = killParticipation ?: 0.0,
+    totalGold = totalGoldEarned ?: 0,
+    wardsPlaced = wardsPlaced ?: 0,
+    wardsDestroyed = wardsDestroyed ?: 0,
+)

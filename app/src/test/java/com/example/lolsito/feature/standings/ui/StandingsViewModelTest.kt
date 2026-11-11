@@ -15,7 +15,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -38,6 +40,7 @@ class StandingsViewModelTest {
     private val repository = FakeStandingsRepository()
     private var leaguesError: Throwable? = null
     private var leaguesRequests = 0
+    private var leaguesGate: CompletableDeferred<Unit>? = null
     private val clock = Clock.fixed(Instant.parse("2026-10-20T12:00:00Z"), ZoneOffset.UTC)
 
     @Before
@@ -59,6 +62,7 @@ class StandingsViewModelTest {
 
     private val leaguesRepository = LeaguesRepository {
         leaguesRequests++
+        leaguesGate?.await()
         leaguesError?.let { throw it }
         listOf(League(LCK, "lck", "LCK", "KOREA", null), League(WORLDS, "worlds", "Worlds", null, null))
     }
@@ -515,6 +519,88 @@ class StandingsViewModelTest {
         assertEquals(WORLDS_2026, vm.uiState.value.selectedTournamentId)
         assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
         assertTrue(preferences.savedStandingsSelections.isEmpty())
+    }
+
+    @Test
+    fun `a league picked while the stored selection is being restored wins and is saved`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(LCK, LCK_SPRING)
+        val gate = CompletableDeferred<Unit>()
+        leaguesGate = gate
+        val vm = viewModel()
+        runCurrent()
+
+        vm.selectLeague(WORLDS)
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(WORLDS, state.selectedLeagueId)
+        assertEquals(WORLDS_2026, state.selectedTournamentId)
+        assertEquals(listOf(WORLDS_2026), state.stageNames)
+        assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2026"), repository.requests)
+        assertEquals(listOf(StandingsSelection(WORLDS, null)), preferences.savedStandingsSelections)
+        assertEquals("the leagues are requested once", 1, leaguesRequests)
+    }
+
+    @Test
+    fun `a tournament picked while the stored selection is being restored wins and is saved`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, WORLDS_2025)
+        val gate = CompletableDeferred<Unit>()
+        leaguesGate = gate
+        val vm = viewModel()
+        runCurrent()
+
+        vm.selectTournament(LCK_SPRING)
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(LCK, state.selectedLeagueId)
+        assertEquals(LCK_SPRING, state.selectedTournamentId)
+        assertEquals(listOf(LCK_SPRING), state.stageNames)
+        assertEquals(listOf("t:$LCK", "s:$LCK_SPRING"), repository.requests)
+        assertEquals(listOf(StandingsSelection(LCK, LCK_SPRING)), preferences.savedStandingsSelections)
+    }
+
+    @Test
+    fun `a selection made before init resumes loads the tournaments once`() = runTest(dispatcher) {
+        val vm = viewModel()
+        vm.selectLeague(WORLDS)
+        advanceUntilIdle()
+
+        assertEquals(WORLDS_2026, vm.uiState.value.selectedTournamentId)
+        assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2026"), repository.requests)
+        assertEquals(1, leaguesRequests)
+    }
+
+    @Test
+    fun `the leagues are requested once even when a stored selection is validated`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, WORLDS_2025)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(2, vm.uiState.value.leagues.size)
+        assertEquals(1, leaguesRequests)
+    }
+
+    @Test
+    fun `a hanging leagues request delays the stored selection only up to the validation timeout`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(WORLDS, WORLDS_2025)
+        leaguesGate = CompletableDeferred()
+        val vm = viewModel()
+        advanceTimeBy(StandingsViewModel.LEAGUES_VALIDATION_TIMEOUT.inWholeMilliseconds - 1)
+        assertTrue("nothing is requested while the stored league is being validated", repository.requests.isEmpty())
+
+        advanceTimeBy(2)
+        runCurrent()
+
+        val state = vm.uiState.value
+        assertEquals(WORLDS, state.selectedLeagueId)
+        assertEquals(WORLDS_2025, state.selectedTournamentId)
+        assertEquals(LoadStatus.Content, state.standingsStatus)
+        assertEquals(LoadStatus.Loading, state.leaguesStatus)
+        assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2025"), repository.requests)
+        assertEquals(1, leaguesRequests)
     }
 
     private fun tournament(id: String, start: String, end: String) =

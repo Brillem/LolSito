@@ -23,5 +23,6 @@ class BottomBarTest {
         assertTrue(showsBottomBar(Routes.SCHEDULE))
         assertTrue(showsBottomBar(Routes.STANDINGS))
         assertFalse(showsBottomBar(Routes.MATCH))
+        assertFalse(showsBottomBar(Routes.GAME))
     }
 }

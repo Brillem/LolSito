@@ -19,7 +19,23 @@ data class MatchGame(
     val sides: Map<String, GameSide>,
 ) {
     fun sideOf(teamId: String?): GameSide? = teamId?.let(sides::get)
+
+    /** Id to open the game stats with; null until the game starts, since the feed has no frames before. */
+    val statsGameId: String?
+        get() = id?.takeIf { state == GameState.IN_PROGRESS || state == GameState.COMPLETED }
+
+    /** Link to this game's stats ([statsGameId]) with the codes of the [teams] on each side, if known. */
+    fun statsLink(teams: List<Team>): GameStatsLink? = statsGameId?.let { gameId ->
+        GameStatsLink(gameId, blueTeamCode = codeOn(GameSide.BLUE, teams), redTeamCode = codeOn(GameSide.RED, teams))
+    }
+
+    /** Null unless exactly one team plays on [side] and it has a code. */
+    private fun codeOn(side: GameSide, teams: List<Team>): String? =
+        teams.singleOrNull { sideOf(it.id) == side }?.code?.takeIf { it.isNotBlank() }
 }
+
+/** What the game stats screen is opened with: the game plus the team codes on each side, if known. */
+data class GameStatsLink(val gameId: String, val blueTeamCode: String?, val redTeamCode: String?)
 
 data class MatchDetail(
     val matchId: String,

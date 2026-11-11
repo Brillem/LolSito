@@ -2,10 +2,11 @@ package com.example.lolsito.feature.game.data
 
 import com.example.lolsito.core.network.NetworkModule
 import com.example.lolsito.testutil.Fixtures
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
+import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
-import mockwebserver3.QueueDispatcher
+import mockwebserver3.RecordedRequest
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -18,17 +19,26 @@ import retrofit2.HttpException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.ConcurrentLinkedQueue
 
 class GameStatsRepositoryImplTest {
 
     private val server = MockWebServer()
+    private val windowResponses = ConcurrentLinkedQueue<MockResponse>()
+    private val detailsResponses = ConcurrentLinkedQueue<MockResponse>()
     private val clock = Clock.fixed(Instant.parse("2026-11-11T16:11:15.900Z"), ZoneOffset.UTC)
     private lateinit var repository: GameStatsRepositoryImpl
 
     @Before
     fun setUp() {
-        // Requests the test did not enqueue a response for (the details feed) fail fast instead of hanging.
-        (server.dispatcher as QueueDispatcher).setFailFast(true)
+        // The two feeds are requested concurrently, so each has its own queue instead of one shared by arrival order.
+        // A request the test did not queue a response for (the details feed) fails fast instead of hanging.
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val queue = if (request.url.encodedPath.contains("/details/")) detailsResponses else windowResponses
+                return queue.poll() ?: MockResponse.Builder().code(404).build()
+            }
+        }
         server.start()
         val api = NetworkModule.createLiveStatsApi(server.url("/livestats/v1/").toString(), OkHttpClient())
         repository = GameStatsRepositoryImpl(api, clock)
@@ -38,12 +48,13 @@ class GameStatsRepositoryImplTest {
     fun tearDown() = server.close()
 
     @Test
-    fun `getGameStats requests the latest aligned window and maps it`() = runTest {
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
+    fun `getGameStats requests the latest aligned window and maps it`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
 
         val stats = repository.getGameStats("115660588583040711")!!
 
-        val request = server.takeRequest()
+        // The details feed is requested too (and fails fast here), in no defined order.
+        val request = List(2) { server.takeRequest() }.single { it.url.encodedPath.contains("/window/") }
         assertEquals("/livestats/v1/window/115660588583040711", request.url.encodedPath)
         assertEquals("2026-11-11T16:10:10Z", request.url.queryParameter("startingTime"))
         assertNull(request.headers["x-api-key"])
@@ -52,22 +63,22 @@ class GameStatsRepositoryImplTest {
     }
 
     @Test
-    fun `getGameStats returns null when the feed has no frames`() = runTest {
-        server.enqueue(MockResponse.Builder().code(204).build())
+    fun `getGameStats returns null when the feed has no frames`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().code(204).build())
 
         assertNull(repository.getGameStats("116299649500204434"))
     }
 
     @Test
-    fun `getGameStats returns null when the body has no frames`() = runTest {
-        server.enqueue(MockResponse.Builder().body("""{"esportsGameId":"1","frames":[]}""").build())
+    fun `getGameStats returns null when the body has no frames`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().body("""{"esportsGameId":"1","frames":[]}""").build())
 
         assertNull(repository.getGameStats("1"))
     }
 
     @Test
-    fun `getGameStats throws on an http error`() = runTest {
-        server.enqueue(
+    fun `getGameStats throws on an http error`() = runBlocking {
+        windowResponses.add(
             MockResponse.Builder()
                 .code(404)
                 .body("""{"httpStatus":404,"errorCode":"RESOURCE_NOT_FOUND"}""")
@@ -83,14 +94,16 @@ class GameStatsRepositoryImplTest {
     }
 
     @Test
-    fun `window and details are requested with the same starting time and joined by participant`() = runTest {
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_details.json")).build())
+    fun `window and details are requested with the same starting time and joined by participant`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
+        detailsResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_details.json")).build())
 
         val stats = repository.getGameStats("115660588583040711")!!
 
-        val window = server.takeRequest()
-        val details = server.takeRequest()
+        // The feeds are requested concurrently, so their order of arrival is not defined.
+        val requests = List(2) { server.takeRequest() }
+        val window = requests.single { it.url.encodedPath.contains("/window/") }
+        val details = requests.single { it.url.encodedPath.contains("/details/") }
         assertEquals("/livestats/v1/window/115660588583040711", window.url.encodedPath)
         assertEquals("/livestats/v1/details/115660588583040711", details.url.encodedPath)
         assertEquals("2026-11-11T16:10:10Z", window.url.queryParameter("startingTime"))
@@ -103,7 +116,7 @@ class GameStatsRepositoryImplTest {
     }
 
     @Test
-    fun `both requests share the starting time even when the clock moves between them`() = runTest {
+    fun `both requests share the starting time even when the clock moves between them`() = runBlocking {
         val moving = object : Clock() {
             private var calls = 0
             override fun getZone() = ZoneOffset.UTC
@@ -111,8 +124,8 @@ class GameStatsRepositoryImplTest {
             override fun instant(): Instant = Instant.parse("2026-11-11T16:11:15.900Z").plusSeconds(30L * calls++)
         }
         val api = NetworkModule.createLiveStatsApi(server.url("/livestats/v1/").toString(), OkHttpClient())
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_details.json")).build())
+        windowResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
+        detailsResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_details.json")).build())
 
         GameStatsRepositoryImpl(api, moving).getGameStats("1")
 
@@ -121,9 +134,9 @@ class GameStatsRepositoryImplTest {
     }
 
     @Test
-    fun `details answering 204 leaves the window stats intact`() = runTest {
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
-        server.enqueue(MockResponse.Builder().code(204).build())
+    fun `details answering 204 leaves the window stats intact`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
+        detailsResponses.add(MockResponse.Builder().code(204).build())
 
         val stats = repository.getGameStats("115660588583040711")!!
 
@@ -134,11 +147,11 @@ class GameStatsRepositoryImplTest {
     }
 
     @Test
-    fun `details failing with an http error or a bad body leaves the window stats intact`() = runTest {
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
-        server.enqueue(MockResponse.Builder().code(500).build())
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
-        server.enqueue(MockResponse.Builder().body("not json").build())
+    fun `details failing with an http error or a bad body leaves the window stats intact`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
+        detailsResponses.add(MockResponse.Builder().code(500).build())
+        windowResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
+        detailsResponses.add(MockResponse.Builder().body("not json").build())
 
         val afterHttpError = repository.getGameStats("1")!!
         val afterBadBody = repository.getGameStats("1")!!
@@ -150,17 +163,17 @@ class GameStatsRepositoryImplTest {
     }
 
     @Test
-    fun `no window frames means no stats and details are not requested`() = runTest {
-        server.enqueue(MockResponse.Builder().code(204).build())
+    fun `no window frames means no stats whatever the details feed says`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().code(204).build())
+        detailsResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_details.json")).build())
 
         assertNull(repository.getGameStats("1"))
-        assertEquals(1, server.requestCount)
     }
 
     @Test
-    fun `a window error is still thrown whatever the details feed says`() = runTest {
-        server.enqueue(MockResponse.Builder().code(404).build())
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_details.json")).build())
+    fun `a window error is still thrown whatever the details feed says`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().code(404).build())
+        detailsResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_details.json")).build())
 
         try {
             repository.getGameStats("1")
@@ -168,12 +181,11 @@ class GameStatsRepositoryImplTest {
         } catch (e: HttpException) {
             assertEquals(404, e.code())
         }
-        assertEquals(1, server.requestCount)
     }
 
     @Test
-    fun `without the details feed the stats are the window stats`() = runTest {
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
+    fun `without the details feed the stats are the window stats`() = runBlocking {
+        windowResponses.add(MockResponse.Builder().body(Fixtures.read("livestats_window.json")).build())
 
         val stats = repository.getGameStats("115660588583040711")!!
 

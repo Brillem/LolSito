@@ -1,5 +1,17 @@
 package com.example.lolsito.feature.game.domain
 
+import java.time.Duration
+import java.time.Instant
+
+/** How far behind the stats' frame kept details may fall before they are dropped, while the game is live. */
+val DETAILS_MAX_AGE: Duration = Duration.ofMinutes(2)
+
+/** How far behind the stats' frame details may be and still count as current: the two feeds' frames of one window differ by less. */
+val DETAILS_FRESH_TOLERANCE: Duration = Duration.ofSeconds(10)
+
+/** Details of every player the details feed knows, from the frame recorded at [frameTime]. */
+data class GameDetails(val frameTime: Instant?, val players: Map<Int, PlayerDetails>)
+
 /** Stats of one game at the latest frame the livestats feed has for it. */
 data class GameStats(
     /** True once the feed reports the game as finished; otherwise the frame is from a live game. */
@@ -12,16 +24,52 @@ data class GameStats(
     val blueTeamId: String? = null,
     /** Id of the team the feed puts on the red side; null when the feed does not say. */
     val redTeamId: String? = null,
+    /** When the frame these stats are from was recorded; null when the feed does not say. */
+    val frameTime: Instant? = null,
+    /** When the frame the players' [PlayerStats.details] are from was recorded; null when there are none or the feed does not say. */
+    val detailsFrameTime: Instant? = null,
 ) {
-    /** These stats with [details] (by participant id) attached to the players they belong to. */
-    fun withDetails(details: Map<Int, PlayerDetails>): GameStats = mapPlayers { it.copy(details = details[it.participantId]) }
+    /**
+     * These stats with [details] (by participant id, from the frame at [frameTime]) attached to the players
+     * they belong to. The frame time is kept only when some player got details.
+     */
+    fun withDetails(details: Map<Int, PlayerDetails>, frameTime: Instant? = null): GameStats {
+        val joined = mapPlayers { it.copy(details = details[it.participantId]) }
+        return if (joined.hasDetails()) joined.copy(detailsFrameTime = frameTime) else joined
+    }
 
-    /** These stats, where a player has no details, with the ones [previous] had for that participant. */
+    /**
+     * These stats with the details [previous] showed, when these have none. Details are all or nothing per
+     * frame: a refresh that brings details for some players shows exactly those, and one that brings none
+     * keeps the previous set as a whole, with its own frame time, until it is older than [DETAILS_MAX_AGE]
+     * behind this frame (a finished game's details never expire).
+     */
     fun keepingDetailsFrom(previous: GameStats): GameStats {
+        if (hasDetails() || previous.detailsExpiredAt(this)) return this
         val before = (previous.blueTeam.players + previous.redTeam.players)
             .mapNotNull { player -> player.details?.let { player.participantId to it } }
             .toMap()
-        return mapPlayers { it.copy(details = it.details ?: before[it.participantId]) }
+        if (before.isEmpty()) return this
+        return mapPlayers { it.copy(details = before[it.participantId]) }.copy(detailsFrameTime = previous.detailsFrameTime)
+    }
+
+    /**
+     * Frame time of the shown details when it is more than [DETAILS_FRESH_TOLERANCE] behind the stats'
+     * frame, that is when they were kept from an earlier refresh; null when they are current or a time is unknown.
+     */
+    fun staleDetailsTime(): Instant? {
+        val detailsTime = detailsFrameTime ?: return null
+        val statsTime = frameTime ?: return null
+        return detailsTime.takeIf { Duration.between(it, statsTime) > DETAILS_FRESH_TOLERANCE }
+    }
+
+    private fun hasDetails() = (blueTeam.players + redTeam.players).any { it.details != null }
+
+    private fun detailsExpiredAt(next: GameStats): Boolean {
+        if (next.isFinished) return false
+        val detailsTime = detailsFrameTime ?: return false
+        val statsTime = next.frameTime ?: return false
+        return Duration.between(detailsTime, statsTime) > DETAILS_MAX_AGE
     }
 
     private fun mapPlayers(transform: (PlayerStats) -> PlayerStats) = copy(

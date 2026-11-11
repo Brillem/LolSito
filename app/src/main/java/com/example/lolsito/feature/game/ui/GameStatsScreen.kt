@@ -43,7 +43,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.SubcomposeAsyncImage
-import com.example.lolsito.core.datadragon.itemIconUrl
 import com.example.lolsito.core.datadragon.runeName
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
@@ -55,6 +54,8 @@ import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.Role
 import com.example.lolsito.feature.game.domain.TeamStats
 import com.example.lolsito.feature.game.domain.matchups
+import java.time.Instant
+import java.time.ZoneId
 
 /** Container: wires the ViewModel to the stateless [GameStatsContent]. */
 @Composable
@@ -143,7 +144,9 @@ private fun GameStatsBody(stats: GameStats, teamCodes: Map<String, String>) {
     val matchups = remember(stats.blueTeam.players, stats.redTeam.players) { stats.matchups() }
     // Keys of the expanded matchup rows: by role, so polling refreshes, scrolling and rotation keep them open.
     var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    val toggle = { key: String -> expanded = if (key in expanded) expanded - key else expanded + key }
+    val open = retainedExpanded(expanded, matchups)
+    val toggle = { key: String -> expanded = toggled(open, key) }
+    val staleDetailsSince = stats.staleDetailsTime()
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "teams") {
             TeamComparison(stats, blueLabel = teamLabel(blueCode, "Blue"), redLabel = teamLabel(redCode, "Red"))
@@ -155,7 +158,13 @@ private fun GameStatsBody(stats: GameStats, teamCodes: Map<String, String>) {
             }
         }
         items(matchups, key = { it.key }) { matchup ->
-            MatchupRow(matchup, stats.dataDragonVersion, expanded = matchup.key in expanded, onClick = { toggle(matchup.key) })
+            MatchupRow(
+                matchup,
+                stats.dataDragonVersion,
+                staleDetailsSince,
+                expanded = matchup.key in open,
+                onClick = { toggle(matchup.key) },
+            )
         }
     }
 }
@@ -234,7 +243,13 @@ private val STATS_COLUMN_WIDTH = 60.dp
  * stats toward the center. Opening it shows both players' details side by side.
  */
 @Composable
-private fun MatchupRow(matchup: Matchup, version: String?, expanded: Boolean, onClick: () -> Unit) {
+private fun MatchupRow(
+    matchup: Matchup,
+    version: String?,
+    staleDetailsSince: Instant?,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             PlayerHalf(matchup.blue, Side.BLUE, Modifier.weight(1f))
@@ -250,8 +265,8 @@ private fun MatchupRow(matchup: Matchup, version: String?, expanded: Boolean, on
         }
         if (expanded) {
             Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlayerDetailsPanel(matchup.blue, version, Modifier.weight(1f))
-                PlayerDetailsPanel(matchup.red, version, Modifier.weight(1f))
+                PlayerDetailsPanel(matchup.blue, version, staleDetailsSince, Modifier.weight(1f))
+                PlayerDetailsPanel(matchup.red, version, staleDetailsSince, Modifier.weight(1f))
             }
         }
         HorizontalDivider()
@@ -331,24 +346,33 @@ private fun PlayerHalf(player: PlayerStats?, side: Side, modifier: Modifier = Mo
     }
 }
 
-/** What opening a matchup shows for one player; "Details unavailable" when the details feed had nothing. */
+/** What opening a matchup shows for one player, as [detailsPanelContent] decides. */
 @Composable
-private fun PlayerDetailsPanel(player: PlayerStats?, version: String?, modifier: Modifier = Modifier) {
-    val details = player?.details
+private fun PlayerDetailsPanel(player: PlayerStats?, version: String?, staleDetailsSince: Instant?, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (details == null) {
-            Text("Details unavailable", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            return@Column
+        when (val content = detailsPanelContent(player, staleDetailsSince)) {
+            DetailsPanelContent.Unavailable ->
+                Text("Details unavailable", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            is DetailsPanelContent.Shown -> {
+                val details = content.details
+                content.staleSince?.let {
+                    Text(
+                        detailsAsOfLabel(it, ZoneId.systemDefault()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // Three per row: six items do not fit side by side in half a phone width.
+                details.itemIds.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { row.forEach { ItemSlot(it, version) } }
+                }
+                DetailLine("Runes", runesLabel(details))
+                DetailLine("Damage share", formatPercent(details.damageShare))
+                DetailLine("Kill participation", formatPercent(details.killParticipation))
+                DetailLine("Gold earned", formatGold(details.totalGold))
+                DetailLine("Wards", "${details.wardsPlaced} placed / ${details.wardsDestroyed} destroyed")
+            }
         }
-        // Three per row: six items do not fit side by side in half a phone width.
-        details.itemIds.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { row.forEach { ItemSlot(it, version) } }
-        }
-        DetailLine("Runes", runesLabel(details))
-        DetailLine("Damage share", formatPercent(details.damageShare))
-        DetailLine("Kill participation", formatPercent(details.killParticipation))
-        DetailLine("Gold earned", formatGold(details.totalGold))
-        DetailLine("Wards", "${details.wardsPlaced} placed / ${details.wardsDestroyed} destroyed")
     }
 }
 
@@ -367,27 +391,26 @@ private fun DetailLine(label: String, value: String) {
     }
 }
 
-/** An item icon; the item id as text when there is no icon url or it fails to load. */
+/** An item icon; the item id as text when there is no icon url or it fails to load, as [itemSlotContent] decides. */
 @Composable
 private fun ItemSlot(itemId: Int, version: String?) {
     val shape = RoundedCornerShape(4.dp)
-    val idText: @Composable () -> Unit = {
+    val idText: @Composable (String) -> Unit = { text ->
         Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
-            Text(itemId.toString(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            Text(text, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }
-    val url = itemIconUrl(version, itemId)
-    if (url == null) {
-        idText()
-        return
+    when (val content = itemSlotContent(version, itemId)) {
+        ItemSlotContent.Empty -> Unit
+        is ItemSlotContent.IdText -> idText(content.text)
+        is ItemSlotContent.Icon -> SubcomposeAsyncImage(
+            model = content.url,
+            contentDescription = "Item $itemId",
+            modifier = Modifier.size(28.dp).clip(shape),
+            loading = { Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.surfaceVariant)) },
+            error = { idText(content.idText) },
+        )
     }
-    SubcomposeAsyncImage(
-        model = url,
-        contentDescription = "Item $itemId",
-        modifier = Modifier.size(28.dp).clip(shape),
-        loading = { Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.surfaceVariant)) },
-        error = { idText() },
-    )
 }
 
 private val previewRoles = listOf("top", "jungle", "mid", "bottom", "support")
@@ -427,13 +450,13 @@ private val previewMatchup = GameStats(
 @Preview(showBackground = true)
 @Composable
 private fun MatchupRowPreview() {
-    MatchupRow(previewMatchup, version = null, expanded = false, onClick = {})
+    MatchupRow(previewMatchup, version = null, staleDetailsSince = null, expanded = false, onClick = {})
 }
 
 @Preview(showBackground = true)
 @Composable
 private fun MatchupRowExpandedPreview() {
-    MatchupRow(previewMatchup, version = null, expanded = true, onClick = {})
+    MatchupRow(previewMatchup, version = null, staleDetailsSince = null, expanded = true, onClick = {})
 }
 
 @Preview(showBackground = true)

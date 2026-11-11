@@ -1,12 +1,10 @@
 package com.example.lolsito.feature.game.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,10 +15,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -32,36 +34,42 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.SubcomposeAsyncImage
-import com.example.lolsito.core.datadragon.runeName
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
+import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.game.domain.GameStats
+import com.example.lolsito.feature.game.domain.GameTeam
 import com.example.lolsito.feature.game.domain.Matchup
 import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.Role
 import com.example.lolsito.feature.game.domain.TeamStats
 import com.example.lolsito.feature.game.domain.matchups
-import java.time.Instant
+import com.example.lolsito.ui.theme.LolSitoTheme
 import java.time.ZoneId
 
 /** Container: wires the ViewModel to the stateless [GameStatsContent]. */
 @Composable
 fun GameStatsScreen(
     viewModel: GameStatsViewModel,
-    teamCodes: Map<String, String>,
+    teams: Map<String, GameTeam>,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -69,7 +77,7 @@ fun GameStatsScreen(
     WhileStarted(viewModel) { viewModel.pollWhileVisible() }
     GameStatsContent(
         state = state,
-        teamCodes = teamCodes,
+        teams = teams,
         onBack = onBack,
         onRetry = viewModel::retry,
         modifier = modifier,
@@ -80,12 +88,14 @@ fun GameStatsScreen(
 @Composable
 fun GameStatsContent(
     state: GameStatsUiState,
-    /** Team codes by team id; a side whose team is not in it is shown by its side name. */
-    teamCodes: Map<String, String>,
+    /** Teams by team id; a side whose team is not in it is shown by its side name. */
+    teams: Map<String, GameTeam>,
     onBack: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Kept here, above the load status, so rotation and a retry keep the chosen view.
+    var view by rememberSaveable { mutableStateOf(ScoreboardView.ITEMS) }
     Column(modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Game stats") },
@@ -98,14 +108,15 @@ fun GameStatsContent(
             },
         )
         LoadStatusView(state.status, emptyMessage = "No stats available for this game", onRetry = onRetry) {
-            state.stats?.let { GameStatsBody(it, teamCodes) }
+            state.stats?.let { GameStatsBody(it, teams, view, onViewChange = { view = it }) }
         }
     }
 }
 
-/** Code of the team with [teamId] in [teamCodes] (by team id); null when the id is missing, unknown or has a blank code. */
-fun teamCodeFor(teamId: String?, teamCodes: Map<String, String>): String? =
-    teamId?.let(teamCodes::get)?.takeIf { it.isNotBlank() }
+/** The team with [teamId] in [teams] (by team id); null when the id is missing, unknown or the team has a blank code. */
+fun teamFor(teamId: String?, teams: Map<String, GameTeam>): GameTeam? =
+    teamId?.let(teams::get)?.takeIf { it.code.isNotBlank() }
+        ?.let { team -> team.copy(logoUrl = team.logoUrl?.takeIf { it.isNotBlank() }) }
 
 /** The team [code] when known, otherwise [fallback] (the side). */
 fun teamLabel(code: String?, fallback: String): String = code?.takeIf { it.isNotBlank() } ?: fallback
@@ -137,47 +148,119 @@ private val teamRows: List<Pair<String, (TeamStats) -> String>> = listOf(
 )
 
 @Composable
-private fun GameStatsBody(stats: GameStats, teamCodes: Map<String, String>) {
+private fun GameStatsBody(
+    stats: GameStats,
+    teams: Map<String, GameTeam>,
+    view: ScoreboardView,
+    onViewChange: (ScoreboardView) -> Unit,
+) {
     // The feed says which team plays on which side; event details are not trusted for that.
-    val blueCode = teamCodeFor(stats.blueTeamId, teamCodes)
-    val redCode = teamCodeFor(stats.redTeamId, teamCodes)
+    val blue = teamFor(stats.blueTeamId, teams)
+    val red = teamFor(stats.redTeamId, teams)
     val matchups = remember(stats.blueTeam.players, stats.redTeam.players) { stats.matchups() }
-    // Keys of the expanded matchup rows: by role, so polling refreshes, scrolling and rotation keep them open.
-    var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    val open = retainedExpanded(expanded, matchups)
-    val toggle = { key: String -> expanded = toggled(open, key) }
     val staleDetailsSince = stats.staleDetailsTime()
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "teams") {
-            TeamComparison(stats, blueLabel = teamLabel(blueCode, "Blue"), redLabel = teamLabel(redCode, "Red"))
+            TeamComparison(stats, blue = blue, red = red)
+        }
+        item(key = "view-toggle") {
+            Column {
+                HorizontalDivider()
+                ViewToggle(view, onViewChange)
+                // Once for the whole list: the details of every player come from the same frame.
+                staleDetailsSince?.let {
+                    Text(
+                        detailsAsOfLabel(it, ZoneId.systemDefault()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            }
         }
         item(key = "matchups-header") {
             Column {
+                MatchupHeader(blue = blue, red = red)
                 HorizontalDivider()
-                MatchupHeader(blueLabel = teamLabel(blueCode, Side.BLUE.label), redLabel = teamLabel(redCode, Side.RED.label))
             }
         }
         items(matchups, key = { it.key }) { matchup ->
-            MatchupRow(
-                matchup,
-                stats.dataDragonVersion,
-                staleDetailsSince,
-                expanded = matchup.key in open,
-                onClick = { toggle(matchup.key) },
-            )
+            MatchupRow(matchup, stats.dataDragonVersion, view)
         }
     }
 }
 
 @Composable
-private fun TeamComparison(stats: GameStats, blueLabel: String, redLabel: String, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ComparisonRow(
-            blue = blueLabel,
-            label = if (stats.isFinished) "Final" else "LIVE",
-            red = redLabel,
-            header = true,
+private fun ViewToggle(view: ScoreboardView, onViewChange: (ScoreboardView) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        ScoreboardView.entries.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = option == view,
+                onClick = { onViewChange(option) },
+                shape = SegmentedButtonDefaults.itemShape(index, ScoreboardView.entries.size),
+                label = { Text(option.label) },
+            )
+        }
+    }
+}
+
+/** A team code with its small logo beside it, on the outer edge; the red side is the mirror image of the blue one. */
+@Composable
+private fun TeamTag(
+    label: String,
+    logoUrl: String?,
+    mirrored: Boolean,
+    color: Color,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier,
+        horizontalArrangement = if (mirrored) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (!mirrored && logoUrl != null) {
+            TeamLogo(logoUrl, contentDescription = null, size = TEAM_LOGO_SIZE)
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            label,
+            style = style,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
         )
+        if (mirrored && logoUrl != null) {
+            Spacer(Modifier.width(6.dp))
+            TeamLogo(logoUrl, contentDescription = null, size = TEAM_LOGO_SIZE)
+        }
+    }
+}
+
+private val TEAM_LOGO_SIZE = 20.dp
+
+@Composable
+private fun TeamComparison(stats: GameStats, blue: GameTeam?, red: GameTeam?, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            TeamTag(
+                teamLabel(blue?.code, "Blue"), blue?.logoUrl, mirrored = false, color = Side.BLUE.color,
+                style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (stats.isFinished) "Final" else "LIVE",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
+            )
+            TeamTag(
+                teamLabel(red?.code, "Red"), red?.logoUrl, mirrored = true, color = Side.RED.color,
+                style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
+            )
+        }
         teamRows.forEach { (label, value) ->
             ComparisonRow(blue = value(stats.blueTeam), label = label, red = value(stats.redTeam))
         }
@@ -185,14 +268,13 @@ private fun TeamComparison(stats: GameStats, blueLabel: String, redLabel: String
 }
 
 @Composable
-private fun ComparisonRow(blue: String, label: String, red: String, header: Boolean = false) {
-    val valueStyle = if (header) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge
+private fun ComparisonRow(blue: String, label: String, red: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             blue,
-            style = valueStyle,
+            style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Bold,
-            color = if (header) Side.BLUE.color else MaterialTheme.colorScheme.onSurface,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
         Text(
@@ -204,9 +286,9 @@ private fun ComparisonRow(blue: String, label: String, red: String, header: Bool
         )
         Text(
             red,
-            style = valueStyle,
+            style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Bold,
-            color = if (header) Side.RED.color else MaterialTheme.colorScheme.onSurface,
+            color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f),
         )
@@ -214,60 +296,57 @@ private fun ComparisonRow(blue: String, label: String, red: String, header: Bool
 }
 
 @Composable
-private fun MatchupHeader(blueLabel: String, redLabel: String) {
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
-        Text(
-            blueLabel,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = Side.BLUE.color,
-            modifier = Modifier.weight(1f),
+private fun MatchupHeader(blue: GameTeam?, red: GameTeam?) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = SCREEN_PADDING_DP.dp, end = SCREEN_PADDING_DP.dp, top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TeamTag(
+            teamLabel(blue?.code, Side.BLUE.label), blue?.logoUrl, mirrored = false, color = Side.BLUE.color,
+            style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(ROLE_COLUMN_WIDTH))
-        Text(
-            redLabel,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = Side.RED.color,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f),
+        Spacer(Modifier.width(ROLE_COLUMN_DP.dp))
+        TeamTag(
+            teamLabel(red?.code, Side.RED.label), red?.logoUrl, mirrored = true, color = Side.RED.color,
+            style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
         )
     }
 }
 
-private val ROLE_COLUMN_WIDTH = 36.dp
-private val STATS_COLUMN_WIDTH = 60.dp
+// The first line of a half is as tall as the champion portrait; the second line depends on the view. Every
+// row of a view has the same height whatever it shows, so the two halves and all rows line up.
+private val PORTRAIT_SIZE = 36.dp
+private val LINE_GAP = 2.dp
+private val STATS_LINE_HEIGHT = 14.dp
+private val KDA_WIDTH = 50.dp
+private val HALF_PADDING = 2.dp
+
+private fun secondLineHeight(view: ScoreboardView) = when (view) {
+    ScoreboardView.ITEMS -> ITEM_SLOT_DP.dp
+    ScoreboardView.STATS -> STATS_LINE_HEIGHT * 2 + LINE_GAP
+}
 
 /**
- * Two opposing players on one row, mirrored around the role in the middle: names toward the outer edges,
- * stats toward the center. Opening it shows both players' details side by side.
+ * Two opposing players on one row, mirrored around the role in the middle: portraits and names toward the
+ * outer edges, K/D/A toward the center, and the same second line on both sides.
  */
 @Composable
-private fun MatchupRow(
-    matchup: Matchup,
-    version: String?,
-    staleDetailsSince: Instant?,
-    expanded: Boolean,
-    onClick: () -> Unit,
-) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            PlayerHalf(matchup.blue, Side.BLUE, Modifier.weight(1f))
+private fun MatchupRow(matchup: Matchup, version: String?, view: ScoreboardView) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = SCREEN_PADDING_DP.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PlayerHalf(matchup.blue, Side.BLUE, version, view, Modifier.weight(1f))
             Text(
                 matchup.role?.let(::roleLabel).orEmpty(),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
-                modifier = Modifier.width(ROLE_COLUMN_WIDTH),
+                modifier = Modifier.width(ROLE_COLUMN_DP.dp),
             )
-            PlayerHalf(matchup.red, Side.RED, Modifier.weight(1f))
-        }
-        if (expanded) {
-            Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlayerDetailsPanel(matchup.blue, version, staleDetailsSince, Modifier.weight(1f))
-                PlayerDetailsPanel(matchup.red, version, staleDetailsSince, Modifier.weight(1f))
-            }
+            PlayerHalf(matchup.red, Side.RED, version, view, Modifier.weight(1f))
         }
         HorizontalDivider()
     }
@@ -282,210 +361,287 @@ private fun roleLabel(role: Role): String = when (role) {
     Role.SUPPORT -> "Sup"
 }
 
-/**
- * One side of a matchup: a strip in the side color on the outer edge, the name and champion toward the
- * edge and the stats toward the center. The red side is the mirror image of the blue one.
- */
+/** One side of a matchup: a strip in the side color on the outer edge, then the headline and the second line. */
 @Composable
-private fun PlayerHalf(player: PlayerStats?, side: Side, modifier: Modifier = Modifier) {
+private fun PlayerHalf(player: PlayerStats?, side: Side, version: String?, view: ScoreboardView, modifier: Modifier = Modifier) {
     val mirrored = side == Side.RED
-    val horizontalAlignment = if (mirrored) Alignment.End else Alignment.Start
+    val height = PORTRAIT_SIZE + LINE_GAP + secondLineHeight(view)
+    Row(modifier.height(height)) {
+        if (!mirrored) Box(Modifier.width(SIDE_BAR_DP.dp).height(height).background(side.color))
+        Column(Modifier.weight(1f).padding(horizontal = HALF_PADDING)) {
+            if (player != null) {
+                PlayerHeadline(player, version, mirrored)
+                Spacer(Modifier.height(LINE_GAP))
+                SecondLine(player, version, view, mirrored)
+            }
+        }
+        if (mirrored) Box(Modifier.width(SIDE_BAR_DP.dp).height(height).background(side.color))
+    }
+}
+
+/** Portrait on the outer edge, name over creep score and level, K/D/A toward the center. */
+@Composable
+private fun PlayerHeadline(player: PlayerStats, version: String?, mirrored: Boolean) {
     val textAlign = if (mirrored) TextAlign.End else TextAlign.Start
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        if (!mirrored) Box(Modifier.width(3.dp).height(36.dp).background(side.color))
-        if (player == null) {
-            Spacer(Modifier.weight(1f))
+    val portrait: @Composable () -> Unit = { ChampionPortrait(player.championId, version) }
+    val identity: @Composable (Modifier) -> Unit = { identityModifier ->
+        Column(identityModifier.padding(horizontal = 4.dp), horizontalAlignment = if (mirrored) Alignment.End else Alignment.Start) {
+            Text(
+                player.summonerName,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = textAlign,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                csLevelLabel(player),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = textAlign,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    val kda: @Composable () -> Unit = {
+        Text(
+            "${player.kills}/${player.deaths}/${player.assists}",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            // Toward the center, away from the name.
+            textAlign = if (mirrored) TextAlign.Start else TextAlign.End,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.width(KDA_WIDTH),
+        )
+    }
+    Row(Modifier.fillMaxWidth().height(PORTRAIT_SIZE), verticalAlignment = Alignment.CenterVertically) {
+        if (mirrored) {
+            kda()
+            identity(Modifier.weight(1f))
+            portrait()
         } else {
-            val identity: @Composable RowScope.() -> Unit = {
-                Column(Modifier.weight(1f).padding(horizontal = 6.dp), horizontalAlignment = horizontalAlignment) {
-                    Text(
-                        player.summonerName,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = textAlign,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        player.championId,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = textAlign,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            val stats: @Composable RowScope.() -> Unit = {
-                Column(Modifier.width(STATS_COLUMN_WIDTH), horizontalAlignment = if (mirrored) Alignment.Start else Alignment.End) {
-                    Text(
-                        "${player.kills}/${player.deaths}/${player.assists}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                    )
-                    Text(
-                        "${player.creepScore} CS · ${player.level}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
-            }
-            if (mirrored) {
-                stats()
-                identity()
-            } else {
-                identity()
-                stats()
-            }
-        }
-        if (mirrored) Box(Modifier.width(3.dp).height(36.dp).background(side.color))
-    }
-}
-
-/** What opening a matchup shows for one player, as [detailsPanelContent] decides. */
-@Composable
-private fun PlayerDetailsPanel(player: PlayerStats?, version: String?, staleDetailsSince: Instant?, modifier: Modifier = Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        when (val content = detailsPanelContent(player, staleDetailsSince)) {
-            DetailsPanelContent.Unavailable ->
-                Text("Details unavailable", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            is DetailsPanelContent.Shown -> {
-                val details = content.details
-                content.staleSince?.let {
-                    Text(
-                        detailsAsOfLabel(it, ZoneId.systemDefault()),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // Three per row: six items do not fit side by side in half a phone width.
-                details.itemIds.chunked(3).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { row.forEach { ItemSlot(it, version) } }
-                }
-                DetailLine("Runes", runesLabel(details))
-                DetailLine("Damage share", formatPercent(details.damageShare))
-                DetailLine("Kill participation", formatPercent(details.killParticipation))
-                DetailLine("Gold earned", formatGold(details.totalGold))
-                DetailLine("Wards", "${details.wardsPlaced} placed / ${details.wardsDestroyed} destroyed")
-            }
+            portrait()
+            identity(Modifier.weight(1f))
+            kda()
         }
     }
 }
 
-/** "Precision / Inspiration - Conqueror"; a part the feed did not send is left out. */
-fun runesLabel(details: PlayerDetails): String {
-    val trees = listOfNotNull(details.primaryStyleId, details.secondaryStyleId).joinToString(" / ") { runeName(it) }
-    val keystone = details.keystoneId?.let { runeName(it) }
-    return listOfNotNull(trees.takeIf { it.isNotEmpty() }, keystone).joinToString(" - ").ifEmpty { "-" }
+/** The champion portrait; the champion id as small text when there is no portrait or it fails to load, as [championSlotContent] decides. */
+@Composable
+private fun ChampionPortrait(championId: String, version: String?) {
+    val shape = RoundedCornerShape(6.dp)
+    val placeholder: @Composable (String) -> Unit = { text ->
+        Box(
+            Modifier.size(PORTRAIT_SIZE).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (text.isNotEmpty()) {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+    when (val content = championSlotContent(version, championId)) {
+        IconSlotContent.Empty -> placeholder("")
+        is IconSlotContent.IdText -> placeholder(content.text)
+        is IconSlotContent.Icon -> SubcomposeAsyncImage(
+            model = content.url,
+            contentDescription = championId,
+            modifier = Modifier.size(PORTRAIT_SIZE).clip(shape),
+            loading = { placeholder("") },
+            error = { placeholder(content.idText) },
+        )
+    }
 }
 
+/** What [playerLine] decides for the player: the item strip, the stat cells, or a muted note. */
 @Composable
-private fun DetailLine(label: String, value: String) {
-    Row(Modifier.fillMaxWidth()) {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+private fun SecondLine(player: PlayerStats, version: String?, view: ScoreboardView, mirrored: Boolean) {
+    Box(
+        Modifier.fillMaxWidth().height(secondLineHeight(view)),
+        contentAlignment = if (mirrored) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        when (val line = playerLine(player, view)) {
+            PlayerLine.Unavailable -> Text(
+                "Details unavailable",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+            )
+            // The red strip is the mirror image of the blue one: its first item is on the outer edge.
+            is PlayerLine.Items -> Row(horizontalArrangement = Arrangement.spacedBy(ITEM_GAP_DP.dp)) {
+                (if (mirrored) line.slots.asReversed() else line.slots).forEach { ItemSlot(it, version) }
+            }
+            is PlayerLine.Stats -> StatsGrid(line)
+        }
     }
+}
+
+// Column weights of the stats grid, the same on both sides: gold is the widest of the first line's cells,
+// and the wards cell sits under it so the keystone name starts where the KP column does.
+private const val FIRST_CELL_WEIGHT = 1.3f
+
+@Composable
+private fun StatsGrid(line: PlayerLine.Stats) {
+    val (gold, kp, damage, wards) = line.cells
+    Column(verticalArrangement = Arrangement.spacedBy(LINE_GAP)) {
+        Row {
+            StatCellText(gold, Modifier.weight(FIRST_CELL_WEIGHT))
+            StatCellText(kp, Modifier.weight(1f))
+            StatCellText(damage, Modifier.weight(1f))
+        }
+        Row {
+            StatCellText(wards, Modifier.weight(FIRST_CELL_WEIGHT))
+            Text(
+                line.keystone,
+                style = STATS_TEXT,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(2f),
+            )
+        }
+    }
+}
+
+private val STATS_TEXT = TextStyle(fontSize = 10.sp, lineHeight = 14.sp)
+
+@Composable
+private fun StatCellText(cell: StatCell, modifier: Modifier = Modifier) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val text: AnnotatedString = buildAnnotatedString {
+        withStyle(SpanStyle(color = muted)) { append(cell.label) }
+        append(' ')
+        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(cell.value) }
+    }
+    Text(
+        text,
+        style = STATS_TEXT,
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
 }
 
 /** An item icon; the item id as text when there is no icon url or it fails to load, as [itemSlotContent] decides. */
 @Composable
 private fun ItemSlot(itemId: Int, version: String?) {
-    val shape = RoundedCornerShape(4.dp)
+    val shape = RoundedCornerShape(3.dp)
+    val size = ITEM_SLOT_DP.dp
     val idText: @Composable (String) -> Unit = { text ->
-        Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
-            Text(text, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        Box(Modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp),
+                maxLines = 1,
+                softWrap = false,
+            )
         }
     }
     when (val content = itemSlotContent(version, itemId)) {
-        ItemSlotContent.Empty -> Unit
-        is ItemSlotContent.IdText -> idText(content.text)
-        is ItemSlotContent.Icon -> SubcomposeAsyncImage(
+        // Reserves its place so every strip lines up.
+        IconSlotContent.Empty -> Spacer(Modifier.size(size))
+        is IconSlotContent.IdText -> idText(content.text)
+        is IconSlotContent.Icon -> SubcomposeAsyncImage(
             model = content.url,
             contentDescription = "Item $itemId",
-            modifier = Modifier.size(28.dp).clip(shape),
-            loading = { Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.surfaceVariant)) },
+            modifier = Modifier.size(size).clip(shape),
+            loading = { Box(Modifier.size(size).background(MaterialTheme.colorScheme.surfaceVariant)) },
             error = { idText(content.idText) },
         )
     }
 }
 
 private val previewRoles = listOf("top", "jungle", "mid", "bottom", "support")
+private val previewChampions = listOf("KSante", "Viego", "Azir", "Jinx", "Nautilus")
 
-private fun previewTeam(firstId: Int, prefix: String, details: PlayerDetails? = null) = TeamStats(
+private fun previewTeam(firstId: Int, prefix: String, details: PlayerDetails? = null, nameSuffix: String = "") = TeamStats(
     totalGold = 31850,
-    kills = 2,
-    towers = 1,
-    dragons = 1,
-    barons = 0,
+    kills = 12,
+    towers = 7,
+    dragons = 3,
+    barons = 1,
     players = (firstId until firstId + 5).map { id ->
         PlayerStats(
-            id, "$prefix Player$id", "Olaf", kills = 1, deaths = 2, assists = 3, creepScore = 142, level = 12,
-            details = details, role = previewRoles[(id - 1) % 5],
+            id, "$prefix Player$id$nameSuffix", previewChampions[(id - 1) % 5], kills = 10, deaths = 12, assists = 11,
+            creepScore = 342, level = 18, details = details, role = previewRoles[(id - 1) % 5],
         )
     },
 )
 
 private val previewDetails = PlayerDetails(
-    itemIds = listOf(3078, 3111, 3071, 6693, 3036, 3026),
-    primaryStyleId = 8000,
-    secondaryStyleId = 8100,
-    keystoneId = 8010,
-    damageShare = 0.29,
-    killParticipation = 0.65,
-    totalGold = 11200,
-    wardsPlaced = 12,
-    wardsDestroyed = 3,
+    itemIds = listOf(3078, 3111, 3071, 6693, 3036, 3026, 3340),
+    primaryStyleId = 8400,
+    secondaryStyleId = 8300,
+    keystoneId = 8437,
+    damageShare = 0.14,
+    killParticipation = 0.72,
+    totalGold = 10880,
+    wardsPlaced = 14,
+    wardsDestroyed = 9,
 )
 
-private val previewMatchup = GameStats(
+private fun previewStats(blueDetails: PlayerDetails?, redDetails: PlayerDetails?, nameSuffix: String = "") = GameStats(
     isFinished = true,
-    blueTeam = previewTeam(1, "MVK", previewDetails),
-    redTeam = previewTeam(6, "FUR", previewDetails.copy(itemIds = listOf(3078, 3111))),
-).matchups().first()
+    blueTeam = previewTeam(1, "BLG", blueDetails, nameSuffix),
+    redTeam = previewTeam(6, "T1", redDetails, nameSuffix),
+    blueTeamId = "blg",
+    redTeamId = "t1",
+)
 
-@Preview(showBackground = true)
+private val previewTeams = mapOf("blg" to GameTeam("BLG"), "t1" to GameTeam("T1"))
+
 @Composable
-private fun MatchupRowPreview() {
-    MatchupRow(previewMatchup, version = null, staleDetailsSince = null, expanded = false, onClick = {})
+private fun ScoreboardPreview(stats: GameStats, view: ScoreboardView) {
+    LolSitoTheme {
+        Box(Modifier.background(MaterialTheme.colorScheme.background)) {
+            GameStatsBody(stats, previewTeams, view, onViewChange = {})
+        }
+    }
 }
 
-@Preview(showBackground = true)
-@Composable
-private fun MatchupRowExpandedPreview() {
-    MatchupRow(previewMatchup, version = null, staleDetailsSince = null, expanded = true, onClick = {})
-}
+private const val PREVIEW_BACKGROUND = 0xFF000000
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = PREVIEW_BACKGROUND, widthDp = 360, heightDp = 780)
 @Composable
-private fun GameStatsContentPreview() {
-    GameStatsContent(
-        state = GameStatsUiState(
-            LoadStatus.Content,
-            GameStats(
-                isFinished = true,
-                blueTeam = previewTeam(1, "MVK"),
-                redTeam = previewTeam(6, "FUR"),
-                blueTeamId = "mvk",
-                redTeamId = "fur",
-            ),
-        ),
-        teamCodes = mapOf("mvk" to "MVK", "fur" to "FUR"),
-        onBack = {},
-        onRetry = {},
-    )
-}
+private fun ItemsViewPreview() =
+    ScoreboardPreview(previewStats(previewDetails, previewDetails.copy(itemIds = previewDetails.itemIds.take(4))), ScoreboardView.ITEMS)
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = PREVIEW_BACKGROUND, widthDp = 360, heightDp = 780)
+@Composable
+private fun StatsViewPreview() = ScoreboardPreview(previewStats(previewDetails, previewDetails), ScoreboardView.STATS)
+
+@Preview(showBackground = true, backgroundColor = PREVIEW_BACKGROUND, widthDp = 360, heightDp = 780)
+@Composable
+private fun DetailsUnavailablePreview() = ScoreboardPreview(previewStats(previewDetails, null), ScoreboardView.ITEMS)
+
+@Preview(showBackground = true, backgroundColor = PREVIEW_BACKGROUND, widthDp = 360, heightDp = 780)
+@Composable
+private fun LongNamesPreview() =
+    ScoreboardPreview(previewStats(previewDetails, previewDetails, nameSuffix = " The Very Long Named"), ScoreboardView.STATS)
+
+@Preview(showBackground = true, backgroundColor = PREVIEW_BACKGROUND, widthDp = 360)
 @Composable
 private fun GameStatsEmptyPreview() {
-    GameStatsContent(
-        state = GameStatsUiState(LoadStatus.Empty),
-        teamCodes = emptyMap(),
-        onBack = {},
-        onRetry = {},
-    )
+    LolSitoTheme {
+        GameStatsContent(state = GameStatsUiState(LoadStatus.Empty), teams = emptyMap(), onBack = {}, onRetry = {})
+    }
 }

@@ -33,6 +33,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.lolsito.R
 import com.example.lolsito.core.di.AppContainer
+import com.example.lolsito.feature.game.domain.GameTeam
 import com.example.lolsito.feature.game.ui.GameStatsScreen
 import com.example.lolsito.feature.game.ui.GameStatsViewModel
 import com.example.lolsito.feature.match.ui.MatchDetailScreen
@@ -53,37 +54,43 @@ object Routes {
     const val GAME_ID_ARG = "gameId"
     private const val TEAM1_ID_ARG = "team1Id"
     private const val TEAM1_CODE_ARG = "team1Code"
+    private const val TEAM1_LOGO_ARG = "team1Logo"
     private const val TEAM2_ID_ARG = "team2Id"
     private const val TEAM2_CODE_ARG = "team2Code"
+    private const val TEAM2_LOGO_ARG = "team2Logo"
 
-    /** Optional query arguments, an id and a code for each of the two teams, in that order. */
-    val TEAM_ARGS = listOf(TEAM1_ID_ARG, TEAM1_CODE_ARG, TEAM2_ID_ARG, TEAM2_CODE_ARG)
+    /** Optional query arguments, an id, a code and a logo url for each of the two teams, in that order. */
+    val TEAM_ARGS = listOf(TEAM1_ID_ARG, TEAM1_CODE_ARG, TEAM1_LOGO_ARG, TEAM2_ID_ARG, TEAM2_CODE_ARG, TEAM2_LOGO_ARG)
 
     /** The team arguments are optional query arguments, so the route still matches `game/{gameId}`. */
     const val GAME = "game/{$GAME_ID_ARG}?" +
-        "$TEAM1_ID_ARG={$TEAM1_ID_ARG}&$TEAM1_CODE_ARG={$TEAM1_CODE_ARG}&" +
-        "$TEAM2_ID_ARG={$TEAM2_ID_ARG}&$TEAM2_CODE_ARG={$TEAM2_CODE_ARG}"
+        "$TEAM1_ID_ARG={$TEAM1_ID_ARG}&$TEAM1_CODE_ARG={$TEAM1_CODE_ARG}&$TEAM1_LOGO_ARG={$TEAM1_LOGO_ARG}&" +
+        "$TEAM2_ID_ARG={$TEAM2_ID_ARG}&$TEAM2_CODE_ARG={$TEAM2_CODE_ARG}&$TEAM2_LOGO_ARG={$TEAM2_LOGO_ARG}"
 
-    fun game(gameId: String, teamCodes: Map<String, String>): String = gameRoute(gameId, teamCodes, Uri::encode)
+    fun game(gameId: String, teams: Map<String, GameTeam>): String = gameRoute(gameId, teams, Uri::encode)
 }
 
 /**
- * Builds the game stats route with the code of each team by team id (the first two, none when unknown).
- * [encode] is `Uri.encode` outside tests.
+ * Builds the game stats route with the code and logo of each team by team id (the first two, none when
+ * unknown; a team without a logo leaves that argument out). [encode] is `Uri.encode` outside tests.
  */
-internal fun gameRoute(gameId: String, teamCodes: Map<String, String>, encode: (String) -> String): String {
-    val query = teamCodes.entries.take(2).flatMapIndexed { i, (id, code) ->
-        listOf(Routes.TEAM_ARGS[2 * i] to id, Routes.TEAM_ARGS[2 * i + 1] to code)
-    }.map { (name, value) -> "$name=${encode(value)}" }
+internal fun gameRoute(gameId: String, teams: Map<String, GameTeam>, encode: (String) -> String): String {
+    val query = teams.entries.take(2).flatMapIndexed { i, (id, team) ->
+        listOf(
+            Routes.TEAM_ARGS[3 * i] to id,
+            Routes.TEAM_ARGS[3 * i + 1] to team.code,
+            Routes.TEAM_ARGS[3 * i + 2] to team.logoUrl?.takeIf { it.isNotBlank() },
+        )
+    }.mapNotNull { (name, value) -> value?.let { "$name=${encode(it)}" } }
     return "game/${encode(gameId)}" + if (query.isEmpty()) "" else query.joinToString("&", prefix = "?")
 }
 
-/** Team codes by team id from the route arguments, read through [argument]; a pair missing either half is ignored. */
-internal fun gameTeamCodes(argument: (String) -> String?): Map<String, String> =
-    Routes.TEAM_ARGS.chunked(2).mapNotNull { (idArg, codeArg) ->
+/** Teams by id from the route arguments, read through [argument]; a team missing its id or code is ignored, its logo is optional. */
+internal fun gameTeams(argument: (String) -> String?): Map<String, GameTeam> =
+    Routes.TEAM_ARGS.chunked(3).mapNotNull { (idArg, codeArg, logoArg) ->
         val id = argument(idArg)
         val code = argument(codeArg)
-        if (id != null && code != null) id to code else null
+        if (id != null && code != null) id to GameTeam(code, argument(logoArg)) else null
     }.toMap()
 
 /** Top-level destinations shown in the bottom bar. Pushed screens (match detail, game stats) hide the bar. */
@@ -192,7 +199,7 @@ fun LolSitoApp(container: AppContainer) {
                     viewModel = vm,
                     onBack = { navController.navigateUp() },
                     onGameClick = { link ->
-                        navController.navigateFrom(entry, Routes.game(link.gameId, link.teamCodes))
+                        navController.navigateFrom(entry, Routes.game(link.gameId, link.teams))
                     },
                 )
             }
@@ -213,7 +220,7 @@ fun LolSitoApp(container: AppContainer) {
                 )
                 GameStatsScreen(
                     viewModel = vm,
-                    teamCodes = gameTeamCodes { name -> arguments?.getString(name) },
+                    teams = gameTeams { name -> arguments?.getString(name) },
                     onBack = { navController.navigateUp() },
                 )
             }

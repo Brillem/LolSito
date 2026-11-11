@@ -37,6 +37,26 @@ class DataDragonTest {
     }
 
     @Test
+    fun `champion icon url points at the champion image of that version`() {
+        assertEquals(
+            "https://ddragon.leagueoflegends.com/cdn/16.20.1/img/champion/KSante.png",
+            championIconUrl("16.20.1", "KSante"),
+        )
+        assertEquals(
+            "https://ddragon.leagueoflegends.com/cdn/16.20.1/img/champion/MonkeyKing.png",
+            championIconUrl("16.20.1", "MonkeyKing"),
+        )
+    }
+
+    @Test
+    fun `champion icon url is null without a version or a champion id`() {
+        assertNull(championIconUrl(null, "KSante"))
+        assertNull(championIconUrl("16.20.1", null))
+        assertNull(championIconUrl("16.20.1", ""))
+        assertNull(championIconUrl("16.20.1", "  "))
+    }
+
+    @Test
     fun `rune trees and keystones have their names`() {
         assertEquals("Precision", runeName(8000))
         assertEquals("Domination", runeName(8100))

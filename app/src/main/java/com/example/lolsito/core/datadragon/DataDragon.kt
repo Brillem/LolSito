@@ -20,6 +20,12 @@ fun dataDragonVersion(patchVersion: String?): String? {
 fun itemIconUrl(version: String?, itemId: Int): String? =
     version?.let { "${ApiConfig.DATA_DRAGON_BASE_URL}cdn/$it/img/item/$itemId.png" }
 
+/** Portrait of champion [championId] (the feed's Data Dragon key, "KSante") at Data Dragon [version]; null when either is missing. */
+fun championIconUrl(version: String?, championId: String?): String? {
+    val id = championId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return version?.let { "${ApiConfig.DATA_DRAGON_BASE_URL}cdn/$it/img/champion/$id.png" }
+}
+
 /**
  * Names of the rune trees and keystones as Data Dragon's runesReforged.json has them. Bundled so
  * the runes show without a second network call; an id missing here (a rune added after this table)

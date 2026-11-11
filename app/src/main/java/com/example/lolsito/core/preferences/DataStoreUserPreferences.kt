@@ -2,14 +2,19 @@ package com.example.lolsito.core.preferences
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
 
-private val Context.userPreferencesDataStore: DataStore<Preferences> by preferencesDataStore(name = "user_preferences")
+private val Context.userPreferencesDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "user_preferences",
+    corruptionHandler = DataStoreUserPreferences.corruptionHandler,
+)
 
 /** [UserPreferences] kept in a Preferences DataStore. Failures are not caught here; callers fall back. */
 class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : UserPreferences {
@@ -35,6 +40,9 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
     }
 
     companion object {
+        /** A corrupt file is replaced by empty preferences, so persistence recovers instead of failing forever. */
+        internal val corruptionHandler = ReplaceFileCorruptionHandler<Preferences> { emptyPreferences() }
+
         internal val SCHEDULE_LEAGUE_IDS = stringSetPreferencesKey("schedule.leagueIds")
         internal val STANDINGS_LEAGUE_ID = stringPreferencesKey("standings.leagueId")
         internal val STANDINGS_TOURNAMENT_ID = stringPreferencesKey("standings.tournamentId")

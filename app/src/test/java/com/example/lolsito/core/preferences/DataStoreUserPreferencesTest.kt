@@ -19,7 +19,10 @@ class DataStoreUserPreferencesTest {
 
     private fun TestScope.preferences(name: String = "prefs"): UserPreferences {
         val file = folder.root.resolve("$name.preferences_pb")
-        val dataStore = PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
+        val dataStore = PreferenceDataStoreFactory.create(
+            corruptionHandler = DataStoreUserPreferences.corruptionHandler,
+            scope = backgroundScope,
+        ) { file }
         return DataStoreUserPreferences(dataStore)
     }
 
@@ -48,5 +51,17 @@ class DataStoreUserPreferencesTest {
 
         preferences.saveStandingsSelection(StandingsSelection("worlds", null))
         assertEquals(StandingsSelection("worlds", null), preferences.getStandingsSelection())
+    }
+
+    @Test
+    fun `a corrupt file reads as nothing stored and a later save round trips`() = runTest(UnconfinedTestDispatcher()) {
+        folder.root.resolve("corrupt.preferences_pb").writeBytes(ByteArray(16) { 0xFF.toByte() })
+        val preferences = preferences("corrupt")
+
+        assertNull(preferences.getScheduleLeagueIds())
+        assertNull(preferences.getStandingsSelection())
+
+        preferences.saveStandingsSelection(StandingsSelection("lck", "spring"))
+        assertEquals(StandingsSelection("lck", "spring"), preferences.getStandingsSelection())
     }
 }

@@ -77,7 +77,7 @@ data class ScheduleUiState(
  * the day list falls back to each event's own state. The feed covers every league, so the section is
  * the feed filtered by the current selection and needs no request when the selection changes.
  *
- * The selection The selection is saved in [preferences] on every
+ * The selection is saved in [preferences] on every
  * toggle and restored once, before the first schedule request, so a stored selection never costs a
  * request for the default one. Preferences failures are ignored: the screen works with the defaults.
  */

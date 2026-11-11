@@ -12,14 +12,18 @@ import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.feature.standings.domain.pickDefaultTournament
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Clock
 import java.time.LocalDate
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 data class StandingsUiState(
     val leagues: List<League> = emptyList(),
@@ -52,9 +56,16 @@ data class StandingsUiState(
  * exist, [savedStateHandle] wins: it holds the latest selection of this very session (a process-death
  * restore), while preferences only seed a launch whose handle is empty. The stored selection is read
  * before the first request, so no data is loaded for the default and then reloaded. A stored league
- * missing from the leagues list is dropped (if the list cannot be loaded it is trusted), and a stored
- * tournament missing from its league falls back to the default pick. Preferences failures are
- * ignored: the screen works with the defaults.
+ * missing from the leagues list is dropped, and a stored tournament missing from its league falls
+ * back to the default pick. Preferences failures are ignored: the screen works with the defaults.
+ *
+ * The leagues are requested once, right after the stored value is read, and that same request both
+ * feeds the picker and validates the stored league. Validation waits for it at most
+ * [LEAGUES_VALIDATION_TIMEOUT]: when the list fails or is slower than that, the stored league is
+ * trusted instead, so a slow leagues endpoint delays the standings by a bounded time. The price is
+ * that a league that no longer exists is then requested once and shows its error until the user picks
+ * another one. A pick made while the stored selection is being restored wins over it, and every
+ * load started by init or by such a pick runs once.
  */
 class StandingsViewModel(
     private val repository: StandingsRepository,
@@ -74,16 +85,26 @@ class StandingsViewModel(
     private var tournamentsJob: Job? = null
     private var standingsJob: Job? = null
 
+    /** True once the stored selection was applied or superseded (a user pick, or nothing usable stored). */
+    private var selectionRestored = false
+
+    /** True once a tournaments load was started, by init or by a pick made before init resumed. */
+    private var tournamentsRequested = false
+
     init {
         viewModelScope.launch {
-            restoreStoredSelection()
-            fetchLeagues()
-            loadTournaments()
+            val stored = readStoredSelection()
+            val leagues = CompletableDeferred<List<League>?>()
+            fetchLeagues(leagues)
+            if (stored != null) restoreIfListed(stored, leagues)
+            selectionRestored = true
+            if (!tournamentsRequested) loadTournaments()
         }
     }
 
     fun selectLeague(leagueId: String) {
-        if (leagueId == _uiState.value.selectedLeagueId) return
+        if (leagueId == _uiState.value.selectedLeagueId && selectionRestored) return
+        selectionRestored = true
         _uiState.update { it.copy(selectedLeagueId = leagueId) }
         savedStateHandle[KEY_LEAGUE_ID] = leagueId
         savedStateHandle.remove<String>(KEY_TOURNAMENT_ID)
@@ -93,10 +114,12 @@ class StandingsViewModel(
 
     fun selectTournament(tournamentId: String) {
         if (tournamentId == _uiState.value.selectedTournamentId) return
+        selectionRestored = true
         _uiState.update { it.copy(selectedTournamentId = tournamentId) }
         savedStateHandle[KEY_TOURNAMENT_ID] = tournamentId
         save(StandingsSelection(_uiState.value.selectedLeagueId, tournamentId))
-        loadStandings()
+        // Before the first tournaments load there is no list yet: that load picks the saved tournament.
+        if (tournamentsRequested) loadStandings() else loadTournaments()
     }
 
     /** Re-fetches only the leagues; tournaments and standings are left as they are. */
@@ -106,32 +129,31 @@ class StandingsViewModel(
 
     fun retryStandings() = loadStandings()
 
-    /**
-     * Seeds the selection from [preferences] through the saved state handle, which the tournament
-     * load already reads. Does nothing when the handle holds a selection (it wins).
-     */
-    private suspend fun restoreStoredSelection() {
-        if (savedStateHandle.contains(KEY_LEAGUE_ID)) return
-        val stored = try {
+    /** The stored selection, or null when the handle already holds one, nothing is stored or the read fails. */
+    private suspend fun readStoredSelection(): StandingsSelection? {
+        if (selectionRestored || savedStateHandle.contains(KEY_LEAGUE_ID)) return null
+        return try {
             preferences.getStandingsSelection()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             null
-        } ?: return
-        if (!isListed(stored.leagueId)) return
+        }
+    }
+
+    /**
+     * Seeds the selection from [stored] through the saved state handle, which the tournament load
+     * already reads, once its league is confirmed in [leagues] (or the list is unavailable). A pick
+     * made meanwhile wins.
+     */
+    private suspend fun restoreIfListed(stored: StandingsSelection, leagues: CompletableDeferred<List<League>?>) {
+        if (selectionRestored) return
+        val loaded = withTimeoutOrNull(LEAGUES_VALIDATION_TIMEOUT) { leagues.await() }
+        if (selectionRestored) return
+        if (loaded != null && loaded.none { it.id == stored.leagueId }) return
         savedStateHandle[KEY_LEAGUE_ID] = stored.leagueId
         savedStateHandle[KEY_TOURNAMENT_ID] = stored.tournamentId
         _uiState.update { it.copy(selectedLeagueId = stored.leagueId) }
-    }
-
-    /** True unless the leagues load and [leagueId] is not among them; unknown counts as listed. */
-    private suspend fun isListed(leagueId: String): Boolean = try {
-        leaguesRepository.getLeagues().any { it.id == leagueId }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        true
     }
 
     private fun save(selection: StandingsSelection) {
@@ -146,12 +168,14 @@ class StandingsViewModel(
         }
     }
 
-    private fun fetchLeagues() {
+    /** [result] receives the loaded leagues, or null when the request fails or is superseded. */
+    private fun fetchLeagues(result: CompletableDeferred<List<League>?>? = null) {
         leaguesJob?.cancel()
         _uiState.update { it.copy(leaguesStatus = LoadStatus.Loading) }
         leaguesJob = viewModelScope.launch {
             try {
                 val leagues = leaguesRepository.getLeagues()
+                result?.complete(leagues)
                 _uiState.update {
                     it.copy(
                         leagues = leagues,
@@ -163,10 +187,11 @@ class StandingsViewModel(
             } catch (e: Exception) {
                 _uiState.update { it.copy(leaguesStatus = LoadStatus.Error(e.toMessage())) }
             }
-        }
+        }.also { job -> job.invokeOnCompletion { result?.complete(null) } }
     }
 
     private fun loadTournaments() {
+        tournamentsRequested = true
         tournamentsJob?.cancel()
         standingsJob?.cancel()
         _uiState.update {
@@ -231,6 +256,9 @@ class StandingsViewModel(
     companion object {
         /** LCK: a round-robin league, so the default view shows real standings tables. */
         const val DEFAULT_LEAGUE_ID = "98767991310872058"
+
+        /** How long a stored league waits for the leagues list to confirm it before being trusted. */
+        internal val LEAGUES_VALIDATION_TIMEOUT: Duration = 3.seconds
 
         const val KEY_LEAGUE_ID = "standings.leagueId"
         const val KEY_TOURNAMENT_ID = "standings.tournamentId"

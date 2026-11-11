@@ -59,7 +59,6 @@ import com.example.lolsito.feature.game.domain.GameTeam
 import com.example.lolsito.feature.game.domain.Matchup
 import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
-import com.example.lolsito.feature.game.domain.Role
 import com.example.lolsito.feature.game.domain.TeamStats
 import com.example.lolsito.feature.game.domain.matchups
 import com.example.lolsito.ui.theme.LolSitoTheme
@@ -163,9 +162,18 @@ private fun GameStatsBody(
         item(key = "teams") {
             TeamComparison(stats, blue = blue, red = red)
         }
-        item(key = "view-toggle") {
+        item(key = "matchups-header") {
             Column {
                 HorizontalDivider()
+                MatchupHeader(blue = blue, red = red)
+                HorizontalDivider()
+            }
+        }
+        items(matchups, key = { it.key }) { matchup ->
+            MatchupRow(matchup, stats.dataDragonVersion, view)
+        }
+        item(key = "view-toggle") {
+            Column {
                 ViewToggle(view, onViewChange)
                 // Once for the whole list: the details of every player come from the same frame.
                 staleDetailsSince?.let {
@@ -173,19 +181,10 @@ private fun GameStatsBody(
                         detailsAsOfLabel(it, ZoneId.systemDefault()),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp),
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                     )
                 }
             }
-        }
-        item(key = "matchups-header") {
-            Column {
-                MatchupHeader(blue = blue, red = red)
-                HorizontalDivider()
-            }
-        }
-        items(matchups, key = { it.key }) { matchup ->
-            MatchupRow(matchup, stats.dataDragonVersion, view)
         }
     }
 }
@@ -305,7 +304,7 @@ private fun MatchupHeader(blue: GameTeam?, red: GameTeam?) {
             teamLabel(blue?.code, Side.BLUE.label), blue?.logoUrl, mirrored = false, color = Side.BLUE.color,
             style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(ROLE_COLUMN_DP.dp))
+        Spacer(Modifier.width(HALF_GAP_DP.dp))
         TeamTag(
             teamLabel(red?.code, Side.RED.label), red?.logoUrl, mirrored = true, color = Side.RED.color,
             style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
@@ -319,6 +318,7 @@ private val PORTRAIT_SIZE = 36.dp
 private val LINE_GAP = 2.dp
 private val STATS_LINE_HEIGHT = 14.dp
 private val KDA_WIDTH = 50.dp
+private val KEYSTONE_SIZE = 18.dp
 private val HALF_PADDING = 2.dp
 
 private fun secondLineHeight(view: ScoreboardView) = when (view) {
@@ -327,8 +327,8 @@ private fun secondLineHeight(view: ScoreboardView) = when (view) {
 }
 
 /**
- * Two opposing players on one row, mirrored around the role in the middle: portraits and names toward the
- * outer edges, K/D/A toward the center, and the same second line on both sides.
+ * Two opposing players on one row, mirrored around the gap in the middle: portraits and names toward the
+ * outer edges, creep score and K/D/A toward the center, and the same second line on both sides.
  */
 @Composable
 private fun MatchupRow(matchup: Matchup, version: String?, view: ScoreboardView) {
@@ -338,27 +338,11 @@ private fun MatchupRow(matchup: Matchup, version: String?, view: ScoreboardView)
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PlayerHalf(matchup.blue, Side.BLUE, version, view, Modifier.weight(1f))
-            Text(
-                matchup.role?.let(::roleLabel).orEmpty(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                modifier = Modifier.width(ROLE_COLUMN_DP.dp),
-            )
+            Spacer(Modifier.width(HALF_GAP_DP.dp))
             PlayerHalf(matchup.red, Side.RED, version, view, Modifier.weight(1f))
         }
         HorizontalDivider()
     }
-}
-
-/** Short lane name that fits the narrow center column. */
-private fun roleLabel(role: Role): String = when (role) {
-    Role.TOP -> "Top"
-    Role.JUNGLE -> "Jng"
-    Role.MID -> "Mid"
-    Role.BOTTOM -> "Bot"
-    Role.SUPPORT -> "Sup"
 }
 
 /** One side of a matchup: a strip in the side color on the outer edge, then the headline and the second line. */
@@ -370,7 +354,7 @@ private fun PlayerHalf(player: PlayerStats?, side: Side, version: String?, view:
         if (!mirrored) Box(Modifier.width(SIDE_BAR_DP.dp).height(height).background(side.color))
         Column(Modifier.weight(1f).padding(horizontal = HALF_PADDING)) {
             if (player != null) {
-                PlayerHeadline(player, version, mirrored)
+                PlayerHeadline(player, player.details, version, mirrored)
                 Spacer(Modifier.height(LINE_GAP))
                 SecondLine(player, version, view, mirrored)
             }
@@ -379,11 +363,16 @@ private fun PlayerHalf(player: PlayerStats?, side: Side, version: String?, view:
     }
 }
 
-/** Portrait on the outer edge, name over creep score and level, K/D/A toward the center. */
+/** Portrait (with the level) on the outer edge, name over the keystone, creep score over K/D/A toward the center. */
 @Composable
-private fun PlayerHeadline(player: PlayerStats, version: String?, mirrored: Boolean) {
+private fun PlayerHeadline(player: PlayerStats, details: PlayerDetails?, version: String?, mirrored: Boolean) {
     val textAlign = if (mirrored) TextAlign.End else TextAlign.Start
-    val portrait: @Composable () -> Unit = { ChampionPortrait(player.championId, version) }
+    val portrait: @Composable () -> Unit = {
+        Box(Modifier.size(PORTRAIT_SIZE)) {
+            ChampionPortrait(player.championId, version)
+            LevelBadge(player.level, Modifier.align(if (mirrored) Alignment.BottomEnd else Alignment.BottomStart))
+        }
+    }
     val identity: @Composable (Modifier) -> Unit = { identityModifier ->
         Column(identityModifier.padding(horizontal = 4.dp), horizontalAlignment = if (mirrored) Alignment.End else Alignment.Start) {
             Text(
@@ -395,39 +384,89 @@ private fun PlayerHeadline(player: PlayerStats, version: String?, mirrored: Bool
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            KeystoneSlot(details, mirrored)
+        }
+    }
+    val score: @Composable () -> Unit = {
+        // Toward the center, away from the name.
+        val scoreAlign = if (mirrored) TextAlign.Start else TextAlign.End
+        Column(Modifier.width(KDA_WIDTH), horizontalAlignment = if (mirrored) Alignment.Start else Alignment.End) {
             Text(
-                csLevelLabel(player),
+                csLabel(player),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = textAlign,
+                textAlign = scoreAlign,
                 maxLines = 1,
                 softWrap = false,
-                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${player.kills}/${player.deaths}/${player.assists}",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = scoreAlign,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }
-    val kda: @Composable () -> Unit = {
-        Text(
-            "${player.kills}/${player.deaths}/${player.assists}",
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-            // Toward the center, away from the name.
-            textAlign = if (mirrored) TextAlign.Start else TextAlign.End,
-            maxLines = 1,
-            softWrap = false,
-            modifier = Modifier.width(KDA_WIDTH),
-        )
-    }
     Row(Modifier.fillMaxWidth().height(PORTRAIT_SIZE), verticalAlignment = Alignment.CenterVertically) {
         if (mirrored) {
-            kda()
+            score()
             identity(Modifier.weight(1f))
             portrait()
         } else {
             portrait()
             identity(Modifier.weight(1f))
-            kda()
+            score()
+        }
+    }
+}
+
+/** The level on a dark rounded background, so it reads over any portrait. */
+@Composable
+private fun LevelBadge(level: Int, modifier: Modifier = Modifier) {
+    Text(
+        level.toString(),
+        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp),
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+        maxLines = 1,
+        softWrap = false,
+        modifier = modifier.background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 3.dp),
+    )
+}
+
+/**
+ * The keystone icon under the name; its name when the icon fails to load, its number when there is no icon,
+ * and an empty slot without details, as [keystoneSlotContent] decides. The slot has the same height in every case.
+ */
+@Composable
+private fun KeystoneSlot(details: PlayerDetails?, mirrored: Boolean) {
+    val text: @Composable (String) -> Unit = { text ->
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+    Box(
+        Modifier.fillMaxWidth().height(KEYSTONE_SIZE),
+        contentAlignment = if (mirrored) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        when (val content = keystoneSlotContent(details)) {
+            IconSlotContent.Empty -> Unit
+            is IconSlotContent.IdText -> text(content.text)
+            is IconSlotContent.Icon -> SubcomposeAsyncImage(
+                model = content.url,
+                contentDescription = content.idText,
+                modifier = Modifier.size(KEYSTONE_SIZE),
+                loading = {},
+                error = { text(content.idText) },
+            )
         }
     }
 }
@@ -491,31 +530,17 @@ private fun SecondLine(player: PlayerStats, version: String?, view: ScoreboardVi
     }
 }
 
-// Column weights of the stats grid, the same on both sides: gold is the widest of the first line's cells,
-// and the wards cell sits under it so the keystone name starts where the KP column does.
-private const val FIRST_CELL_WEIGHT = 1.3f
-
 @Composable
 private fun StatsGrid(line: PlayerLine.Stats) {
     val (gold, kp, damage, wards) = line.cells
     Column(verticalArrangement = Arrangement.spacedBy(LINE_GAP)) {
         Row {
-            StatCellText(gold, Modifier.weight(FIRST_CELL_WEIGHT))
+            StatCellText(gold, Modifier.weight(1f))
             StatCellText(kp, Modifier.weight(1f))
-            StatCellText(damage, Modifier.weight(1f))
         }
         Row {
-            StatCellText(wards, Modifier.weight(FIRST_CELL_WEIGHT))
-            Text(
-                line.keystone,
-                style = STATS_TEXT,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(2f),
-            )
+            StatCellText(damage, Modifier.weight(1f))
+            StatCellText(wards, Modifier.weight(1f))
         }
     }
 }

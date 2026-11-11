@@ -58,3 +58,35 @@ private val RUNE_NAMES: Map<Int, String> = mapOf(
 
 /** Name of rune tree or keystone [id], or the number itself when unknown. */
 fun runeName(id: Int): String = RUNE_NAMES[id] ?: id.toString()
+
+/**
+ * Icon path of every keystone as Data Dragon's runesReforged.json has it, relative to its unversioned
+ * `cdn/img/` folder. Bundled with [RUNE_NAMES] so the rune shows without a second network call; a
+ * keystone added after this table has no icon and [keystoneIconUrl] returns null and the screen falls back to its name or number.
+ */
+private val KEYSTONE_ICONS: Map<Int, String> = mapOf(
+    8005 to "perk-images/Styles/Precision/PressTheAttack/PressTheAttack.png",
+    8008 to "perk-images/Styles/Precision/LethalTempo/LethalTempoTemp.png",
+    8010 to "perk-images/Styles/Precision/Conqueror/Conqueror.png",
+    8021 to "perk-images/Styles/Precision/FleetFootwork/FleetFootwork.png",
+    8112 to "perk-images/Styles/Domination/Electrocute/Electrocute.png",
+    8128 to "perk-images/Styles/Domination/DarkHarvest/DarkHarvest.png",
+    9923 to "perk-images/Styles/Domination/HailOfBlades/HailOfBlades.png",
+    8214 to "perk-images/Styles/Sorcery/SummonAery/SummonAery.png",
+    8229 to "perk-images/Styles/Sorcery/ArcaneComet/ArcaneComet.png",
+    8230 to "perk-images/Styles/Sorcery/PhaseRush/StormraidersSurgeRuneIcon2.png",
+    8992 to "perk-images/Styles/Sorcery/DeathfireTouch/DEATHFIRE_TOUCH_KEYSTONE.png",
+    8351 to "perk-images/Styles/Inspiration/GlacialAugment/GlacialAugment.png",
+    8360 to "perk-images/Styles/Inspiration/UnsealedSpellbook/UnsealedSpellbook.png",
+    8369 to "perk-images/Styles/Inspiration/FirstStrike/FirstStrike.png",
+    8437 to "perk-images/Styles/Resolve/GraspOfTheUndying/GraspOfTheUndying.png",
+    8439 to "perk-images/Styles/Resolve/VeteranAftershock/VeteranAftershock.png",
+    8465 to "perk-images/Styles/Resolve/Guardian/Guardian.png",
+)
+
+/** Ids of the keystones that have an icon in the bundled table. */
+val KEYSTONE_IDS: Set<Int> = KEYSTONE_ICONS.keys
+
+/** Icon of keystone [keystoneId] (not versioned, so no Data Dragon version is needed), or null when the keystone is unknown. */
+fun keystoneIconUrl(keystoneId: Int): String? =
+    KEYSTONE_ICONS[keystoneId]?.let { "${ApiConfig.DATA_DRAGON_BASE_URL}cdn/img/$it" }

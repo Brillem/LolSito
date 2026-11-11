@@ -1,7 +1,9 @@
 package com.example.lolsito.core.datadragon
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DataDragonTest {
@@ -73,5 +75,37 @@ class DataDragonTest {
     @Test
     fun `an unknown rune id falls back to the number`() {
         assertEquals("1234", runeName(1234))
+    }
+
+    @Test
+    fun `keystone icon url points at the unversioned perk image`() {
+        assertEquals(
+            "https://ddragon.leagueoflegends.com/cdn/img/perk-images/Styles/Precision/Conqueror/Conqueror.png",
+            keystoneIconUrl(8010),
+        )
+        assertEquals(
+            "https://ddragon.leagueoflegends.com/cdn/img/perk-images/Styles/Sorcery/PhaseRush/StormraidersSurgeRuneIcon2.png",
+            keystoneIconUrl(8230),
+        )
+    }
+
+    @Test
+    fun `keystone icon url is null for an unknown id or a rune tree`() {
+        assertNull(keystoneIconUrl(1234))
+        assertNull(keystoneIconUrl(8000))
+    }
+
+    @Test
+    fun `every current keystone has a named icon`() {
+        val keystones = listOf(
+            8005, 8008, 8010, 8021, 8112, 8128, 9923, 8214, 8229, 8230, 8992, 8351, 8360, 8369, 8437, 8439, 8465,
+        )
+        keystones.forEach { id ->
+            val url = keystoneIconUrl(id)
+            assertTrue("keystone $id has no icon", !url.isNullOrBlank() && url.endsWith(".png"))
+            assertNotEquals("keystone $id has no name", id.toString(), runeName(id))
+        }
+        assertEquals(keystones.size, KEYSTONE_IDS.size)
+        assertEquals(keystones.toSet(), KEYSTONE_IDS)
     }
 }

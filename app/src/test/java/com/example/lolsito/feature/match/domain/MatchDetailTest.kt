@@ -4,6 +4,7 @@ import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.SeriesType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MatchDetailTest {
@@ -52,5 +53,20 @@ class MatchDetailTest {
         val d = detail(game(1, "a"), game(2, "b", GameState.UNNEEDED), game(3, "c", GameState.UNSTARTED))
         assertEquals(d.visibleGames.size, d.gameKeys.size)
         assertEquals(listOf("game:a#0", "game:c#0"), d.gameKeys)
+    }
+
+    @Test
+    fun `started games with an id open their stats`() {
+        assertEquals("a", game(1, "a", GameState.IN_PROGRESS).statsGameId)
+        assertEquals("b", game(2, "b", GameState.COMPLETED).statsGameId)
+    }
+
+    @Test
+    fun `games that did not start or have no id stay non-tappable`() {
+        assertNull(game(1, "a", GameState.UNSTARTED).statsGameId)
+        assertNull(game(2, null, GameState.COMPLETED).statsGameId)
+        assertNull(game(3, null, GameState.IN_PROGRESS).statsGameId)
+        assertNull(game(4, "d", GameState.UNNEEDED).statsGameId)
+        assertNull(game(5, "e", GameState.UNKNOWN).statsGameId)
     }
 }

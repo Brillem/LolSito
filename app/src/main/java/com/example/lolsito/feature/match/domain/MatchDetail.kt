@@ -19,6 +19,10 @@ data class MatchGame(
     val sides: Map<String, GameSide>,
 ) {
     fun sideOf(teamId: String?): GameSide? = teamId?.let(sides::get)
+
+    /** Id to open the game stats with; null until the game starts, since the feed has no frames before. */
+    val statsGameId: String?
+        get() = id?.takeIf { state == GameState.IN_PROGRESS || state == GameState.COMPLETED }
 }
 
 data class MatchDetail(

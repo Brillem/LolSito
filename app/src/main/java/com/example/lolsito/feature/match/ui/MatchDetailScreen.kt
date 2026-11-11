@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.match.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,9 +46,20 @@ import com.example.lolsito.feature.match.domain.MatchGame
 
 /** Container: wires the ViewModel to the stateless [MatchDetailContent]. */
 @Composable
-fun MatchDetailScreen(viewModel: MatchDetailViewModel, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun MatchDetailScreen(
+    viewModel: MatchDetailViewModel,
+    onBack: () -> Unit,
+    onGameClick: (gameId: String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    MatchDetailContent(state = state, onBack = onBack, onRetry = viewModel::retry, modifier = modifier)
+    MatchDetailContent(
+        state = state,
+        onBack = onBack,
+        onRetry = viewModel::retry,
+        onGameClick = onGameClick,
+        modifier = modifier,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,6 +68,7 @@ fun MatchDetailContent(
     state: MatchDetailUiState,
     onBack: () -> Unit,
     onRetry: () -> Unit,
+    onGameClick: (gameId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -72,13 +85,13 @@ fun MatchDetailContent(
         when (state) {
             MatchDetailUiState.Loading -> LoadingView()
             is MatchDetailUiState.Error -> ErrorView(state.message, onRetry)
-            is MatchDetailUiState.Content -> MatchDetailBody(state.detail)
+            is MatchDetailUiState.Content -> MatchDetailBody(state.detail, onGameClick)
         }
     }
 }
 
 @Composable
-private fun MatchDetailBody(detail: MatchDetail) {
+private fun MatchDetailBody(detail: MatchDetail, onGameClick: (gameId: String) -> Unit) {
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "header") { MatchHeader(detail) }
         item(key = "games-title") {
@@ -101,7 +114,9 @@ private fun MatchDetailBody(detail: MatchDetail) {
         }
         val keys = detail.gameKeys
         items(games.size, key = { keys[it] }) { index ->
-            GameRow(games[index], detail.teams)
+            val game = games[index]
+            val statsGameId = game.statsGameId
+            GameRow(game, detail.teams, onClick = statsGameId?.let { id -> { onGameClick(id) } })
             HorizontalDivider()
         }
     }
@@ -163,9 +178,12 @@ private fun HeaderTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier = 
 }
 
 @Composable
-fun GameRow(game: MatchGame, teams: List<Team>, modifier: Modifier = Modifier) {
+fun GameRow(game: MatchGame, teams: List<Team>, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = "View stats", onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -187,6 +205,14 @@ fun GameRow(game: MatchGame, teams: List<Team>, modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.labelMedium,
             color = if (game.state == GameState.IN_PROGRESS) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (onClick != null) {
+            Text(
+                "›",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
     }
 }
 
@@ -230,11 +256,16 @@ private val previewDetail = MatchDetail(
 @Preview(showBackground = true)
 @Composable
 private fun MatchDetailContentPreview() {
-    MatchDetailContent(state = MatchDetailUiState.Content(previewDetail), onBack = {}, onRetry = {})
+    MatchDetailContent(state = MatchDetailUiState.Content(previewDetail), onBack = {}, onRetry = {}, onGameClick = {})
 }
 
 @Preview(showBackground = true)
 @Composable
 private fun MatchDetailErrorPreview() {
-    MatchDetailContent(state = MatchDetailUiState.Error("Could not load the match"), onBack = {}, onRetry = {})
+    MatchDetailContent(
+        state = MatchDetailUiState.Error("Could not load the match"),
+        onBack = {},
+        onRetry = {},
+        onGameClick = {},
+    )
 }

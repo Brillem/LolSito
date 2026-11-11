@@ -30,6 +30,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.lolsito.R
 import com.example.lolsito.core.di.AppContainer
+import com.example.lolsito.feature.game.ui.GameStatsScreen
+import com.example.lolsito.feature.game.ui.GameStatsViewModel
 import com.example.lolsito.feature.match.ui.MatchDetailScreen
 import com.example.lolsito.feature.match.ui.MatchDetailViewModel
 import com.example.lolsito.feature.schedule.ui.ScheduleScreen
@@ -44,9 +46,14 @@ object Routes {
     const val MATCH = "match/{$MATCH_ID_ARG}"
 
     fun match(matchId: String): String = "match/${Uri.encode(matchId)}"
+
+    const val GAME_ID_ARG = "gameId"
+    const val GAME = "game/{$GAME_ID_ARG}"
+
+    fun game(gameId: String): String = "game/${Uri.encode(gameId)}"
 }
 
-/** Top-level destinations shown in the bottom bar. Pushed screens (match detail) hide the bar. */
+/** Top-level destinations shown in the bottom bar. Pushed screens (match detail, game stats) hide the bar. */
 private enum class TopLevelDestination(val route: String, val label: String, @DrawableRes val icon: Int) {
     SCHEDULE(Routes.SCHEDULE, "Schedule", R.drawable.ic_tab_schedule),
     STANDINGS(Routes.STANDINGS, "Standings", R.drawable.ic_tab_standings),
@@ -105,7 +112,7 @@ fun LolSitoApp(container: AppContainer) {
                 )
                 ScheduleScreen(
                     viewModel = vm,
-                    onMatchClick = { matchId -> navController.navigateToMatch(from = entry, matchId = matchId) },
+                    onMatchClick = { matchId -> navController.navigateFrom(entry, Routes.match(matchId)) },
                 )
             }
             composable(Routes.STANDINGS) { entry ->
@@ -123,7 +130,7 @@ fun LolSitoApp(container: AppContainer) {
                 )
                 StandingsScreen(
                     viewModel = vm,
-                    onMatchClick = { matchId -> navController.navigateToMatch(from = entry, matchId = matchId) },
+                    onMatchClick = { matchId -> navController.navigateFrom(entry, Routes.match(matchId)) },
                 )
             }
             composable(
@@ -136,19 +143,36 @@ fun LolSitoApp(container: AppContainer) {
                         initializer { MatchDetailViewModel(matchId, container.matchDetailRepository) }
                     }
                 )
-                MatchDetailScreen(viewModel = vm, onBack = { navController.navigateUp() })
+                MatchDetailScreen(
+                    viewModel = vm,
+                    onBack = { navController.navigateUp() },
+                    onGameClick = { gameId -> navController.navigateFrom(entry, Routes.game(gameId)) },
+                )
+            }
+            composable(
+                Routes.GAME,
+                arguments = listOf(navArgument(Routes.GAME_ID_ARG) { type = NavType.StringType }),
+            ) { entry ->
+                val gameId = requireNotNull(entry.arguments?.getString(Routes.GAME_ID_ARG))
+                val vm: GameStatsViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { GameStatsViewModel(gameId, container.gameStatsRepository) }
+                    }
+                )
+                GameStatsScreen(viewModel = vm, onBack = { navController.navigateUp() })
             }
         }
     }
 }
 
 /**
- * Opens match detail from [from]. A double tap would otherwise push it twice: the first navigate
- * moves [from] out of RESUMED, so the second tap is dropped; single top guards the rest.
+ * Pushes [route] (match detail, game stats) from [from] on the current tab's back stack. A double tap
+ * would otherwise push it twice: the first navigate moves [from] out of RESUMED, so the second tap is
+ * dropped; single top guards the rest.
  */
-private fun NavHostController.navigateToMatch(from: NavBackStackEntry, matchId: String) {
+private fun NavHostController.navigateFrom(from: NavBackStackEntry, route: String) {
     if (!canNavigateFrom(from.lifecycle.currentState)) return
-    navigate(Routes.match(matchId)) { launchSingleTop = true }
+    navigate(route) { launchSingleTop = true }
 }
 
 /** Switches tabs keeping one back stack per tab: state is saved on leave and restored on return. */

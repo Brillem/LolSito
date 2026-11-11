@@ -2,6 +2,7 @@ package com.example.lolsito.feature.game.ui
 
 import com.example.lolsito.core.datadragon.championIconUrl
 import com.example.lolsito.core.datadragon.itemIconUrl
+import com.example.lolsito.core.datadragon.keystoneIconUrl
 import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
 import org.junit.Assert.assertEquals
@@ -88,7 +89,7 @@ class MatchupDisplayTest {
     fun `seven item slots fit in half a 360 dp screen next to the side bar`() {
         assertEquals(152, itemStripWidthDp())
         assertTrue(itemStripWidthDp() + SIDE_BAR_DP <= halfWidthDp(360))
-        assertEquals(162, halfWidthDp(360))
+        assertEquals(174, halfWidthDp(360))
     }
 
     // Which second line a player gets
@@ -102,22 +103,32 @@ class MatchupDisplayTest {
     }
 
     @Test
-    fun `in the stats view a player with details gets compact cells and the keystone`() {
+    fun `in the stats view a player with details gets compact cells without the keystone`() {
         assertEquals(
             PlayerLine.Stats(
                 cells = listOf(StatCell("Gold", "10.9k"), StatCell("KP", "72%"), StatCell("DMG", "14%"), StatCell("Wards", "14/9")),
-                keystone = "Conqueror",
             ),
             playerLine(player(details = details), ScoreboardView.STATS),
         )
     }
 
     @Test
-    fun `a missing keystone shows a dash and an unknown one its number`() {
-        val none = playerLine(player(details = details.copy(keystoneId = null)), ScoreboardView.STATS) as PlayerLine.Stats
-        val unknown = playerLine(player(details = details.copy(keystoneId = 1234)), ScoreboardView.STATS) as PlayerLine.Stats
-        assertEquals("-", none.keystone)
-        assertEquals("1234", unknown.keystone)
+    fun `the keystone slot shows the rune icon, keeping the name for when it fails to load`() {
+        assertEquals(
+            IconSlotContent.Icon(url = keystoneIconUrl(8010)!!, idText = "Conqueror"),
+            keystoneSlotContent(details),
+        )
+    }
+
+    @Test
+    fun `the keystone slot shows the number of a rune it does not know`() {
+        assertEquals(IconSlotContent.IdText("1234"), keystoneSlotContent(details.copy(keystoneId = 1234)))
+    }
+
+    @Test
+    fun `the keystone slot shows a dash when the feed sent no keystone and nothing without details`() {
+        assertEquals(IconSlotContent.IdText("-"), keystoneSlotContent(details.copy(keystoneId = null)))
+        assertEquals(IconSlotContent.Empty, keystoneSlotContent(null))
     }
 
     @Test
@@ -136,8 +147,8 @@ class MatchupDisplayTest {
     }
 
     @Test
-    fun `the first line shows creep score and level`() {
-        assertEquals("212 CS · 13", csLevelLabel(player()))
+    fun `the creep score is labeled`() {
+        assertEquals("212 CS", csLabel(player()))
     }
 
     @Test

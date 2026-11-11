@@ -2,6 +2,7 @@ package com.example.lolsito.feature.game.ui
 
 import com.example.lolsito.core.datadragon.championIconUrl
 import com.example.lolsito.core.datadragon.itemIconUrl
+import com.example.lolsito.core.datadragon.keystoneIconUrl
 import com.example.lolsito.core.datadragon.runeName
 import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
@@ -17,7 +18,7 @@ enum class ScoreboardView(val label: String) {
     STATS("Stats"),
 }
 
-/** What an icon slot (an item or a champion portrait) draws. */
+/** What an icon slot (an item, a champion portrait or a keystone) draws. */
 sealed interface IconSlotContent {
     /** Nothing: the slot holds no icon. */
     data object Empty : IconSlotContent
@@ -44,6 +45,17 @@ fun championSlotContent(version: String?, championId: String): IconSlotContent {
     return if (url == null) IconSlotContent.IdText(id) else IconSlotContent.Icon(url, id)
 }
 
+/**
+ * What the keystone slot under a player's name draws: the rune icon (named for when it fails to load), the rune number
+ * when the keystone has no bundled icon, a dash when the feed sent none, and nothing without [details].
+ */
+fun keystoneSlotContent(details: PlayerDetails?): IconSlotContent {
+    if (details == null) return IconSlotContent.Empty
+    val id = details.keystoneId ?: return IconSlotContent.IdText("-")
+    val url = keystoneIconUrl(id)
+    return if (url == null) IconSlotContent.IdText(id.toString()) else IconSlotContent.Icon(url, runeName(id))
+}
+
 /** Item slots on a player's strip: the feed sends up to six items and the trinket. */
 const val ITEM_SLOT_COUNT = 7
 
@@ -51,21 +63,21 @@ const val ITEM_SLOT_COUNT = 7
 fun itemSlots(itemIds: List<Int>): List<Int> =
     (itemIds + List(maxOf(0, ITEM_SLOT_COUNT - itemIds.size)) { 0 }).take(ITEM_SLOT_COUNT)
 
-// Row layout, in dp. A half is what is left of the screen width beside the center role column; the item
-// strip must fit in it next to the side bar (360 dp: (360 - 2 * 4 - 28) / 2 = 162; the strip is 7 * 20 + 6 * 2 = 152).
+// Row layout, in dp. A half is what is left of the screen width beside the gap between the two halves; the item
+// strip must fit in it next to the side bar (360 dp: (360 - 2 * 4 - 4) / 2 = 174; the strip is 7 * 20 + 6 * 2 = 152).
 const val SCREEN_PADDING_DP = 4
-const val ROLE_COLUMN_DP = 28
+const val HALF_GAP_DP = 4
 const val SIDE_BAR_DP = 3
 const val ITEM_SLOT_DP = 20
 const val ITEM_GAP_DP = 2
 
 /** Width of one player's half on a screen [screenDp] wide. */
-fun halfWidthDp(screenDp: Int): Int = (screenDp - 2 * SCREEN_PADDING_DP - ROLE_COLUMN_DP) / 2
+fun halfWidthDp(screenDp: Int): Int = (screenDp - 2 * SCREEN_PADDING_DP - HALF_GAP_DP) / 2
 
 /** Width of the item strip: [ITEM_SLOT_COUNT] slots and the gaps between them. */
 fun itemStripWidthDp(): Int = ITEM_SLOT_COUNT * ITEM_SLOT_DP + (ITEM_SLOT_COUNT - 1) * ITEM_GAP_DP
 
-/** One label and value of the stats view, short enough not to wrap in a third of a half. */
+/** One label and value of the stats view, short enough not to wrap in half of a half. */
 data class StatCell(val label: String, val value: String)
 
 /** Gold, kill participation, damage share and wards of [details], in the order the stats view lays them out. */
@@ -84,8 +96,8 @@ sealed interface PlayerLine {
     /** The padded item strip ([ITEM_SLOT_COUNT] item ids, 0 for an empty slot). */
     data class Items(val slots: List<Int>) : PlayerLine
 
-    /** The compact stat [cells] and the [keystone] rune name ("-" when the feed did not send it). */
-    data class Stats(val cells: List<StatCell>, val keystone: String) : PlayerLine
+    /** The compact stat [cells]. */
+    data class Stats(val cells: List<StatCell>) : PlayerLine
 }
 
 /** The second line of [player]'s half in [view]. */
@@ -93,12 +105,12 @@ fun playerLine(player: PlayerStats, view: ScoreboardView): PlayerLine {
     val details = player.details ?: return PlayerLine.Unavailable
     return when (view) {
         ScoreboardView.ITEMS -> PlayerLine.Items(itemSlots(details.itemIds))
-        ScoreboardView.STATS -> PlayerLine.Stats(statCells(details), details.keystoneId?.let { runeName(it) } ?: "-")
+        ScoreboardView.STATS -> PlayerLine.Stats(statCells(details))
     }
 }
 
-/** "212 CS · 13" (creep score and level). */
-fun csLevelLabel(player: PlayerStats): String = "${player.creepScore} CS · ${player.level}"
+/** "212 CS" (creep score). */
+fun csLabel(player: PlayerStats): String = "${player.creepScore} CS"
 
 /** "Details as of 12:34:56": the note for details older than the stats beside them, in [zone]'s time. */
 fun detailsAsOfLabel(since: Instant, zone: ZoneId, locale: Locale = Locale.getDefault()): String =

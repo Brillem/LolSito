@@ -33,7 +33,7 @@ class GameStatsMappersTest {
     @Test
     fun `joins each team's players with their metadata by participant id`() {
         assertEquals(
-            PlayerStats(1, "MVK Kratos", "Olaf", kills = 0, deaths = 2, assists = 0, creepScore = 142, level = 12),
+            PlayerStats(1, "MVK Kratos", "Olaf", kills = 0, deaths = 2, assists = 0, creepScore = 142, level = 12, role = "top"),
             stats.blueTeam.players.first(),
         )
         assertEquals(
@@ -45,9 +45,26 @@ class GameStatsMappersTest {
             stats.redTeam.players.map { it.championId },
         )
         assertEquals(
-            PlayerStats(9, "FUR Ayu", "Yunara", kills = 1, deaths = 2, assists = 0, creepScore = 155, level = 10),
+            PlayerStats(9, "FUR Ayu", "Yunara", kills = 1, deaths = 2, assists = 0, creepScore = 155, level = 10, role = "bottom"),
             stats.redTeam.players[3],
         )
+    }
+
+    @Test
+    fun `maps the team ids and each player's role from the feed metadata`() {
+        assertEquals("107251245690956393", stats.blueTeamId)
+        assertEquals("100205576309502431", stats.redTeamId)
+        assertEquals(listOf("top", "jungle", "mid", "bottom", "support"), stats.blueTeam.players.map { it.role })
+        assertEquals(listOf("top", "jungle", "mid", "bottom", "support"), stats.redTeam.players.map { it.role })
+    }
+
+    @Test
+    fun `missing team ids and roles stay null`() {
+        val stats = decode("""{"frames":[{"blueTeam":{"participants":[{"participantId":1}]}}]}""").toGameStats()!!
+
+        assertNull(stats.blueTeamId)
+        assertNull(stats.redTeamId)
+        assertNull(stats.blueTeam.players.single().role)
     }
 
     @Test

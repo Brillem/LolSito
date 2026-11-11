@@ -80,32 +80,27 @@ class MatchDetailTest {
         MatchGame(number = 1, id = id, state = state, sides = sides.toMap())
 
     @Test
-    fun `stats link carries the code of the team on each side`() {
+    fun `stats link carries each team's code by team id, without sides`() {
         val game = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.RED)
-        assertEquals(GameStatsLink("g1", blueTeamCode = "MVK", redTeamCode = "FUR"), game.statsLink(teams))
+        assertEquals(GameStatsLink("g1", mapOf("mvk" to "MVK", "fur" to "FUR")), game.statsLink(teams))
     }
 
     @Test
-    fun `stats link follows the sides of that game when teams swap`() {
-        val game = sided("g4", GameState.IN_PROGRESS, "fur" to GameSide.BLUE, "mvk" to GameSide.RED)
-        assertEquals(GameStatsLink("g4", blueTeamCode = "FUR", redTeamCode = "MVK"), game.statsLink(teams))
+    fun `stats link does not depend on the sides event details report`() {
+        val swapped = sided("g4", GameState.IN_PROGRESS, "fur" to GameSide.BLUE, "mvk" to GameSide.RED)
+        val unsided = sided("g4", GameState.IN_PROGRESS)
+        val expected = GameStatsLink("g4", mapOf("mvk" to "MVK", "fur" to "FUR"))
+        assertEquals(expected, swapped.statsLink(teams))
+        assertEquals(expected, unsided.statsLink(teams))
     }
 
     @Test
-    fun `stats link has no codes when sides or team ids are unknown`() {
-        assertEquals(GameStatsLink("g1", null, null), sided("g1", GameState.COMPLETED).statsLink(teams))
-        val noIds = teams.map { it.copy(id = null) }
-        val game = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.RED)
-        assertEquals(GameStatsLink("g1", null, null), game.statsLink(noIds))
-    }
-
-    @Test
-    fun `stats link skips a side shared by two teams or a blank code`() {
-        val bothBlue = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.BLUE)
-        assertEquals(GameStatsLink("g1", null, null), bothBlue.statsLink(teams))
+    fun `stats link skips a team without an id or with a blank code`() {
+        val noId = listOf(teams[0].copy(id = null), teams[1])
+        assertEquals(GameStatsLink("g1", mapOf("fur" to "FUR")), sided("g1", GameState.COMPLETED).statsLink(noId))
         val blank = listOf(teams[0].copy(code = " "), teams[1])
-        val game = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.RED)
-        assertEquals(GameStatsLink("g1", null, "FUR"), game.statsLink(blank))
+        assertEquals(GameStatsLink("g1", mapOf("fur" to "FUR")), sided("g1", GameState.COMPLETED).statsLink(blank))
+        assertEquals(GameStatsLink("g1", emptyMap()), sided("g1", GameState.COMPLETED).statsLink(noId.map { it.copy(id = null) }))
     }
 
     @Test

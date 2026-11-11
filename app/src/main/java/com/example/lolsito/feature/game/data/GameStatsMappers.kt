@@ -25,6 +25,8 @@ fun LiveStatsWindowResponse.toGameStats(): GameStats? {
         blueTeam = frame.blueTeam.toTeamStats(gameMetadata?.blueTeamMetadata),
         redTeam = frame.redTeam.toTeamStats(gameMetadata?.redTeamMetadata),
         dataDragonVersion = dataDragonVersion(gameMetadata?.patchVersion),
+        blueTeamId = gameMetadata?.blueTeamMetadata?.esportsTeamId?.takeIf { it.isNotBlank() },
+        redTeamId = gameMetadata?.redTeamMetadata?.esportsTeamId?.takeIf { it.isNotBlank() },
     )
 }
 
@@ -57,6 +59,7 @@ private fun LiveStatsParticipantFrameDto.toPlayerStats(id: Int, metadata: LiveSt
         assists = assists ?: 0,
         creepScore = creepScore ?: 0,
         level = level ?: 0,
+        role = metadata?.role?.takeIf { it.isNotBlank() },
     )
 
 /**

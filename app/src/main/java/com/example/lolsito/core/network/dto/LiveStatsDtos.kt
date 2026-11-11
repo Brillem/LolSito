@@ -18,13 +18,19 @@ data class LiveStatsGameMetadataDto(
 )
 
 @Serializable
-data class LiveStatsTeamMetadataDto(val participantMetadata: List<LiveStatsParticipantMetadataDto>? = null)
+data class LiveStatsTeamMetadataDto(
+    /** Id of the team on this side, the same id event details use for the team. */
+    val esportsTeamId: String? = null,
+    val participantMetadata: List<LiveStatsParticipantMetadataDto>? = null,
+)
 
 @Serializable
 data class LiveStatsParticipantMetadataDto(
     val participantId: Int? = null,
     val summonerName: String? = null,
     val championId: String? = null,
+    /** Lane the player plays: "top", "jungle", "mid", "bottom" or "support". */
+    val role: String? = null,
 )
 
 @Serializable

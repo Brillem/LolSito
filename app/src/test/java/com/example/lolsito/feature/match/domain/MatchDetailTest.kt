@@ -4,6 +4,7 @@ import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.feature.game.domain.GameTeam
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -72,9 +73,14 @@ class MatchDetailTest {
     }
 
     private val teams = listOf(
-        Team("MVK Esports", "MVK", null, null, null, id = "mvk"),
-        Team("FURIA", "FUR", null, null, null, id = "fur"),
+        Team("MVK Esports", "MVK", "https://img/mvk.png", null, null, id = "mvk"),
+        Team("FURIA", "FUR", "https://img/fur.png", null, null, id = "fur"),
     )
+
+    private val mvk = GameTeam("MVK", "https://img/mvk.png")
+    private val fur = GameTeam("FUR", "https://img/fur.png")
+    private val bothTeams = mapOf("mvk" to mvk, "fur" to fur)
+    private val furOnly = mapOf("fur" to fur)
 
     private fun sided(id: String?, state: GameState, vararg sides: Pair<String, GameSide>) =
         MatchGame(number = 1, id = id, state = state, sides = sides.toMap())
@@ -82,14 +88,14 @@ class MatchDetailTest {
     @Test
     fun `stats link carries each team's code by team id, without sides`() {
         val game = sided("g1", GameState.COMPLETED, "mvk" to GameSide.BLUE, "fur" to GameSide.RED)
-        assertEquals(GameStatsLink("g1", mapOf("mvk" to "MVK", "fur" to "FUR")), game.statsLink(teams))
+        assertEquals(GameStatsLink("g1", bothTeams), game.statsLink(teams))
     }
 
     @Test
     fun `stats link does not depend on the sides event details report`() {
         val swapped = sided("g4", GameState.IN_PROGRESS, "fur" to GameSide.BLUE, "mvk" to GameSide.RED)
         val unsided = sided("g4", GameState.IN_PROGRESS)
-        val expected = GameStatsLink("g4", mapOf("mvk" to "MVK", "fur" to "FUR"))
+        val expected = GameStatsLink("g4", bothTeams)
         assertEquals(expected, swapped.statsLink(teams))
         assertEquals(expected, unsided.statsLink(teams))
     }
@@ -97,10 +103,19 @@ class MatchDetailTest {
     @Test
     fun `stats link skips a team without an id or with a blank code`() {
         val noId = listOf(teams[0].copy(id = null), teams[1])
-        assertEquals(GameStatsLink("g1", mapOf("fur" to "FUR")), sided("g1", GameState.COMPLETED).statsLink(noId))
+        assertEquals(GameStatsLink("g1", furOnly), sided("g1", GameState.COMPLETED).statsLink(noId))
         val blank = listOf(teams[0].copy(code = " "), teams[1])
-        assertEquals(GameStatsLink("g1", mapOf("fur" to "FUR")), sided("g1", GameState.COMPLETED).statsLink(blank))
+        assertEquals(GameStatsLink("g1", furOnly), sided("g1", GameState.COMPLETED).statsLink(blank))
         assertEquals(GameStatsLink("g1", emptyMap()), sided("g1", GameState.COMPLETED).statsLink(noId.map { it.copy(id = null) }))
+    }
+
+    @Test
+    fun `stats link carries a team's logo, none when it has no image`() {
+        val noImage = listOf(teams[0].copy(imageUrl = null), teams[1].copy(imageUrl = " "))
+        assertEquals(
+            GameStatsLink("g1", mapOf("mvk" to GameTeam("MVK", null), "fur" to GameTeam("FUR", null))),
+            sided("g1", GameState.COMPLETED).statsLink(noImage),
+        )
     }
 
     @Test

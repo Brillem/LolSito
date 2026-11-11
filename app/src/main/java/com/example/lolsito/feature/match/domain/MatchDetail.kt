@@ -5,6 +5,7 @@ import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.UniqueKeys
+import com.example.lolsito.feature.game.domain.GameTeam
 import com.example.lolsito.core.model.formatMatchResult
 
 enum class GameState { UNSTARTED, IN_PROGRESS, COMPLETED, UNNEEDED, UNKNOWN }
@@ -25,7 +26,7 @@ data class MatchGame(
         get() = id?.takeIf { state == GameState.IN_PROGRESS || state == GameState.COMPLETED }
 
     /**
-     * Link to this game's stats ([statsGameId]) with the code of each of the [teams] that has an id
+     * Link to this game's stats ([statsGameId]) with the code and logo of each of the [teams] that has an id
      * and a code. The sides are left to the stats feed, which is the one that says who played where.
      */
     fun statsLink(teams: List<Team>): GameStatsLink? = statsGameId?.let { gameId ->
@@ -33,14 +34,16 @@ data class MatchGame(
             gameId,
             teams.mapNotNull { team ->
                 val id = team.id?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                team.code.takeIf { it.isNotBlank() }?.let { id to it }
+                team.code.takeIf { it.isNotBlank() }?.let { code ->
+                    id to GameTeam(code, team.imageUrl?.takeIf { it.isNotBlank() })
+                }
             }.toMap(),
         )
     }
 }
 
-/** What the game stats screen is opened with: the game plus the code of each team by team id. */
-data class GameStatsLink(val gameId: String, val teamCodes: Map<String, String>)
+/** What the game stats screen is opened with: the game plus the code and logo of each team by team id. */
+data class GameStatsLink(val gameId: String, val teams: Map<String, GameTeam>)
 
 data class MatchDetail(
     val matchId: String,

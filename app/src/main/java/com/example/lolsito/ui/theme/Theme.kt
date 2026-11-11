@@ -1,58 +1,59 @@
 package com.example.lolsito.ui.theme
 
-import android.app.Activity
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+/**
+ * The one scheme of the app: black background, very dark gray surfaces, off-white text and red as
+ * the only accent. [androidx.compose.material3.ColorScheme.inversePrimary] carries [RedText], the
+ * red to use for accent text on dark surfaces, where [Red] itself is too dim for small text.
+ */
+private val LolSitoColorScheme = darkColorScheme(
+    primary = Red,
+    onPrimary = OnRed,
+    primaryContainer = RedContainer,
+    onPrimaryContainer = OnRedContainer,
+    inversePrimary = RedText,
+    secondary = TextSecondary,
+    onSecondary = Black,
+    secondaryContainer = RedContainer,
+    onSecondaryContainer = OnRedContainer,
+    tertiary = RedText,
+    onTertiary = Black,
+    tertiaryContainer = RedContainer,
+    onTertiaryContainer = OnRedContainer,
+    background = Black,
+    onBackground = TextPrimary,
+    surface = Surface,
+    onSurface = TextPrimary,
+    surfaceVariant = SurfaceContainerHigh,
+    onSurfaceVariant = TextSecondary,
+    surfaceTint = Red,
+    inverseSurface = TextPrimary,
+    inverseOnSurface = SurfaceContainer,
+    error = ErrorRed,
+    onError = Black,
+    errorContainer = RedContainer,
+    onErrorContainer = OnRedContainer,
+    outline = Outline,
+    outlineVariant = OutlineVariant,
+    scrim = Black,
+    surfaceBright = SurfaceBright,
+    surfaceDim = Black,
+    surfaceContainerLowest = Black,
+    surfaceContainerLow = Surface,
+    surfaceContainer = SurfaceContainer,
+    surfaceContainerHigh = SurfaceContainerHigh,
+    surfaceContainerHighest = SurfaceContainerHighest,
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
-)
-
+/** Fixed dark theme: it ignores the system setting and Material dynamic color on purpose. */
 @Composable
-fun LolSitoTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit
-) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
+fun LolSitoTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = LolSitoColorScheme,
         typography = Typography,
-        content = content
+        content = content,
     )
 }

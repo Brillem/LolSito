@@ -78,7 +78,7 @@ class ScheduleViewModelTest {
             var content = awaitItem()
             while (content.status == LoadStatus.Loading) content = awaitItem()
             assertEquals(LoadStatus.Content, content.status)
-            assertEquals(listOf("1", "2"), content.days.flatMap { d -> d.events.map { it.matchId } })
+            assertEquals(listOf("1", "2"), content.upcomingIds())
             assertEquals(2, content.leagues.size)
             assertEquals(setOf(WORLDS), content.selectedLeagueIds)
             assertTrue(content.canLoadOlder)
@@ -129,13 +129,14 @@ class ScheduleViewModelTest {
 
         val empty = vm.uiState.value
         assertEquals(LoadStatus.Content, empty.status)
-        assertTrue(empty.days.isEmpty())
+        assertTrue(empty.upcomingDays.isEmpty())
+        assertTrue(empty.resultDays.isEmpty())
         assertTrue(empty.canLoadOlder)
         assertFalse(empty.canLoadNewer)
 
         vm.loadOlder()
         advanceUntilIdle()
-        assertEquals(listOf("1"), vm.uiState.value.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("1"), vm.uiState.value.upcomingIds())
     }
 
     @Test
@@ -146,7 +147,8 @@ class ScheduleViewModelTest {
 
         val empty = vm.uiState.value
         assertEquals(LoadStatus.Content, empty.status)
-        assertTrue(empty.days.isEmpty())
+        assertTrue(empty.upcomingDays.isEmpty())
+        assertTrue(empty.resultDays.isEmpty())
         assertFalse(empty.canLoadOlder)
         assertTrue(empty.canLoadNewer)
     }
@@ -175,7 +177,7 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val state = vm.uiState.value
-        assertEquals(listOf("1", "2", "3", "4"), state.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("1", "2", "3", "4"), state.upcomingIds())
         assertFalse(state.canLoadOlder)
         assertTrue(state.canLoadNewer)
 
@@ -202,7 +204,7 @@ class ScheduleViewModelTest {
         assertFalse(failed.isLoadingOlder)
         assertFalse(failed.isLoadingNewer)
         assertEquals(LoadStatus.Content, failed.status)
-        assertEquals(listOf("2"), failed.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("2"), failed.upcomingIds())
         assertTrue(failed.canLoadOlder)
         assertTrue(failed.canLoadNewer)
 
@@ -213,7 +215,7 @@ class ScheduleViewModelTest {
 
         val recovered = vm.uiState.value
         assertNull(recovered.olderError)
-        assertEquals(listOf("1", "2"), recovered.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("1", "2"), recovered.upcomingIds())
         assertFalse(recovered.canLoadOlder)
         assertTrue(recovered.canLoadNewer)
         assertEquals(setOf(WORLDS) to "o1", repository.requests.last())
@@ -236,7 +238,7 @@ class ScheduleViewModelTest {
         assertFalse(failed.isLoadingOlder)
         assertFalse(failed.isLoadingNewer)
         assertEquals(LoadStatus.Content, failed.status)
-        assertEquals(listOf("2"), failed.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("2"), failed.upcomingIds())
         assertTrue(failed.canLoadOlder)
         assertTrue(failed.canLoadNewer)
 
@@ -247,7 +249,7 @@ class ScheduleViewModelTest {
 
         val recovered = vm.uiState.value
         assertNull(recovered.newerError)
-        assertEquals(listOf("2", "3"), recovered.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("2", "3"), recovered.upcomingIds())
         assertTrue(recovered.canLoadOlder)
         assertFalse(recovered.canLoadNewer)
         assertEquals(setOf(WORLDS) to "n1", repository.requests.last())
@@ -277,7 +279,7 @@ class ScheduleViewModelTest {
         gate.complete(Unit)
         advanceUntilIdle()
         assertEquals(callsInFlight, repository.scheduleCalls)
-        assertEquals(listOf("1", "2"), vm.uiState.value.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("1", "2"), vm.uiState.value.upcomingIds())
         assertFalse(vm.uiState.value.isLoadingOlder)
         assertFalse(vm.uiState.value.isPaging)
     }
@@ -366,7 +368,7 @@ class ScheduleViewModelTest {
 
         val state = vm.uiState.value
         assertEquals(setOf(WORLDS, LCK), state.selectedLeagueIds)
-        assertEquals(listOf("9"), state.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("9"), state.upcomingIds())
         assertFalse(state.canLoadOlder)
         assertFalse(state.canLoadNewer)
         assertEquals(setOf(WORLDS, LCK) to null, repository.requests.last())
@@ -408,7 +410,7 @@ class ScheduleViewModelTest {
         val state = vm.uiState.value
         assertEquals(setOf(LCK), state.selectedLeagueIds)
         assertEquals(LoadStatus.Content, state.status)
-        assertEquals(listOf("7"), state.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("7"), state.upcomingIds())
         assertEquals(listOf(setOf(LCK) to null), repository.requests)
         assertEquals(1, repository.scheduleCalls)
         assertTrue("restoring does not write back", preferences.savedScheduleLeagueIds.isEmpty())
@@ -522,7 +524,7 @@ class ScheduleViewModelTest {
 
         assertEquals(setOf(WORLDS, LCK), vm.uiState.value.selectedLeagueIds)
         assertEquals(LoadStatus.Content, vm.uiState.value.status)
-        assertEquals(listOf("9"), vm.uiState.value.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("9"), vm.uiState.value.upcomingIds())
         assertTrue(preferences.savedScheduleLeagueIds.isEmpty())
     }
 
@@ -553,7 +555,7 @@ class ScheduleViewModelTest {
 
         val state = vm.uiState.value
         assertEquals(LoadStatus.Content, state.status)
-        assertEquals(listOf("1", "2"), state.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("1", "2"), state.upcomingIds())
         assertTrue(state.canLoadOlder)
         assertTrue(state.liveEvents.isEmpty())
         assertEquals(1, repository.scheduleCalls)
@@ -603,7 +605,7 @@ class ScheduleViewModelTest {
 
         val state = vm.uiState.value
         assertEquals(LoadStatus.Content, state.status)
-        assertEquals(listOf("1"), state.days.flatMap { d -> d.events.map { it.matchId } })
+        assertEquals(listOf("1"), state.upcomingIds())
         assertTrue(state.canLoadNewer)
         assertTrue(state.liveEvents.isEmpty())
         assertEquals(null, state.liveMatchIds)
@@ -642,7 +644,7 @@ class ScheduleViewModelTest {
     }
 
     @Test
-    fun `a match is live in the day list when the live feed says so, whatever the schedule says`() = runTest(dispatcher) {
+    fun `a match is live only in the live section when the live feed says so, whatever the schedule says`() = runTest(dispatcher) {
         repository.pages[key(setOf(WORLDS), null)] = page(
             listOf(event("started", 1), event("ended", 2, MatchState.IN_PROGRESS), event("later", 3)),
         )
@@ -651,10 +653,9 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val state = vm.uiState.value
-        val byId = state.days.flatMap { it.events }.associateBy { it.matchId }
-        assertTrue(state.isLive(byId.getValue("started")))
-        assertFalse(state.isLive(byId.getValue("ended")))
-        assertFalse(state.isLive(byId.getValue("later")))
+        assertEquals(listOf("started"), state.liveEvents.map { it.matchId })
+        assertEquals(listOf("later"), state.upcomingIds())
+        assertEquals("not in the feed any more, so it has finished", listOf("ended"), state.resultIds())
     }
 
     @Test
@@ -667,9 +668,213 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val state = vm.uiState.value
-        val byId = state.days.flatMap { it.events }.associateBy { it.matchId }
-        assertTrue(state.isLive(byId.getValue("1")))
-        assertFalse(state.isLive(byId.getValue("2")))
+        assertEquals(listOf("1"), state.liveEvents.map { it.matchId })
+        assertEquals(listOf("2"), state.upcomingIds())
+        assertTrue(state.resultIds().isEmpty())
+    }
+
+    @Test
+    fun `upcoming matches come soonest first and results most recent first`() = runTest(dispatcher) {
+        val done = MatchState.COMPLETED
+        repository.pages[key(setOf(WORLDS), null)] = page(
+            listOf(event("r1", 1, done), event("u2", 30), event("r2", 2, done), event("u1", 28)),
+            older = "o1",
+            newer = "n1",
+        )
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(listOf("u1", "u2"), state.upcomingIds())
+        assertEquals(listOf("r2", "r1"), state.resultIds())
+        assertTrue(state.canLoadOlder)
+        assertTrue(state.canLoadNewer)
+    }
+
+    @Test
+    fun `paging merges each page into its section and keeps the other flag`() = runTest(dispatcher) {
+        val done = MatchState.COMPLETED
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("r2", 2, done), event("u1", 30)), older = "o1", newer = "n1")
+        repository.pages[key(setOf(WORLDS), "o1")] = page(listOf(event("r1", 1, done)), older = null, newer = "x")
+        repository.pages[key(setOf(WORLDS), "n1")] = page(listOf(event("u2", 31)), older = "y", newer = null)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.loadOlder()
+        advanceUntilIdle()
+        assertEquals(listOf("r2", "r1"), vm.uiState.value.resultIds())
+        assertFalse(vm.uiState.value.canLoadOlder)
+        assertTrue(vm.uiState.value.canLoadNewer)
+
+        vm.loadNewer()
+        advanceUntilIdle()
+        assertEquals(listOf("u1", "u2"), vm.uiState.value.upcomingIds())
+        assertFalse(vm.uiState.value.canLoadNewer)
+    }
+
+    @Test
+    fun `a match that goes live moves out of upcoming into the live section on the next refresh`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1), event("2", 2)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(listOf("1", "2"), vm.uiState.value.upcomingIds())
+
+        liveRepository.events = listOf(live("1", WORLDS, 1))
+        vm.retry()
+        advanceUntilIdle()
+
+        assertEquals(listOf("1"), vm.uiState.value.liveEvents.map { it.matchId })
+        assertEquals(listOf("2"), vm.uiState.value.upcomingIds())
+    }
+
+    @Test
+    fun `a match that ends moves from the live section into the results`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1, MatchState.IN_PROGRESS)))
+        liveRepository.events = listOf(live("1", WORLDS, 1))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+        assertEquals(listOf("1"), vm.uiState.value.liveEvents.map { it.matchId })
+        assertTrue(vm.uiState.value.resultIds().isEmpty())
+
+        liveRepository.events = emptyList()
+        advance(LIVE_SECTION_POLL_INTERVAL)
+
+        assertTrue(vm.uiState.value.liveEvents.isEmpty())
+        assertEquals(listOf("1"), vm.uiState.value.resultIds())
+        polling.cancel()
+    }
+
+    @Test
+    fun `the live toggle starts off`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.liveOnly)
+    }
+
+    @Test
+    fun `the live toggle lists the live matches of every league and keeps the selection`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        liveRepository.events = listOf(live("w1", WORLDS, 0), live("k1", LCK, 1))
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(listOf("w1"), vm.uiState.value.liveEvents.map { it.matchId })
+
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+
+        val on = vm.uiState.value
+        assertTrue(on.liveOnly)
+        assertEquals(listOf("w1", "k1"), on.liveEvents.map { it.matchId })
+        assertEquals(setOf(WORLDS), on.selectedLeagueIds)
+
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+
+        val off = vm.uiState.value
+        assertFalse(off.liveOnly)
+        assertEquals(listOf("w1"), off.liveEvents.map { it.matchId })
+        assertEquals(setOf(WORLDS), off.selectedLeagueIds)
+        assertEquals(listOf("1"), off.upcomingIds())
+    }
+
+    @Test
+    fun `turning the live toggle on refreshes the live matches right away without touching the schedule`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(1, liveRepository.calls)
+        assertEquals(1, repository.scheduleCalls)
+
+        liveRepository.events = listOf(live("k1", LCK, 1))
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+
+        assertEquals(2, liveRepository.calls)
+        assertEquals(listOf("k1"), vm.uiState.value.liveEvents.map { it.matchId })
+        assertEquals(1, repository.scheduleCalls)
+
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+        assertEquals("turning it off needs no request", 2, liveRepository.calls)
+        assertEquals(1, repository.scheduleCalls)
+    }
+
+    @Test
+    fun `turning the live toggle on while a live request is in flight does not start another`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val gate = CompletableDeferred<Unit>()
+        liveRepository.gate = gate
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+        assertEquals(1, liveRepository.calls)
+
+        liveRepository.events = listOf(live("k1", LCK, 1))
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(1, liveRepository.calls)
+        assertEquals(listOf("k1"), vm.uiState.value.liveEvents.map { it.matchId })
+    }
+
+    @Test
+    fun `with nothing live the live toggle shows an empty list`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.liveOnly)
+        assertTrue(vm.uiState.value.liveEvents.isEmpty())
+    }
+
+    @Test
+    fun `changing the league chips while the live toggle is on keeps it on and still loads the selection`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        repository.pages[key(setOf(WORLDS, LCK), null)] = page(listOf(event("9", 9)))
+        liveRepository.events = listOf(live("k1", LCK, 1))
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+
+        vm.toggleLeague(LCK)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertTrue(state.liveOnly)
+        assertEquals(setOf(WORLDS, LCK), state.selectedLeagueIds)
+        assertEquals(listOf("k1"), state.liveEvents.map { it.matchId })
+        assertEquals(listOf(setOf(WORLDS, LCK)), preferences.savedScheduleLeagueIds)
+
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+        assertEquals(listOf("9"), vm.uiState.value.upcomingIds())
+        assertEquals(listOf("k1"), vm.uiState.value.liveEvents.map { it.matchId })
+    }
+
+    @Test
+    fun `polling keeps the live toggle list current`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.toggleLiveOnly()
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+        val before = liveRepository.calls
+
+        liveRepository.events = listOf(live("k1", LCK, 1))
+        advance(LIVE_SECTION_POLL_INTERVAL)
+
+        assertEquals(before + 1, liveRepository.calls)
+        assertEquals(listOf("k1"), vm.uiState.value.liveEvents.map { it.matchId })
+        polling.cancel()
     }
 
     @Test
@@ -680,7 +885,7 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val state = vm.uiState.value
-        val dayKeys = state.days.flatMap { it.keys }
+        val dayKeys = (state.upcomingDays + state.resultDays).flatMap { it.keys + it.headerKey }
         assertEquals(2, state.liveKeys.size)
         assertEquals(state.liveKeys.size, state.liveKeys.toSet().size)
         assertTrue((state.liveKeys + dayKeys).let { it.size == it.toSet().size })
@@ -691,7 +896,7 @@ class ScheduleViewModelTest {
         repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)), older = "o1")
         val vm = viewModel()
         advanceUntilIdle()
-        val daysBefore = vm.uiState.value.days
+        val daysBefore = vm.uiState.value.upcomingDays to vm.uiState.value.resultDays
         val polling = launch { vm.pollWhileVisible() }
 
         liveRepository.events = listOf(live("w1", WORLDS, 0))
@@ -704,7 +909,7 @@ class ScheduleViewModelTest {
 
         assertEquals(3, liveRepository.calls)
         assertEquals(1, repository.scheduleCalls)
-        assertEquals(daysBefore, vm.uiState.value.days)
+        assertEquals(daysBefore, vm.uiState.value.upcomingDays to vm.uiState.value.resultDays)
         assertEquals(LoadStatus.Content, vm.uiState.value.status)
         polling.cancel()
     }
@@ -784,6 +989,10 @@ class ScheduleViewModelTest {
         assertEquals(listOf("w1"), vm.uiState.value.liveEvents.map { it.matchId })
         polling.cancel()
     }
+
+    private fun ScheduleUiState.upcomingIds() = upcomingDays.flatMap { d -> d.events.map { it.matchId } }
+
+    private fun ScheduleUiState.resultIds() = resultDays.flatMap { d -> d.events.map { it.matchId } }
 
     private suspend fun TestScope.advance(duration: kotlin.time.Duration) {
         advanceTimeBy(duration)

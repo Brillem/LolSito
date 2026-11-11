@@ -48,22 +48,40 @@ object Routes {
     fun match(matchId: String): String = "match/${Uri.encode(matchId)}"
 
     const val GAME_ID_ARG = "gameId"
-    const val BLUE_CODE_ARG = "blueCode"
-    const val RED_CODE_ARG = "redCode"
-    /** The team codes are optional query arguments, so the route still matches `game/{gameId}`. */
-    const val GAME = "game/{$GAME_ID_ARG}?$BLUE_CODE_ARG={$BLUE_CODE_ARG}&$RED_CODE_ARG={$RED_CODE_ARG}"
+    private const val TEAM1_ID_ARG = "team1Id"
+    private const val TEAM1_CODE_ARG = "team1Code"
+    private const val TEAM2_ID_ARG = "team2Id"
+    private const val TEAM2_CODE_ARG = "team2Code"
 
-    fun game(gameId: String, blueCode: String?, redCode: String?): String = gameRoute(gameId, blueCode, redCode, Uri::encode)
+    /** Optional query arguments, an id and a code for each of the two teams, in that order. */
+    val TEAM_ARGS = listOf(TEAM1_ID_ARG, TEAM1_CODE_ARG, TEAM2_ID_ARG, TEAM2_CODE_ARG)
+
+    /** The team arguments are optional query arguments, so the route still matches `game/{gameId}`. */
+    const val GAME = "game/{$GAME_ID_ARG}?" +
+        "$TEAM1_ID_ARG={$TEAM1_ID_ARG}&$TEAM1_CODE_ARG={$TEAM1_CODE_ARG}&" +
+        "$TEAM2_ID_ARG={$TEAM2_ID_ARG}&$TEAM2_CODE_ARG={$TEAM2_CODE_ARG}"
+
+    fun game(gameId: String, teamCodes: Map<String, String>): String = gameRoute(gameId, teamCodes, Uri::encode)
 }
 
-/** Builds the game stats route; unknown codes are left out. [encode] is `Uri.encode` outside tests. */
-internal fun gameRoute(gameId: String, blueCode: String?, redCode: String?, encode: (String) -> String): String {
-    val query = listOfNotNull(
-        blueCode?.let { "${Routes.BLUE_CODE_ARG}=${encode(it)}" },
-        redCode?.let { "${Routes.RED_CODE_ARG}=${encode(it)}" },
-    )
+/**
+ * Builds the game stats route with the code of each team by team id (the first two, none when unknown).
+ * [encode] is `Uri.encode` outside tests.
+ */
+internal fun gameRoute(gameId: String, teamCodes: Map<String, String>, encode: (String) -> String): String {
+    val query = teamCodes.entries.take(2).flatMapIndexed { i, (id, code) ->
+        listOf(Routes.TEAM_ARGS[2 * i] to id, Routes.TEAM_ARGS[2 * i + 1] to code)
+    }.map { (name, value) -> "$name=${encode(value)}" }
     return "game/${encode(gameId)}" + if (query.isEmpty()) "" else query.joinToString("&", prefix = "?")
 }
+
+/** Team codes by team id from the route arguments, read through [argument]; a pair missing either half is ignored. */
+internal fun gameTeamCodes(argument: (String) -> String?): Map<String, String> =
+    Routes.TEAM_ARGS.chunked(2).mapNotNull { (idArg, codeArg) ->
+        val id = argument(idArg)
+        val code = argument(codeArg)
+        if (id != null && code != null) id to code else null
+    }.toMap()
 
 /** Top-level destinations shown in the bottom bar. Pushed screens (match detail, game stats) hide the bar. */
 private enum class TopLevelDestination(val route: String, val label: String, @DrawableRes val icon: Int) {
@@ -166,7 +184,7 @@ fun LolSitoApp(container: AppContainer) {
                     viewModel = vm,
                     onBack = { navController.navigateUp() },
                     onGameClick = { link ->
-                        navController.navigateFrom(entry, Routes.game(link.gameId, link.blueTeamCode, link.redTeamCode))
+                        navController.navigateFrom(entry, Routes.game(link.gameId, link.teamCodes))
                     },
                 )
             }
@@ -174,9 +192,9 @@ fun LolSitoApp(container: AppContainer) {
                 Routes.GAME,
                 arguments = listOf(
                     navArgument(Routes.GAME_ID_ARG) { type = NavType.StringType },
-                    navArgument(Routes.BLUE_CODE_ARG) { type = NavType.StringType; nullable = true; defaultValue = null },
-                    navArgument(Routes.RED_CODE_ARG) { type = NavType.StringType; nullable = true; defaultValue = null },
-                ),
+                ) + Routes.TEAM_ARGS.map { name ->
+                    navArgument(name) { type = NavType.StringType; nullable = true; defaultValue = null }
+                },
             ) { entry ->
                 val arguments = entry.arguments
                 val gameId = requireNotNull(arguments?.getString(Routes.GAME_ID_ARG))
@@ -187,8 +205,7 @@ fun LolSitoApp(container: AppContainer) {
                 )
                 GameStatsScreen(
                     viewModel = vm,
-                    blueTeamCode = arguments?.getString(Routes.BLUE_CODE_ARG),
-                    redTeamCode = arguments?.getString(Routes.RED_CODE_ARG),
+                    teamCodes = gameTeamCodes { name -> arguments?.getString(name) },
                     onBack = { navController.navigateUp() },
                 )
             }

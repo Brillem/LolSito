@@ -24,18 +24,23 @@ data class MatchGame(
     val statsGameId: String?
         get() = id?.takeIf { state == GameState.IN_PROGRESS || state == GameState.COMPLETED }
 
-    /** Link to this game's stats ([statsGameId]) with the codes of the [teams] on each side, if known. */
+    /**
+     * Link to this game's stats ([statsGameId]) with the code of each of the [teams] that has an id
+     * and a code. The sides are left to the stats feed, which is the one that says who played where.
+     */
     fun statsLink(teams: List<Team>): GameStatsLink? = statsGameId?.let { gameId ->
-        GameStatsLink(gameId, blueTeamCode = codeOn(GameSide.BLUE, teams), redTeamCode = codeOn(GameSide.RED, teams))
+        GameStatsLink(
+            gameId,
+            teams.mapNotNull { team ->
+                val id = team.id?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                team.code.takeIf { it.isNotBlank() }?.let { id to it }
+            }.toMap(),
+        )
     }
-
-    /** Null unless exactly one team plays on [side] and it has a code. */
-    private fun codeOn(side: GameSide, teams: List<Team>): String? =
-        teams.singleOrNull { sideOf(it.id) == side }?.code?.takeIf { it.isNotBlank() }
 }
 
-/** What the game stats screen is opened with: the game plus the team codes on each side, if known. */
-data class GameStatsLink(val gameId: String, val blueTeamCode: String?, val redTeamCode: String?)
+/** What the game stats screen is opened with: the game plus the code of each team by team id. */
+data class GameStatsLink(val gameId: String, val teamCodes: Map<String, String>)
 
 data class MatchDetail(
     val matchId: String,

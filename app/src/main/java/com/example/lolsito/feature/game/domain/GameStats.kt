@@ -1,7 +1,5 @@
 package com.example.lolsito.feature.game.domain
 
-import com.example.lolsito.core.model.UniqueKeys
-
 /** Stats of one game at the latest frame the livestats feed has for it. */
 data class GameStats(
     /** True once the feed reports the game as finished; otherwise the frame is from a live game. */
@@ -10,6 +8,10 @@ data class GameStats(
     val redTeam: TeamStats,
     /** Data Dragon version to load item icons from, null when the feed's patch is unknown. */
     val dataDragonVersion: String? = null,
+    /** Id of the team the feed puts on the blue side; null when the feed does not say. */
+    val blueTeamId: String? = null,
+    /** Id of the team the feed puts on the red side; null when the feed does not say. */
+    val redTeamId: String? = null,
 ) {
     /** These stats with [details] (by participant id) attached to the players they belong to. */
     fun withDetails(details: Map<Int, PlayerDetails>): GameStats = mapPlayers { it.copy(details = details[it.participantId]) }
@@ -37,13 +39,7 @@ data class TeamStats(
     val barons: Int,
     /** Ordered by participant id, which follows the role order (top to support). */
     val players: List<PlayerStats>,
-) {
-    /** LazyColumn keys aligned with [players], unique even if the feed repeats a participant id. */
-    val playerKeys: List<String> by lazy {
-        val unique = UniqueKeys()
-        players.map { unique.next("player:${it.participantId}") }
-    }
-}
+)
 
 data class PlayerStats(
     val participantId: Int,
@@ -57,6 +53,8 @@ data class PlayerStats(
     val level: Int,
     /** Null when the details feed has nothing for this player (yet). */
     val details: PlayerDetails? = null,
+    /** Lane as the feed sends it (for example "top"); null when it does not say. */
+    val role: String? = null,
 )
 
 data class PlayerDetails(

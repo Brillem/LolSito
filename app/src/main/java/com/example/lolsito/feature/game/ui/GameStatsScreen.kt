@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,7 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -25,6 +26,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,16 +49,18 @@ import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.game.domain.GameStats
+import com.example.lolsito.feature.game.domain.Matchup
 import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
+import com.example.lolsito.feature.game.domain.Role
 import com.example.lolsito.feature.game.domain.TeamStats
+import com.example.lolsito.feature.game.domain.matchups
 
 /** Container: wires the ViewModel to the stateless [GameStatsContent]. */
 @Composable
 fun GameStatsScreen(
     viewModel: GameStatsViewModel,
-    blueTeamCode: String?,
-    redTeamCode: String?,
+    teamCodes: Map<String, String>,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -64,8 +68,7 @@ fun GameStatsScreen(
     WhileStarted(viewModel) { viewModel.pollWhileVisible() }
     GameStatsContent(
         state = state,
-        blueTeamCode = blueTeamCode,
-        redTeamCode = redTeamCode,
+        teamCodes = teamCodes,
         onBack = onBack,
         onRetry = viewModel::retry,
         modifier = modifier,
@@ -76,9 +79,8 @@ fun GameStatsScreen(
 @Composable
 fun GameStatsContent(
     state: GameStatsUiState,
-    /** Codes of the teams on each side; the side name is shown when a code is unknown. */
-    blueTeamCode: String?,
-    redTeamCode: String?,
+    /** Team codes by team id; a side whose team is not in it is shown by its side name. */
+    teamCodes: Map<String, String>,
     onBack: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -95,10 +97,14 @@ fun GameStatsContent(
             },
         )
         LoadStatusView(state.status, emptyMessage = "No stats available for this game", onRetry = onRetry) {
-            state.stats?.let { GameStatsBody(it, blueTeamCode, redTeamCode) }
+            state.stats?.let { GameStatsBody(it, teamCodes) }
         }
     }
 }
+
+/** Code of the team with [teamId] in [teamCodes] (by team id); null when the id is missing, unknown or has a blank code. */
+fun teamCodeFor(teamId: String?, teamCodes: Map<String, String>): String? =
+    teamId?.let(teamCodes::get)?.takeIf { it.isNotBlank() }
 
 /** The team [code] when known, otherwise [fallback] (the side). */
 fun teamLabel(code: String?, fallback: String): String = code?.takeIf { it.isNotBlank() } ?: fallback
@@ -130,16 +136,27 @@ private val teamRows: List<Pair<String, (TeamStats) -> String>> = listOf(
 )
 
 @Composable
-private fun GameStatsBody(stats: GameStats, blueTeamCode: String?, redTeamCode: String?) {
-    // Keys of the expanded player rows: by participant, so polling refreshes and scrolling keep them open.
+private fun GameStatsBody(stats: GameStats, teamCodes: Map<String, String>) {
+    // The feed says which team plays on which side; event details are not trusted for that.
+    val blueCode = teamCodeFor(stats.blueTeamId, teamCodes)
+    val redCode = teamCodeFor(stats.redTeamId, teamCodes)
+    val matchups = remember(stats.blueTeam.players, stats.redTeam.players) { stats.matchups() }
+    // Keys of the expanded matchup rows: by role, so polling refreshes, scrolling and rotation keep them open.
     var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val toggle = { key: String -> expanded = if (key in expanded) expanded - key else expanded + key }
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "teams") {
-            TeamComparison(stats, blueLabel = teamLabel(blueTeamCode, "Blue"), redLabel = teamLabel(redTeamCode, "Red"))
+            TeamComparison(stats, blueLabel = teamLabel(blueCode, "Blue"), redLabel = teamLabel(redCode, "Red"))
         }
-        players(Side.BLUE, teamLabel(blueTeamCode, Side.BLUE.label), stats.blueTeam, stats.dataDragonVersion, expanded, toggle)
-        players(Side.RED, teamLabel(redTeamCode, Side.RED.label), stats.redTeam, stats.dataDragonVersion, expanded, toggle)
+        item(key = "matchups-header") {
+            Column {
+                HorizontalDivider()
+                MatchupHeader(blueLabel = teamLabel(blueCode, Side.BLUE.label), redLabel = teamLabel(redCode, Side.RED.label))
+            }
+        }
+        items(matchups, key = { it.key }) { matchup ->
+            MatchupRow(matchup, stats.dataDragonVersion, expanded = matchup.key in expanded, onClick = { toggle(matchup.key) })
+        }
     }
 }
 
@@ -187,79 +204,145 @@ private fun ComparisonRow(blue: String, label: String, red: String, header: Bool
     }
 }
 
-private fun LazyListScope.players(
-    side: Side,
-    title: String,
-    team: TeamStats,
-    version: String?,
-    expanded: List<String>,
-    onToggle: (String) -> Unit,
-) {
-    item(key = "${side.name}-title") {
-        Column {
-            HorizontalDivider()
-            Text(
-                title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = side.color,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
-            )
-            PlayerColumns(
-                name = "Player",
-                kda = "K/D/A",
-                cs = "CS",
-                level = "Lvl",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                // Indented past the side strip of the player rows.
-                modifier = Modifier.padding(start = 28.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
-            )
-        }
-    }
-    val keys = team.playerKeys
-    items(team.players.size, key = { "${side.name}:${keys[it]}" }) { index ->
-        val player = team.players[index]
-        val key = "${side.name}:${keys[index]}"
-        Column {
-            PlayerRow(player, side, onClick = { onToggle(key) })
-            if (key in expanded) PlayerDetailsPanel(player.details, version)
-        }
-    }
-}
-
 @Composable
-private fun PlayerRow(player: PlayerStats, side: Side, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.width(4.dp).height(36.dp).background(side.color))
-        Spacer(Modifier.width(8.dp))
-        PlayerColumns(
-            name = player.summonerName,
-            champion = player.championId,
-            kda = "${player.kills}/${player.deaths}/${player.assists}",
-            cs = player.creepScore.toString(),
-            level = player.level.toString(),
-            color = MaterialTheme.colorScheme.onSurface,
+private fun MatchupHeader(blueLabel: String, redLabel: String) {
+    Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
+        Text(
+            blueLabel,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = Side.BLUE.color,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(ROLE_COLUMN_WIDTH))
+        Text(
+            redLabel,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = Side.RED.color,
+            textAlign = TextAlign.End,
             modifier = Modifier.weight(1f),
         )
     }
 }
 
-/** What opening a player row shows; "Details unavailable" when the details feed had nothing. */
+private val ROLE_COLUMN_WIDTH = 36.dp
+private val STATS_COLUMN_WIDTH = 60.dp
+
+/**
+ * Two opposing players on one row, mirrored around the role in the middle: names toward the outer edges,
+ * stats toward the center. Opening it shows both players' details side by side.
+ */
 @Composable
-private fun PlayerDetailsPanel(details: PlayerDetails?, version: String?) {
-    Column(
-        Modifier.fillMaxWidth().padding(start = 28.dp, end = 16.dp, bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+private fun MatchupRow(matchup: Matchup, version: String?, expanded: Boolean, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            PlayerHalf(matchup.blue, Side.BLUE, Modifier.weight(1f))
+            Text(
+                matchup.role?.let(::roleLabel).orEmpty(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                modifier = Modifier.width(ROLE_COLUMN_WIDTH),
+            )
+            PlayerHalf(matchup.red, Side.RED, Modifier.weight(1f))
+        }
+        if (expanded) {
+            Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PlayerDetailsPanel(matchup.blue, version, Modifier.weight(1f))
+                PlayerDetailsPanel(matchup.red, version, Modifier.weight(1f))
+            }
+        }
+        HorizontalDivider()
+    }
+}
+
+/** Short lane name that fits the narrow center column. */
+private fun roleLabel(role: Role): String = when (role) {
+    Role.TOP -> "Top"
+    Role.JUNGLE -> "Jng"
+    Role.MID -> "Mid"
+    Role.BOTTOM -> "Bot"
+    Role.SUPPORT -> "Sup"
+}
+
+/**
+ * One side of a matchup: a strip in the side color on the outer edge, the name and champion toward the
+ * edge and the stats toward the center. The red side is the mirror image of the blue one.
+ */
+@Composable
+private fun PlayerHalf(player: PlayerStats?, side: Side, modifier: Modifier = Modifier) {
+    val mirrored = side == Side.RED
+    val horizontalAlignment = if (mirrored) Alignment.End else Alignment.Start
+    val textAlign = if (mirrored) TextAlign.End else TextAlign.Start
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        if (!mirrored) Box(Modifier.width(3.dp).height(36.dp).background(side.color))
+        if (player == null) {
+            Spacer(Modifier.weight(1f))
+        } else {
+            val identity: @Composable RowScope.() -> Unit = {
+                Column(Modifier.weight(1f).padding(horizontal = 6.dp), horizontalAlignment = horizontalAlignment) {
+                    Text(
+                        player.summonerName,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = textAlign,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        player.championId,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = textAlign,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            val stats: @Composable RowScope.() -> Unit = {
+                Column(Modifier.width(STATS_COLUMN_WIDTH), horizontalAlignment = if (mirrored) Alignment.Start else Alignment.End) {
+                    Text(
+                        "${player.kills}/${player.deaths}/${player.assists}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                    )
+                    Text(
+                        "${player.creepScore} CS · ${player.level}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+            if (mirrored) {
+                stats()
+                identity()
+            } else {
+                identity()
+                stats()
+            }
+        }
+        if (mirrored) Box(Modifier.width(3.dp).height(36.dp).background(side.color))
+    }
+}
+
+/** What opening a matchup shows for one player; "Details unavailable" when the details feed had nothing. */
+@Composable
+private fun PlayerDetailsPanel(player: PlayerStats?, version: String?, modifier: Modifier = Modifier) {
+    val details = player?.details
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (details == null) {
             Text("Details unavailable", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             return@Column
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            details.itemIds.forEach { ItemSlot(it, version) }
+        // Three per row: six items do not fit side by side in half a phone width.
+        details.itemIds.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { row.forEach { ItemSlot(it, version) } }
         }
         DetailLine("Runes", runesLabel(details))
         DetailLine("Damage share", formatPercent(details.damageShare))
@@ -280,7 +363,7 @@ fun runesLabel(details: PlayerDetails): String {
 private fun DetailLine(label: String, value: String) {
     Row(Modifier.fillMaxWidth()) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
+        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
     }
 }
 
@@ -289,7 +372,7 @@ private fun DetailLine(label: String, value: String) {
 private fun ItemSlot(itemId: Int, version: String?) {
     val shape = RoundedCornerShape(4.dp)
     val idText: @Composable () -> Unit = {
-        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
             Text(itemId.toString(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }
@@ -301,59 +384,57 @@ private fun ItemSlot(itemId: Int, version: String?) {
     SubcomposeAsyncImage(
         model = url,
         contentDescription = "Item $itemId",
-        modifier = Modifier.size(32.dp).clip(shape),
-        loading = { Box(Modifier.size(32.dp).background(MaterialTheme.colorScheme.surfaceVariant)) },
+        modifier = Modifier.size(28.dp).clip(shape),
+        loading = { Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.surfaceVariant)) },
         error = { idText() },
     )
 }
 
-/** One player line, shared with the column headers so values line up under their labels. */
-@Composable
-private fun PlayerColumns(
-    name: String,
-    kda: String,
-    cs: String,
-    level: String,
-    color: Color,
-    modifier: Modifier = Modifier,
-    champion: String? = null,
-) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (champion != null) FontWeight.SemiBold else FontWeight.Normal,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (champion != null) {
-                Text(
-                    champion,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Text(kda, style = MaterialTheme.typography.bodyMedium, color = color, textAlign = TextAlign.Center, modifier = Modifier.width(72.dp))
-        Text(cs, style = MaterialTheme.typography.bodyMedium, color = color, textAlign = TextAlign.End, modifier = Modifier.width(40.dp))
-        Text(level, style = MaterialTheme.typography.bodyMedium, color = color, textAlign = TextAlign.End, modifier = Modifier.width(36.dp))
-    }
-}
+private val previewRoles = listOf("top", "jungle", "mid", "bottom", "support")
 
-private fun previewTeam(firstId: Int, prefix: String) = TeamStats(
+private fun previewTeam(firstId: Int, prefix: String, details: PlayerDetails? = null) = TeamStats(
     totalGold = 31850,
     kills = 2,
     towers = 1,
     dragons = 1,
     barons = 0,
     players = (firstId until firstId + 5).map { id ->
-        PlayerStats(id, "$prefix Player$id", "Olaf", kills = 1, deaths = 2, assists = 3, creepScore = 142, level = 12)
+        PlayerStats(
+            id, "$prefix Player$id", "Olaf", kills = 1, deaths = 2, assists = 3, creepScore = 142, level = 12,
+            details = details, role = previewRoles[(id - 1) % 5],
+        )
     },
 )
+
+private val previewDetails = PlayerDetails(
+    itemIds = listOf(3078, 3111, 3071, 6693, 3036, 3026),
+    primaryStyleId = 8000,
+    secondaryStyleId = 8100,
+    keystoneId = 8010,
+    damageShare = 0.29,
+    killParticipation = 0.65,
+    totalGold = 11200,
+    wardsPlaced = 12,
+    wardsDestroyed = 3,
+)
+
+private val previewMatchup = GameStats(
+    isFinished = true,
+    blueTeam = previewTeam(1, "MVK", previewDetails),
+    redTeam = previewTeam(6, "FUR", previewDetails.copy(itemIds = listOf(3078, 3111))),
+).matchups().first()
+
+@Preview(showBackground = true)
+@Composable
+private fun MatchupRowPreview() {
+    MatchupRow(previewMatchup, version = null, expanded = false, onClick = {})
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun MatchupRowExpandedPreview() {
+    MatchupRow(previewMatchup, version = null, expanded = true, onClick = {})
+}
 
 @Preview(showBackground = true)
 @Composable
@@ -361,10 +442,15 @@ private fun GameStatsContentPreview() {
     GameStatsContent(
         state = GameStatsUiState(
             LoadStatus.Content,
-            GameStats(isFinished = true, blueTeam = previewTeam(1, "MVK"), redTeam = previewTeam(6, "FUR")),
+            GameStats(
+                isFinished = true,
+                blueTeam = previewTeam(1, "MVK"),
+                redTeam = previewTeam(6, "FUR"),
+                blueTeamId = "mvk",
+                redTeamId = "fur",
+            ),
         ),
-        blueTeamCode = "MVK",
-        redTeamCode = "FUR",
+        teamCodes = mapOf("mvk" to "MVK", "fur" to "FUR"),
         onBack = {},
         onRetry = {},
     )
@@ -375,8 +461,7 @@ private fun GameStatsContentPreview() {
 private fun GameStatsEmptyPreview() {
     GameStatsContent(
         state = GameStatsUiState(LoadStatus.Empty),
-        blueTeamCode = null,
-        redTeamCode = null,
+        teamCodes = emptyMap(),
         onBack = {},
         onRetry = {},
     )

@@ -96,4 +96,28 @@ class LolEsportsApiTest {
         assertEquals("115660540725177488", request.url.queryParameter("tournamentId"))
         assertEquals(3, response.data.standings.single().stages.size)
     }
+
+    @Test
+    fun `getLive sends api key and locale and parses the live fixture`() = runTest {
+        server.enqueue(MockResponse.Builder().body(Fixtures.read("getLive_live.json")).build())
+
+        val response = api.getLive()
+
+        val request = server.takeRequest()
+        assertEquals(ApiConfig.API_KEY, request.headers["x-api-key"])
+        assertEquals("/persisted/gw/getLive", request.url.encodedPath)
+        assertEquals("en-US", request.url.queryParameter("hl"))
+        val event = response.data.schedule.events.single()
+        assertEquals("match", event.type)
+        assertEquals("inProgress", event.state)
+        assertEquals("117393366911740182", event.league?.id)
+        assertEquals("117393592614464348", event.match?.id)
+    }
+
+    @Test
+    fun `getLive parses the empty fixture as no events`() = runTest {
+        server.enqueue(MockResponse.Builder().body(Fixtures.read("getLive.json")).build())
+
+        assertEquals(emptyList<Any>(), api.getLive().data.schedule.events)
+    }
 }

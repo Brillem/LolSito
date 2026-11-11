@@ -11,6 +11,7 @@ Header: `x-api-key: 0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z` (public web key; 4
 | getLeagues.json | `getLeagues?hl=en-US` |
 | getSchedule_worlds.json | `getSchedule?hl=en-US&leagueId=98767975604431411` (pagination: `pageToken` from `pages.older/newer`) |
 | getLive.json | `getLive?hl=en-US` (empty: no live match at capture time) |
+| getLive_live.json | `getLive?hl=en-US` captured 2026-11-11 with one live match (LCP P&R, FAK vs GZ, Bo5, 2-2); `type` is `match` here, other values (shows) have no `match` |
 | getTournamentsForLeague_worlds.json | `getTournamentsForLeague?hl=en-US&leagueId=98767975604431411` |
 | getStandings_lck.json | `getStandings?hl=en-US&tournamentId=115548147890329817` (populated rankings) |
 | getStandings_worlds2026.json | `getStandings?hl=en-US&tournamentId=115660540725177488` (empty rankings: bracket/swiss stages) |

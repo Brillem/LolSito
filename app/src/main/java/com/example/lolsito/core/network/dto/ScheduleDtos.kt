@@ -28,7 +28,7 @@ data class EventDto(
 )
 
 @Serializable
-data class EventLeagueDto(val name: String? = null, val slug: String? = null)
+data class EventLeagueDto(val name: String? = null, val slug: String? = null, val id: String? = null)
 
 @Serializable
 data class MatchDto(

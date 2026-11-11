@@ -14,6 +14,8 @@ data class ScheduleEvent(
     val leagueName: String,
     val leagueSlug: String?,
     val match: Match?,
+    /** League id; only the live feed sends it (the schedule does not). */
+    val leagueId: String? = null,
 ) {
     /** The only real identity an event has; null for match-less events (e.g. show matches). */
     val matchId: String? get() = match?.id
@@ -41,6 +43,12 @@ data class ScheduleDay(val date: LocalDate, val events: List<ScheduleEvent>) {
 
 interface ScheduleRepository {
     suspend fun getSchedule(leagueIds: List<String>, pageToken: String?): SchedulePage
+}
+
+/** Matches being played right now, across all leagues. */
+interface LiveMatchesRepository {
+    /** Live events that are matches, in feed order; empty when nothing is live. */
+    suspend fun getLiveMatches(): List<ScheduleEvent>
 }
 
 fun groupEventsByDay(events: List<ScheduleEvent>, zoneId: ZoneId): List<ScheduleDay> =

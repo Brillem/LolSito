@@ -42,7 +42,9 @@ import com.example.lolsito.core.model.formatMatchResult
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
+import com.example.lolsito.core.ui.LiveBadge
 import com.example.lolsito.core.ui.TeamLogo
+import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import java.time.Instant
@@ -59,6 +61,7 @@ fun ScheduleScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    WhileStarted(viewModel) { viewModel.pollWhileVisible() }
     ScheduleContent(
         state = state,
         onToggleLeague = viewModel::toggleLeague,
@@ -126,6 +129,12 @@ private fun ScheduleList(
     onMatchClick: (String) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
+        if (state.liveEvents.isNotEmpty()) {
+            stickyHeader(key = "live-header") { SectionHeader("Live now") }
+            itemsIndexed(state.liveEvents, key = { index, _ -> state.liveKeys[index] }) { _, event ->
+                EventRow(event, state.zoneId, isLive = true, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+            }
+        }
         item(key = "older") {
             PagingButton(
                 "Load older",
@@ -149,7 +158,12 @@ private fun ScheduleList(
         state.days.forEach { day ->
             stickyHeader(key = "day-${day.date}") { DayHeader(day.date) }
             itemsIndexed(day.events, key = { index, _ -> day.keys[index] }) { _, event ->
-                EventRow(event, state.zoneId, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+                EventRow(
+                    event,
+                    state.zoneId,
+                    isLive = state.isLive(event),
+                    onClick = event.matchId?.let { id -> { onMatchClick(id) } },
+                )
             }
         }
         item(key = "newer") {
@@ -187,9 +201,12 @@ private val dayFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
 private val timeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
 @Composable
-fun DayHeader(date: LocalDate, modifier: Modifier = Modifier) {
+fun DayHeader(date: LocalDate, modifier: Modifier = Modifier) = SectionHeader(date.format(dayFormatter), modifier)
+
+@Composable
+private fun SectionHeader(title: String, modifier: Modifier = Modifier) {
     Text(
-        text = date.format(dayFormatter),
+        text = title,
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.Bold,
         modifier = modifier
@@ -204,6 +221,8 @@ fun EventRow(
     event: ScheduleEvent,
     zoneId: ZoneId,
     modifier: Modifier = Modifier,
+    /** Shows the LIVE badge; defaults to the event's own state for callers that have no live feed. */
+    isLive: Boolean = event.state == MatchState.IN_PROGRESS,
     /** Null for rows without a match, which are not clickable. */
     onClick: (() -> Unit)? = null,
 ) {
@@ -218,9 +237,7 @@ fun EventRow(
     ) {
         Column(Modifier.width(64.dp)) {
             Text(event.startTime.atZone(zoneId).format(timeFormatter), style = MaterialTheme.typography.bodyMedium)
-            if (event.state == MatchState.IN_PROGRESS) {
-                Text("LIVE", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-            }
+            if (isLive) LiveBadge()
         }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

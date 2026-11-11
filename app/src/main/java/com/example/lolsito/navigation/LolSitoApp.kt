@@ -120,6 +120,7 @@ fun LolSitoApp(container: AppContainer) {
                         initializer {
                             ScheduleViewModel(
                                 repository = container.scheduleRepository,
+                                liveRepository = container.liveMatchesRepository,
                                 leaguesRepository = container.leaguesRepository,
                                 preferences = container.userPreferences,
                                 zoneId = container.zoneId(),

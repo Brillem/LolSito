@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -39,6 +40,12 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
         }
     }
 
+    override suspend fun getNoSpoilers(): Boolean? = dataStore.data.first()[NO_SPOILERS]
+
+    override suspend fun saveNoSpoilers(enabled: Boolean) {
+        dataStore.edit { it[NO_SPOILERS] = enabled }
+    }
+
     companion object {
         /** A corrupt file is replaced by empty preferences, so persistence recovers instead of failing forever. */
         internal val corruptionHandler = ReplaceFileCorruptionHandler<Preferences> { emptyPreferences() }
@@ -46,6 +53,7 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
         internal val SCHEDULE_LEAGUE_IDS = stringSetPreferencesKey("schedule.leagueIds")
         internal val STANDINGS_LEAGUE_ID = stringPreferencesKey("standings.leagueId")
         internal val STANDINGS_TOURNAMENT_ID = stringPreferencesKey("standings.tournamentId")
+        internal val NO_SPOILERS = booleanPreferencesKey("noSpoilers")
 
         fun create(context: Context): UserPreferences =
             DataStoreUserPreferences(context.applicationContext.userPreferencesDataStore)

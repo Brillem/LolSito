@@ -192,7 +192,7 @@ fun LolSitoApp(container: AppContainer) {
                 val matchId = requireNotNull(entry.arguments?.getString(Routes.MATCH_ID_ARG))
                 val vm: MatchDetailViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { MatchDetailViewModel(matchId, container.matchDetailRepository) }
+                        initializer { MatchDetailViewModel(matchId, container.matchDetailRepository, container.userPreferences) }
                     }
                 )
                 MatchDetailScreen(

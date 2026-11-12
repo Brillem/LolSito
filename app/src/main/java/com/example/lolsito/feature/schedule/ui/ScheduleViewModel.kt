@@ -51,6 +51,8 @@ data class ScheduleUiState(
     val liveOnly: Boolean = false,
     /** Every match the live feed currently reports, of any league; null until it answered once. */
     val liveMatchIds: Set<String>? = null,
+    /** The eye toggle: finished results are hidden (see [eventRowDisplay]). Remembered between launches. */
+    val noSpoilers: Boolean = false,
 ) {
     /** Only one page loads at a time, so both paging buttons are disabled while one is in flight. */
     val isPaging: Boolean get() = isLoadingOlder || isLoadingNewer
@@ -74,6 +76,8 @@ data class ScheduleUiState(
  * league, so the section is the feed filtered by the current selection and needs no request when the
  * selection changes. The LIVE toggle ([toggleLiveOnly]) swaps the page for the feed's matches of all
  * leagues; it leaves the selection and the loaded schedule alone and is not remembered.
+ *
+ * The no-spoilers mode ([toggleNoSpoilers]) is saved the same way and restored before the first request.
  *
  * The selection is saved in [preferences] on every
  * toggle and restored once, before the first schedule request, so a stored selection never costs a
@@ -101,6 +105,9 @@ class ScheduleViewModel(
     private var lastLiveMatches: List<ScheduleEvent> = emptyList()
     private var lastLiveIds: Set<String>? = null
     private var liveLoading = false
+
+    /** True once the stored no-spoilers mode was read or superseded by a user toggle. */
+    private var noSpoilersRestored = false
 
     /** True once the stored selection was applied or superseded (a user toggle, or nothing usable stored). */
     private var selectionRestored = false
@@ -130,6 +137,38 @@ class ScheduleViewModel(
         val on = !_uiState.value.liveOnly
         _uiState.update { it.copy(liveOnly = on).withSections() }
         if (on) loadLive()
+    }
+
+    /** Flips the mode at once and remembers it; Standings and Match detail read it when they are shown. */
+    fun toggleNoSpoilers() {
+        noSpoilersRestored = true
+        val on = !_uiState.value.noSpoilers
+        _uiState.update { it.copy(noSpoilers = on) }
+        viewModelScope.launch {
+            try {
+                preferences.saveNoSpoilers(on)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Not remembering the mode is better than failing the toggle.
+            }
+        }
+    }
+
+    /** Runs before the first request, so a stored "on" never flashes results; unreadable counts as off. */
+    private suspend fun restoreNoSpoilers() {
+        if (noSpoilersRestored) return
+        val stored = try {
+            preferences.getNoSpoilers()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        // A toggle made while reading wins over the stored value.
+        if (noSpoilersRestored) return
+        noSpoilersRestored = true
+        if (stored != null) _uiState.update { it.copy(noSpoilers = stored) }
     }
 
     fun toggleLeague(leagueId: String) {
@@ -176,6 +215,7 @@ class ScheduleViewModel(
         }
         loadJob = viewModelScope.launch {
             try {
+                restoreNoSpoilers()
                 if (_uiState.value.leagues.isEmpty()) {
                     val leagues = leaguesRepository.getLeagues()
                     // One update, so the chips never show the default selection next to the real leagues.

@@ -34,6 +34,8 @@ data class StandingsUiState(
     val selectedTournamentId: String? = null,
     val standingsStatus: LoadStatus = LoadStatus.Loading,
     val rows: List<StandingsRow> = emptyList(),
+    /** No-spoilers mode, set in Schedule: finished matches show no score or winner. The ranking tables are not affected. */
+    val noSpoilers: Boolean = false,
 ) {
     /**
      * Name of the selected league, or a neutral label until the leagues load. A leagues retry keeps
@@ -92,6 +94,7 @@ class StandingsViewModel(
     private var tournamentsRequested = false
 
     init {
+        refreshNoSpoilers()
         viewModelScope.launch {
             val stored = readStoredSelection()
             val leagues = CompletableDeferred<List<League>?>()
@@ -99,6 +102,22 @@ class StandingsViewModel(
             if (stored != null) restoreIfListed(stored, leagues)
             selectionRestored = true
             if (!tournamentsRequested) loadTournaments()
+        }
+    }
+
+    /**
+     * Reads the no-spoilers mode, which Schedule changes; the screen calls it every time it comes back, so a
+     * toggle made meanwhile shows up. An unreadable preference keeps the current value (off at first).
+     */
+    fun refreshNoSpoilers() {
+        viewModelScope.launch {
+            try {
+                preferences.getNoSpoilers()?.let { stored -> _uiState.update { it.copy(noSpoilers = stored) } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Keep showing with the current mode.
+            }
         }
     }
 

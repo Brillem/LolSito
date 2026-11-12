@@ -7,6 +7,7 @@ import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.polling.MATCH_DETAIL_POLL_INTERVAL
 import com.example.lolsito.feature.match.domain.MatchDetail
 import com.example.lolsito.feature.match.domain.MatchDetailRepository
+import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -27,12 +28,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MatchDetailViewModelTest {
 
     private val dispatcher = StandardTestDispatcher()
     private val repository = FakeMatchDetailRepository()
+    private val preferences = FakeUserPreferences()
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -44,7 +47,7 @@ class MatchDetailViewModelTest {
     fun `initial load shows loading then content`() = runTest(dispatcher) {
         repository.detail = detail("m1")
 
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         vm.uiState.test {
             assertEquals(MatchDetailUiState.Loading, awaitItem())
             assertEquals(MatchDetailUiState.Content(detail("m1")), awaitItem())
@@ -56,7 +59,7 @@ class MatchDetailViewModelTest {
     fun `error then retry shows loading and recovers`() = runTest(dispatcher) {
         repository.error = IOException("boom")
 
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         vm.uiState.test {
             assertEquals(MatchDetailUiState.Loading, awaitItem())
             assertEquals(MatchDetailUiState.Error("boom"), awaitItem())
@@ -75,7 +78,7 @@ class MatchDetailViewModelTest {
     fun `blank error message falls back to a generic one`() = runTest(dispatcher) {
         repository.error = IOException("")
 
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         vm.uiState.test {
             assertEquals(MatchDetailUiState.Loading, awaitItem())
             assertEquals(MatchDetailUiState.Error("Something went wrong"), awaitItem())
@@ -86,7 +89,7 @@ class MatchDetailViewModelTest {
     @Test
     fun `a completed match is loaded once however long the screen stays visible`() = runTest(dispatcher) {
         repository.detail = detail("m1")
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         advanceUntilIdle()
 
         val polling = launch { vm.pollWhileVisible() }
@@ -100,7 +103,7 @@ class MatchDetailViewModelTest {
     @Test
     fun `an in-progress match reloads every interval while visible, without a spinner`() = runTest(dispatcher) {
         repository.detail = detail("m1", MatchState.IN_PROGRESS, "Round 1")
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         val states = mutableListOf<MatchDetailUiState>()
         backgroundScope.launch { vm.uiState.toList(states) }
         runCurrent() // the initial load is done; from here on only Content may follow
@@ -126,7 +129,7 @@ class MatchDetailViewModelTest {
     @Test
     fun `polling stops once the match completes`() = runTest(dispatcher) {
         repository.detail = detail("m1", MatchState.IN_PROGRESS)
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         advanceUntilIdle()
         val polling = launch { vm.pollWhileVisible() }
 
@@ -144,7 +147,7 @@ class MatchDetailViewModelTest {
     @Test
     fun `nothing is requested while the screen is not visible and polling resumes when it is again`() = runTest(dispatcher) {
         repository.detail = detail("m1", MatchState.IN_PROGRESS)
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         advanceUntilIdle()
 
         advance(MATCH_DETAIL_POLL_INTERVAL * 5)
@@ -167,7 +170,7 @@ class MatchDetailViewModelTest {
     @Test
     fun `a failed background refresh keeps the last content and is retried at the next tick`() = runTest(dispatcher) {
         repository.detail = detail("m1", MatchState.IN_PROGRESS, "Round 1")
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         advanceUntilIdle()
         val polling = launch { vm.pollWhileVisible() }
 
@@ -187,7 +190,7 @@ class MatchDetailViewModelTest {
     fun `no refresh is requested while the initial load is still in flight`() = runTest(dispatcher) {
         repository.detail = detail("m1", MatchState.IN_PROGRESS)
         repository.gate = CompletableDeferred()
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         val polling = launch { vm.pollWhileVisible() }
 
         advance(MATCH_DETAIL_POLL_INTERVAL * 3)
@@ -204,7 +207,7 @@ class MatchDetailViewModelTest {
     @Test
     fun `a slow refresh is never overlapped by the next tick`() = runTest(dispatcher) {
         repository.detail = detail("m1", MatchState.IN_PROGRESS)
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         advanceUntilIdle()
         val polling = launch { vm.pollWhileVisible() }
 
@@ -222,7 +225,7 @@ class MatchDetailViewModelTest {
     @Test
     fun `an initial failure is not polled and retry still recovers`() = runTest(dispatcher) {
         repository.error = IOException("boom")
-        val vm = MatchDetailViewModel(matchId = "m1", repository = repository)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
         advanceUntilIdle()
         val polling = launch { vm.pollWhileVisible() }
 
@@ -244,6 +247,100 @@ class MatchDetailViewModelTest {
     }
 
     /** [blockName] only tells two snapshots of the same match apart. */
+    @Test
+    fun `results are shown when the mode is off`() = runTest(dispatcher) {
+        repository.detail = detail("m1")
+
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
+        advanceUntilIdle()
+
+        assertEquals(MatchDetailUiState.Content(detail("m1"), resultsHidden = false), vm.uiState.value)
+    }
+
+    @Test
+    fun `results start hidden when the mode is on and revealing shows them`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        repository.detail = detail("m1")
+
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
+        advanceUntilIdle()
+        assertEquals(MatchDetailUiState.Content(detail("m1"), resultsHidden = true), vm.uiState.value)
+
+        vm.revealResult()
+        assertEquals(MatchDetailUiState.Content(detail("m1"), resultsHidden = false), vm.uiState.value)
+    }
+
+    @Test
+    fun `a reveal survives a refresh of the same screen`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        repository.detail = detail("m1", MatchState.IN_PROGRESS)
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
+        advanceUntilIdle()
+        vm.revealResult()
+
+        val poll = launch { vm.pollWhileVisible() }
+        advanceTimeBy(MATCH_DETAIL_POLL_INTERVAL + 1.milliseconds)
+        runCurrent()
+        poll.cancel()
+
+        assertEquals(false, (vm.uiState.value as MatchDetailUiState.Content).resultsHidden)
+        assertTrue(repository.requests.size >= 2)
+    }
+
+    @Test
+    fun `a reveal does not persist and a new screen hides results again`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        repository.detail = detail("m1")
+        val first = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
+        advanceUntilIdle()
+        first.revealResult()
+
+        val second = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
+        advanceUntilIdle()
+
+        assertEquals(true, (second.uiState.value as MatchDetailUiState.Content).resultsHidden)
+        assertTrue(preferences.savedNoSpoilers.isEmpty())
+    }
+
+    @Test
+    fun `a reveal applies to its own series only`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        repository.detail = detail("m1")
+        val one = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
+        val other = MatchDetailViewModel(matchId = "m2", repository = repository, preferences = preferences)
+        advanceUntilIdle()
+
+        one.revealResult()
+
+        assertEquals(true, (other.uiState.value as MatchDetailUiState.Content).resultsHidden)
+    }
+
+    @Test
+    fun `an unreadable preference shows the results`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        preferences.readFails = true
+        repository.detail = detail("m1")
+
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
+        advanceUntilIdle()
+
+        assertEquals(false, (vm.uiState.value as MatchDetailUiState.Content).resultsHidden)
+    }
+
+    @Test
+    fun `retry keeps the reveal`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        repository.detail = detail("m1")
+        val vm = MatchDetailViewModel(matchId = "m1", repository = repository, preferences = preferences)
+        advanceUntilIdle()
+        vm.revealResult()
+
+        vm.retry()
+        advanceUntilIdle()
+
+        assertEquals(false, (vm.uiState.value as MatchDetailUiState.Content).resultsHidden)
+    }
+
     private fun detail(id: String, state: MatchState = MatchState.COMPLETED, blockName: String? = null) = MatchDetail(
         matchId = id,
         state = state,

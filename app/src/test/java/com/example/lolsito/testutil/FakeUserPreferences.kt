@@ -8,12 +8,14 @@ import java.io.IOException
 class FakeUserPreferences(
     var scheduleLeagueIds: Set<String>? = null,
     var standingsSelection: StandingsSelection? = null,
+    var noSpoilers: Boolean? = null,
 ) : UserPreferences {
     var readFails = false
     var writeFails = false
     var reads = 0
     val savedScheduleLeagueIds = mutableListOf<Set<String>>()
     val savedStandingsSelections = mutableListOf<StandingsSelection>()
+    val savedNoSpoilers = mutableListOf<Boolean>()
 
     override suspend fun getScheduleLeagueIds(): Set<String>? {
         reads++
@@ -37,5 +39,16 @@ class FakeUserPreferences(
         if (writeFails) throw IOException("write failed")
         savedStandingsSelections += selection
         standingsSelection = selection
+    }
+
+    override suspend fun getNoSpoilers(): Boolean? {
+        if (readFails) throw IOException("read failed")
+        return noSpoilers
+    }
+
+    override suspend fun saveNoSpoilers(enabled: Boolean) {
+        if (writeFails) throw IOException("write failed")
+        savedNoSpoilers += enabled
+        noSpoilers = enabled
     }
 }

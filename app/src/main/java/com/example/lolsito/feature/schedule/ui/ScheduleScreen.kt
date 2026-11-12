@@ -27,6 +27,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,6 +38,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,7 +55,6 @@ import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
-import com.example.lolsito.core.model.formatMatchResult
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LiveBadge
@@ -60,7 +64,6 @@ import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
-import com.example.lolsito.feature.schedule.domain.liveScoreLabel
 import com.example.lolsito.ui.theme.LolSitoTheme
 import java.time.Instant
 import java.time.LocalDate
@@ -81,6 +84,7 @@ fun ScheduleScreen(
         state = state,
         onToggleLeague = viewModel::toggleLeague,
         onToggleLiveOnly = viewModel::toggleLiveOnly,
+        onToggleNoSpoilers = viewModel::toggleNoSpoilers,
         onRetry = viewModel::retry,
         onLoadOlder = viewModel::loadOlder,
         onLoadNewer = viewModel::loadNewer,
@@ -94,6 +98,7 @@ fun ScheduleContent(
     state: ScheduleUiState,
     onToggleLeague: (String) -> Unit,
     onToggleLiveOnly: () -> Unit,
+    onToggleNoSpoilers: () -> Unit,
     onRetry: () -> Unit,
     onLoadOlder: () -> Unit,
     onLoadNewer: () -> Unit,
@@ -101,7 +106,17 @@ fun ScheduleContent(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
-        ScheduleFilterRow(state.leagues, state.selectedLeagueIds, state.liveOnly, onToggleLeague, onToggleLiveOnly)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ScheduleFilterRow(
+                state.leagues,
+                state.selectedLeagueIds,
+                state.liveOnly,
+                onToggleLeague,
+                onToggleLiveOnly,
+                Modifier.weight(1f),
+            )
+            NoSpoilersToggle(state.noSpoilers, onToggleNoSpoilers)
+        }
         if (state.liveOnly) {
             // The toggle replaces the page, so the schedule's own loading, error and empty states do not apply.
             LiveOnlyList(state, onMatchClick)
@@ -115,6 +130,24 @@ fun ScheduleContent(
                 ScheduleList(state, onLoadOlder, onLoadNewer, onMatchClick)
             }
         }
+    }
+}
+
+/** Eye at the top: open shows results, crossed out means no-spoilers mode is on and finished results are hidden. */
+@Composable
+private fun NoSpoilersToggle(noSpoilers: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    IconButton(
+        onClick = onToggle,
+        modifier = modifier.semantics {
+            contentDescription = if (noSpoilers) "Show results" else "Hide results"
+            stateDescription = if (noSpoilers) "No spoilers on" else "No spoilers off"
+        },
+    ) {
+        Icon(
+            imageVector = if (noSpoilers) EyeOffIcon else EyeIcon,
+            contentDescription = null,
+            tint = if (noSpoilers) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -190,7 +223,7 @@ private fun LiveOnlyList(state: ScheduleUiState, onMatchClick: (String) -> Unit)
 
 private fun LazyListScope.liveRows(state: ScheduleUiState, onMatchClick: (String) -> Unit) {
     itemsIndexed(state.liveEvents, key = { index, _ -> state.liveKeys[index] }) { _, event ->
-        EventRow(event, state.zoneId, isLive = true, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+        EventRow(event, state.zoneId, isLive = true, noSpoilers = state.noSpoilers, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
     }
 }
 
@@ -212,7 +245,7 @@ private fun ScheduleList(
         }
         if (showUpcoming) {
             item(key = "upcoming-header") { SectionHeader("Upcoming") }
-            dayRows(state.upcomingDays, state.zoneId, onMatchClick)
+            dayRows(state.upcomingDays, state.zoneId, state.noSpoilers, onMatchClick)
             item(key = "newer") {
                 PagingButton(
                     "Load newer",
@@ -226,7 +259,7 @@ private fun ScheduleList(
         }
         if (showResults) {
             item(key = "results-header") { SectionHeader("Results") }
-            dayRows(state.resultDays, state.zoneId, onMatchClick)
+            dayRows(state.resultDays, state.zoneId, state.noSpoilers, onMatchClick)
             item(key = "older") {
                 PagingButton(
                     "Load older",
@@ -252,12 +285,17 @@ private fun ScheduleList(
 }
 
 @OptIn(ExperimentalFoundationApi::class)
-private fun LazyListScope.dayRows(days: List<ScheduleDay>, zoneId: ZoneId, onMatchClick: (String) -> Unit) {
+private fun LazyListScope.dayRows(
+    days: List<ScheduleDay>,
+    zoneId: ZoneId,
+    noSpoilers: Boolean,
+    onMatchClick: (String) -> Unit,
+) {
     days.forEach { day ->
         stickyHeader(key = day.headerKey) { DayHeader(day.date) }
         itemsIndexed(day.events, key = { index, _ -> day.keys[index] }) { _, event ->
             // Live matches have their own section, so a row here is never live, whatever its state says.
-            EventRow(event, zoneId, isLive = false, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+            EventRow(event, zoneId, isLive = false, noSpoilers = noSpoilers, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
         }
     }
 }
@@ -331,14 +369,17 @@ fun EventRow(
     modifier: Modifier = Modifier,
     /** Shows the LIVE badge; defaults to the event's own state for callers that have no live feed. */
     isLive: Boolean = event.state == MatchState.IN_PROGRESS,
+    /** Hides a finished match's score and winner (see [eventRowDisplay]). */
+    noSpoilers: Boolean = false,
     /** Null for rows without a match, which are not clickable. */
     onClick: (() -> Unit)? = null,
 ) {
     val teams = event.match?.teams.orEmpty()
     val hasTeams = teams.size >= 2
-    val result = formatMatchResult(event.state, teams, event.match?.format)
+    val display = eventRowDisplay(event, isLive, noSpoilers)
+    val result = display.result
     val time = event.startTime.atZone(zoneId).format(timeFormatter)
-    val score = if (isLive) liveScoreLabel(teams) ?: "vs" else result.score
+    val score = display.score
     // With a score (or live badge) in the middle the time has no place there: a finished match keeps it in the caption.
     val timeInCaption = !isLive && (score != null || !hasTeams)
     val caption = listOfNotNull(
@@ -471,7 +512,7 @@ private fun PreviewContent(state: ScheduleUiState) {
     LolSitoTheme {
         ScheduleContent(
             state = state,
-            onToggleLeague = {}, onToggleLiveOnly = {}, onRetry = {}, onLoadOlder = {}, onLoadNewer = {}, onMatchClick = {},
+            onToggleLeague = {}, onToggleLiveOnly = {}, onToggleNoSpoilers = {}, onRetry = {}, onLoadOlder = {}, onLoadNewer = {}, onMatchClick = {},
         )
     }
 }
@@ -519,3 +560,7 @@ private fun LongCodesEventRowPreview() {
     )
     LolSitoTheme { EventRow(long, ZoneId.of("UTC"), isLive = false, onClick = {}) }
 }
+
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
+@Composable
+private fun ScheduleNoSpoilersPreview() = PreviewContent(previewState.copy(noSpoilers = true))

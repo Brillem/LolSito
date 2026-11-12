@@ -1007,6 +1007,84 @@ class ScheduleViewModelTest {
     private fun page(events: List<ScheduleEvent>, older: String? = null, newer: String? = null) =
         SchedulePage(events, older, newer)
 
+    @Test
+    fun `no spoilers is off by default and nothing is saved`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.noSpoilers)
+        assertTrue(preferences.savedNoSpoilers.isEmpty())
+    }
+
+    @Test
+    fun `a stored no spoilers mode is restored`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.noSpoilers)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+    }
+
+    @Test
+    fun `toggling no spoilers flips the state and remembers it each time`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleNoSpoilers()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.noSpoilers)
+
+        vm.toggleNoSpoilers()
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.noSpoilers)
+        assertEquals(listOf(true, false), preferences.savedNoSpoilers)
+    }
+
+    @Test
+    fun `toggling no spoilers does not reload the schedule or touch the selection`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val calls = repository.scheduleCalls
+
+        vm.toggleNoSpoilers()
+        advanceUntilIdle()
+
+        assertEquals(calls, repository.scheduleCalls)
+        assertEquals(setOf(WORLDS), vm.uiState.value.selectedLeagueIds)
+        assertTrue(preferences.savedScheduleLeagueIds.isEmpty())
+    }
+
+    @Test
+    fun `an unreadable no spoilers preference falls back to off`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        preferences.readFails = true
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.noSpoilers)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+    }
+
+    @Test
+    fun `a failed save still flips the no spoilers mode`() = runTest(dispatcher) {
+        preferences.writeFails = true
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleNoSpoilers()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.noSpoilers)
+    }
+
+
     private fun event(id: String, hour: Long, state: MatchState = MatchState.UNSTARTED) = ScheduleEvent(
         startTime = Instant.parse("2026-10-20T00:00:00Z").plusSeconds(hour * 3600),
         state = state,

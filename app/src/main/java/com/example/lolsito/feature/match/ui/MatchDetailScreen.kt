@@ -68,6 +68,7 @@ fun MatchDetailScreen(
         state = state,
         onBack = onBack,
         onRetry = viewModel::retry,
+        onShowResult = viewModel::revealResult,
         onGameClick = onGameClick,
         modifier = modifier,
     )
@@ -81,6 +82,7 @@ fun MatchDetailContent(
     onRetry: () -> Unit,
     onGameClick: (GameStatsLink) -> Unit,
     modifier: Modifier = Modifier,
+    onShowResult: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         TopAppBar(
@@ -96,16 +98,21 @@ fun MatchDetailContent(
         when (state) {
             MatchDetailUiState.Loading -> LoadingView()
             is MatchDetailUiState.Error -> ErrorView(state.message, onRetry)
-            is MatchDetailUiState.Content -> MatchDetailBody(state.detail, onGameClick)
+            is MatchDetailUiState.Content -> MatchDetailBody(state, onShowResult, onGameClick)
         }
     }
 }
 
 @Composable
-private fun MatchDetailBody(detail: MatchDetail, onGameClick: (GameStatsLink) -> Unit) {
+private fun MatchDetailBody(
+    content: MatchDetailUiState.Content,
+    onShowResult: () -> Unit,
+    onGameClick: (GameStatsLink) -> Unit,
+) {
+    val detail = content.detail
     val context = LocalContext.current
     LazyColumn(Modifier.fillMaxSize()) {
-        detail.liveLink?.let { live ->
+        content.liveLink?.let { live ->
             item(key = "watch-live") {
                 Button(
                     onClick = { context.openWatchLink(live) },
@@ -113,7 +120,15 @@ private fun MatchDetailBody(detail: MatchDetail, onGameClick: (GameStatsLink) ->
                 ) { Text("Watch live") }
             }
         }
-        item(key = "header") { MatchHeader(detail) }
+        item(key = "header") { MatchHeader(content) }
+        if (content.resultsHidden) {
+            item(key = "show-result") {
+                OutlinedButton(
+                    onClick = onShowResult,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                ) { Text("Show result") }
+            }
+        }
         item(key = "games-title") {
             Text(
                 "Games",
@@ -122,7 +137,7 @@ private fun MatchDetailBody(detail: MatchDetail, onGameClick: (GameStatsLink) ->
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
-        val games = detail.visibleGames
+        val games = content.displayedGames
         if (games.isEmpty()) {
             item(key = "no-games") {
                 Text(
@@ -132,15 +147,16 @@ private fun MatchDetailBody(detail: MatchDetail, onGameClick: (GameStatsLink) ->
                 )
             }
         }
-        val keys = detail.gameKeys
+        val keys = content.displayedGameKeys
         items(games.size, key = { keys[it] }) { index ->
             val game = games[index]
-            val statsLink = game.statsLink(detail.teams)
+            val statsLink = content.statsLinkFor(game)
             GameRow(
                 game,
                 detail.teams,
                 onClick = statsLink?.let { link -> { onGameClick(link) } },
-                onWatch = game.vodLink?.let { vod -> { context.openWatchLink(vod) } },
+                onWatch = content.watchLinkFor(game)?.let { vod -> { context.openWatchLink(vod) } },
+                showState = content.showsGameState,
             )
             HorizontalDivider()
         }
@@ -148,8 +164,9 @@ private fun MatchDetailBody(detail: MatchDetail, onGameClick: (GameStatsLink) ->
 }
 
 @Composable
-fun MatchHeader(detail: MatchDetail, modifier: Modifier = Modifier) {
-    val result = detail.result
+fun MatchHeader(content: MatchDetailUiState.Content, modifier: Modifier = Modifier) {
+    val detail = content.detail
+    val result = content.displayedResult
     Column(
         modifier.fillMaxWidth().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -168,10 +185,10 @@ fun MatchHeader(detail: MatchDetail, modifier: Modifier = Modifier) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 HeaderTeam(teams[0], result.emphasisFor(0), Modifier.weight(1f))
                 Text(
-                    text = result.score ?: if (detail.state == MatchState.IN_PROGRESS) "LIVE" else "vs",
+                    text = content.headerLabel,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (result.score == null && detail.state == MatchState.IN_PROGRESS) {
+                    color = if (content.headerIsLive) {
                         MaterialTheme.colorScheme.error
                     } else {
                         MaterialTheme.colorScheme.onSurface
@@ -209,6 +226,8 @@ fun GameRow(
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     onWatch: (() -> Unit)? = null,
+    /** False while results are hidden: the game's state would give them away. */
+    showState: Boolean = true,
 ) {
     Row(
         modifier
@@ -231,11 +250,13 @@ fun GameRow(
             }
         }
         Spacer(Modifier.width(8.dp))
-        Text(
-            game.state.label,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (game.state == GameState.IN_PROGRESS) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (showState) {
+            Text(
+                game.state.label,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (game.state == GameState.IN_PROGRESS) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (onWatch != null) {
             OutlinedButton(onClick = onWatch, modifier = Modifier.padding(start = 8.dp)) { Text("Watch") }
         }
@@ -308,6 +329,17 @@ private fun MatchDetailContentPreview() {
 private fun MatchDetailErrorPreview() {
     MatchDetailContent(
         state = MatchDetailUiState.Error("Could not load the match"),
+        onBack = {},
+        onRetry = {},
+        onGameClick = {},
+    )
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun MatchDetailHiddenPreview() {
+    MatchDetailContent(
+        state = MatchDetailUiState.Content(previewDetail, resultsHidden = true),
         onBack = {},
         onRetry = {},
         onGameClick = {},

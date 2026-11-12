@@ -1,6 +1,7 @@
 package com.example.lolsito.feature.standings.ui
 
 import com.example.lolsito.core.model.MatchResultDisplay
+import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.UniqueKeys
 import com.example.lolsito.core.model.formatMatchResult
 import com.example.lolsito.feature.standings.domain.Ranking
@@ -33,6 +34,10 @@ sealed interface StandingsRow {
     data class MatchRow(override val key: String, val sectionMatch: SectionMatch) : StandingsRow {
         val result: MatchResultDisplay
             get() = formatMatchResult(sectionMatch.state, sectionMatch.match.teams, sectionMatch.match.format)
+
+        /** [result], or with [noSpoilers] on, that of a finished match without its score and winner. */
+        fun displayedResult(noSpoilers: Boolean): MatchResultDisplay =
+            if (noSpoilers && sectionMatch.state == MatchState.COMPLETED) result.copy(score = null, winnerIndex = null) else result
 
         /** Both teams are known, so the row shows them; otherwise it reads "TBD". */
         val hasBothTeams: Boolean get() = sectionMatch.match.teams.size >= 2

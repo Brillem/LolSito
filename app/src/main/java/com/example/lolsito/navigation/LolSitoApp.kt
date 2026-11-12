@@ -239,6 +239,7 @@ fun LolSitoApp(container: AppContainer) {
                                 scheduleRepository = container.scheduleRepository,
                                 leaguesRepository = container.leaguesRepository,
                                 preferences = container.userPreferences,
+                                lineupRepository = container.teamLineupRepository,
                                 zoneId = container.zoneId(),
                             )
                         }

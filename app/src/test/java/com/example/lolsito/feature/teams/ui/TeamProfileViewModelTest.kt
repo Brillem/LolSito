@@ -12,11 +12,16 @@ import com.example.lolsito.feature.schedule.domain.SchedulePage
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import com.example.lolsito.feature.schedule.ui.eventRowDisplay
 import com.example.lolsito.feature.teams.domain.InternationalLeagues
+import com.example.lolsito.feature.teams.domain.Player
+import com.example.lolsito.feature.teams.domain.PlayerRole
+import com.example.lolsito.feature.teams.domain.RoleGroup
+import com.example.lolsito.feature.teams.domain.TeamLineupRepository
 import com.example.lolsito.feature.teams.domain.TeamProfile
 import com.example.lolsito.feature.teams.domain.TeamsRepository
 import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -42,6 +47,7 @@ class TeamProfileViewModelTest {
     private val teams = FakeTeamsRepository()
     private val schedule = FakeScheduleRepository()
     private val preferences = FakeUserPreferences()
+    private val lineups = FakeTeamLineupRepository()
     private var leaguesError: Throwable? = null
     private val leaguesRepository = LeaguesRepository {
         leaguesError?.let { throw it }
@@ -85,6 +91,7 @@ class TeamProfileViewModelTest {
         scheduleRepository = schedule,
         leaguesRepository = leaguesRepository,
         preferences = preferences,
+        lineupRepository = lineups,
         zoneId = ZoneOffset.UTC,
     )
 
@@ -451,6 +458,162 @@ class TeamProfileViewModelTest {
                 null,
             ),
         )
+    }
+
+    private fun player(id: String, name: String, role: PlayerRole) = Player(id, name, null, null, null, role)
+
+    private val faker = player("f", "Faker", PlayerRole.MID)
+    private val subMid = player("s", "Sub", PlayerRole.MID)
+    private val zeus = player("z", "Zeus", PlayerRole.TOP)
+
+    private fun withRoster() {
+        teams.profiles[T1_ID] = teams.profiles.getValue(T1_ID).copy(
+            roster = listOf(RoleGroup(PlayerRole.TOP, listOf(zeus)), RoleGroup(PlayerRole.MID, listOf(subMid, faker))),
+        )
+    }
+
+    @Test
+    fun `the roster is shown before the lineup arrives, then the starters are marked`() = runTest(dispatcher) {
+        withRoster()
+        val answer = CompletableDeferred<Set<String>?>()
+        lineups.answers["p1"] = { answer.await() }
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(LoadStatus.Content, vm.uiState.value.matchesStatus)
+        assertEquals(listOf("p1"), vm.uiState.value.previousIds)
+        assertEquals(2, vm.uiState.value.profile?.roster?.size)
+        assertNull(vm.uiState.value.lineup)
+
+        answer.complete(setOf("f", "z"))
+        advanceUntilIdle()
+
+        val lineup = vm.uiState.value.lineup!!
+        assertEquals(listOf(zeus, faker), lineup.starters)
+        assertEquals(listOf(RoleGroup(PlayerRole.MID, listOf(subMid))), lineup.rest)
+        assertEquals(listOf("p1" to T1_ID), lineups.requests)
+        assertEquals(2, vm.uiState.value.profile?.roster?.size)
+    }
+
+    @Test
+    fun `the lineup is read from the newest finished matches first and falls back to the one before`() = runTest(dispatcher) {
+        withRoster()
+        schedule.pages[lckFilter to null] = SchedulePage(
+            events = listOf(
+                event("old", "2026-09-01T10:00:00Z", MatchState.COMPLETED, "T1", "Gen.G"),
+                event("new", "2026-10-01T10:00:00Z", MatchState.COMPLETED, "T1", "DRX"),
+                event("next", "2026-11-20T10:00:00Z", MatchState.UNSTARTED, "Dplus KIA", "T1"),
+            ),
+            olderToken = null,
+            newerToken = null,
+        )
+        lineups.answers["old"] = { setOf("f") }
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf("new" to T1_ID, "old" to T1_ID), lineups.requests)
+        assertEquals(listOf(faker), vm.uiState.value.lineup?.starters)
+    }
+
+    @Test
+    fun `a lineup that fails leaves the profile as it is, without an error`() = runTest(dispatcher) {
+        withRoster()
+        lineups.answers["p1"] = { throw IOException("feed down") }
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertNull(state.lineup)
+        assertEquals(LoadStatus.Content, state.status)
+        assertEquals(LoadStatus.Content, state.matchesStatus)
+        assertNull(state.olderError)
+        assertEquals(listOf("p1"), state.previousIds)
+        assertEquals(listOf(zeus), state.profile?.roster?.first()?.players)
+    }
+
+    @Test
+    fun `a lineup with nobody from the roster leaves the roster as it is`() = runTest(dispatcher) {
+        withRoster()
+        lineups.answers["p1"] = { setOf("ghost") }
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.lineup)
+    }
+
+    @Test
+    fun `a reload does not keep a stale lineup`() = runTest(dispatcher) {
+        withRoster()
+        lineups.answers["p1"] = { setOf("f") }
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(listOf(faker), vm.uiState.value.lineup?.starters)
+
+        val pending = CompletableDeferred<Set<String>?>()
+        lineups.answers["p1"] = { pending.await() }
+        vm.retry()
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.lineup)
+        assertEquals(LoadStatus.Content, vm.uiState.value.matchesStatus)
+    }
+
+    @Test
+    fun `a lineup still on its way when the profile reloads is dropped`() = runTest(dispatcher) {
+        withRoster()
+        val first = CompletableDeferred<Set<String>?>()
+        lineups.answers["p1"] = { first.await() }
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        lineups.answers["p1"] = { null }
+        vm.retry()
+        advanceUntilIdle()
+        first.complete(setOf("f"))
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.lineup)
+    }
+
+    @Test
+    fun `no finished match means no lineup request`() = runTest(dispatcher) {
+        withRoster()
+        schedule.pages[lckFilter to null] = SchedulePage(
+            events = listOf(event("u1", "2026-11-20T10:00:00Z", MatchState.UNSTARTED, "Dplus KIA", "T1")),
+            olderToken = null,
+            newerToken = null,
+        )
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(lineups.requests.isEmpty())
+        assertNull(vm.uiState.value.lineup)
+    }
+
+    @Test
+    fun `loading older matches does not ask for another lineup`() = runTest(dispatcher) {
+        withRoster()
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.loadOlder()
+        advanceUntilIdle()
+
+        assertEquals(listOf("p1" to T1_ID), lineups.requests)
+    }
+
+    private class FakeTeamLineupRepository : TeamLineupRepository {
+        val answers = mutableMapOf<String, suspend () -> Set<String>?>()
+        val requests = mutableListOf<Pair<String, String>>()
+
+        override suspend fun getLineup(matchId: String, teamId: String): Set<String>? {
+            requests += matchId to teamId
+            return answers[matchId]?.invoke()
+        }
     }
 
     private class FakeTeamsRepository : TeamsRepository {

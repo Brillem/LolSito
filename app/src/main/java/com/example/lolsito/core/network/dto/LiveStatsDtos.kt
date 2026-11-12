@@ -27,6 +27,8 @@ data class LiveStatsTeamMetadataDto(
 @Serializable
 data class LiveStatsParticipantMetadataDto(
     val participantId: Int? = null,
+    /** Id of the player, the same id the team roster (getTeams) uses. */
+    val esportsPlayerId: String? = null,
     val summonerName: String? = null,
     val championId: String? = null,
     /** Lane the player plays: "top", "jungle", "mid", "bottom" or "support". */

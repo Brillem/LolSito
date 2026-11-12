@@ -7,6 +7,9 @@ import com.example.lolsito.core.network.LolEsportsJson
 import com.example.lolsito.core.network.dto.EventDetailsResponse
 import com.example.lolsito.feature.match.domain.GameSide
 import com.example.lolsito.feature.match.domain.GameState
+import com.example.lolsito.core.network.dto.WatchMediaDto
+import com.example.lolsito.feature.match.domain.WatchLink
+import com.example.lolsito.feature.match.domain.WatchProvider
 import com.example.lolsito.testutil.Fixtures
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -252,5 +255,38 @@ class MatchDetailMappersTest {
         assertNull(decode("""{"data":{}}""").toMatchDetail())
         assertNull(decode("""{"data":{"event":{"id":"1"}}}""").toMatchDetail())
         assertNull(decode("""{"data":{"event":{"id":"","match":{}}}}""").toMatchDetail())
+    }
+
+    @Test
+    fun `picks the english vod of a game`() {
+        assertEquals(WatchLink(WatchProvider.YOUTUBE, "UWBRuboiCXk", "en-US"), detail.games[0].vod)
+    }
+
+    @Test
+    fun `live stream is parsed, unknown providers dropped, english preferred`() {
+        val response = decode(Fixtures.read("getEventDetails.json"))
+        val event = response.data.event!!
+        val streams = listOf(
+            WatchMediaDto("x", "afreeca", "en-US"),
+            WatchMediaDto("de_chan", "twitch", "de-DE"),
+            WatchMediaDto("en_chan", "twitch", "en-GB"),
+        )
+        val withStreams = response.copy(data = response.data.copy(event = event.copy(streams = streams)))
+        assertEquals(WatchLink(WatchProvider.TWITCH, "en_chan", "en-GB"), withStreams.toMatchDetail()!!.liveStream)
+    }
+
+    @Test
+    fun `event without vods or streams maps the same detail as before`() {
+        val response = decode(Fixtures.read("getEventDetails.json"))
+        val event = response.data.event!!
+        val match = event.match!!
+        val bare = event.copy(
+            streams = null,
+            match = match.copy(games = match.games!!.map { it.copy(vods = null) }),
+        )
+        val parsed = response.copy(data = response.data.copy(event = bare)).toMatchDetail()!!
+        assertNull(parsed.liveStream)
+        assertTrue(parsed.games.all { it.vod == null })
+        assertEquals(detail.copy(games = detail.games.map { it.copy(vod = null) }), parsed)
     }
 }

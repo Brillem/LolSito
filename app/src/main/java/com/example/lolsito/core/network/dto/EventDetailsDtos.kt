@@ -16,6 +16,7 @@ data class EventDetailDto(
     val league: EventDetailLeagueDto? = null,
     val tournament: TournamentRefDto? = null,
     val match: EventDetailMatchDto? = null,
+    val streams: List<WatchMediaDto>? = null,
 )
 
 @Serializable
@@ -51,7 +52,16 @@ data class GameDto(
     val id: String? = null,
     val state: String? = null,
     val teams: List<GameTeamDto>? = null,
+    val vods: List<WatchMediaDto>? = null,
 )
 
 @Serializable
 data class GameTeamDto(val id: String? = null, val side: String? = null)
+
+/** A VOD (`games[].vods`) or live stream (`streams`): `parameter` is the video id or channel name. */
+@Serializable
+data class WatchMediaDto(
+    val parameter: String? = null,
+    val provider: String? = null,
+    val locale: String? = null,
+)

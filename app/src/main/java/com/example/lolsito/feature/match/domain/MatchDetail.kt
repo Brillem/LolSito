@@ -18,7 +18,12 @@ data class MatchGame(
     val state: GameState,
     /** Side per team id; empty when the API does not send sides. */
     val sides: Map<String, GameSide>,
+    /** VOD to watch, already chosen by [pickWatchLink]; null when there is none. */
+    val vod: WatchLink? = null,
 ) {
+    /** VOD to offer as "Watch": only for a completed game. */
+    val vodLink: WatchLink? get() = vod?.takeIf { state == GameState.COMPLETED }
+
     fun sideOf(teamId: String?): GameSide? = teamId?.let(sides::get)
 
     /** Id to open the game stats with; null until the game starts, since the feed has no frames before. */
@@ -56,6 +61,8 @@ data class MatchDetail(
     val teams: List<Team>,
     val format: SeriesFormat?,
     val games: List<MatchGame>,
+    /** Live stream to watch, already chosen by [pickWatchLink]; null when there is none. */
+    val liveStream: WatchLink? = null,
 ) {
     /** Games that were or will be played; `unneeded` games are hidden. */
     val visibleGames: List<MatchGame> get() = games.filter { it.state != GameState.UNNEEDED }
@@ -68,6 +75,9 @@ data class MatchDetail(
         val unique = UniqueKeys()
         visibleGames.map { game -> unique.next(game.id?.let { "game:$it" } ?: "game-number:${game.number}") }
     }
+
+    /** Stream to offer as "Watch live": only while the series is in progress. */
+    val liveLink: WatchLink? get() = liveStream?.takeIf { state == MatchState.IN_PROGRESS }
 
     val result: MatchResultDisplay get() = formatMatchResult(state, teams, format)
 }

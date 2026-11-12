@@ -56,12 +56,16 @@ import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.GameTeam
+import com.example.lolsito.feature.game.domain.GoldHistory
+import com.example.lolsito.feature.game.domain.GoldPoint
 import com.example.lolsito.feature.game.domain.Matchup
 import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
 import com.example.lolsito.feature.game.domain.matchups
 import com.example.lolsito.ui.theme.LolSitoTheme
+import java.time.Duration
+import java.time.Instant
 import java.time.ZoneId
 
 /** Container: wires the ViewModel to the stateless [GameStatsContent]. */
@@ -107,7 +111,7 @@ fun GameStatsContent(
             },
         )
         LoadStatusView(state.status, emptyMessage = "No stats available for this game", onRetry = onRetry) {
-            state.stats?.let { GameStatsBody(it, teams, view, onViewChange = { view = it }) }
+            state.stats?.let { GameStatsBody(it, state.goldHistory, teams, view, onViewChange = { view = it }) }
         }
     }
 }
@@ -149,6 +153,7 @@ private val teamRows: List<Pair<String, (TeamStats) -> String>> = listOf(
 @Composable
 private fun GameStatsBody(
     stats: GameStats,
+    goldHistory: GoldHistory?,
     teams: Map<String, GameTeam>,
     view: ScoreboardView,
     onViewChange: (ScoreboardView) -> Unit,
@@ -161,6 +166,12 @@ private fun GameStatsBody(
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "teams") {
             TeamComparison(stats, blue = blue, red = red)
+        }
+        // Secondary: without a history of at least two points the screen is as it was without the chart.
+        goldHistory?.points?.takeIf { it.size >= 2 }?.let { points ->
+            item(key = "gold-difference") {
+                GoldDifferenceChart(points, blueColor = Side.BLUE.color, redColor = Side.RED.color)
+            }
         }
         item(key = "matchups-header") {
             Column {
@@ -634,11 +645,17 @@ private fun previewStats(blueDetails: PlayerDetails?, redDetails: PlayerDetails?
 
 private val previewTeams = mapOf("blg" to GameTeam("BLG"), "t1" to GameTeam("T1"))
 
+private val previewGoldHistory = GoldHistory(
+    start = Instant.EPOCH,
+    points = listOf(0, -77, -243, 93, -591, -1235, -677, -1209, -1613, -1216, -1112, -1455, 419, -1808, -418, -27, -614, 906, 4848)
+        .mapIndexed { index, difference -> GoldPoint(Duration.ofMinutes(2L * index), difference) },
+)
+
 @Composable
 private fun ScoreboardPreview(stats: GameStats, view: ScoreboardView) {
     LolSitoTheme {
         Box(Modifier.background(MaterialTheme.colorScheme.background)) {
-            GameStatsBody(stats, previewTeams, view, onViewChange = {})
+            GameStatsBody(stats, previewGoldHistory, previewTeams, view, onViewChange = {})
         }
     }
 }

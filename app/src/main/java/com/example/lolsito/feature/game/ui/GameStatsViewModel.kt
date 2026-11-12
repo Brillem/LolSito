@@ -7,6 +7,7 @@ import com.example.lolsito.core.polling.pollWhile
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.GameStatsRepository
+import com.example.lolsito.feature.game.domain.GoldHistory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,7 +18,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** [stats] is set only while [status] is [LoadStatus.Content]. */
-data class GameStatsUiState(val status: LoadStatus = LoadStatus.Loading, val stats: GameStats? = null)
+data class GameStatsUiState(
+    val status: LoadStatus = LoadStatus.Loading,
+    val stats: GameStats? = null,
+    /** Gold difference so far; null while it loads, when it failed, or without [stats]. */
+    val goldHistory: GoldHistory? = null,
+)
 
 /**
  * Loads the latest stats of one game; [retry] loads them again. While the game is not finished,
@@ -54,9 +60,13 @@ class GameStatsViewModel(
         val stats = repository.getGameStats(gameId) ?: return
         // Only replace content: a reload started meanwhile owns the state.
         // Details are secondary: a refresh that came back without them keeps the last ones.
+        // The gold history, once loaded, grows with each refreshed frame.
         _uiState.update {
             if (it.status != LoadStatus.Content) it
-            else GameStatsUiState(LoadStatus.Content, it.stats?.let(stats::keepingDetailsFrom) ?: stats)
+            else {
+                val next = it.stats?.let(stats::keepingDetailsFrom) ?: stats
+                GameStatsUiState(LoadStatus.Content, next, it.goldHistory?.including(next))
+            }
         }
     }
 
@@ -64,7 +74,7 @@ class GameStatsViewModel(
         loadJob?.cancel()
         _uiState.value = GameStatsUiState(LoadStatus.Loading)
         loadJob = viewModelScope.launch {
-            _uiState.value = try {
+            val state = try {
                 val stats = repository.getGameStats(gameId)
                 if (stats == null) GameStatsUiState(LoadStatus.Empty) else GameStatsUiState(LoadStatus.Content, stats)
             } catch (e: CancellationException) {
@@ -72,6 +82,29 @@ class GameStatsViewModel(
             } catch (e: Exception) {
                 GameStatsUiState(LoadStatus.Error(e.message?.takeIf { it.isNotBlank() } ?: "Something went wrong"))
             }
+            _uiState.value = state
+            // A child of this load, so a reload cancels it; the stats never wait for it.
+            state.stats?.let { launch { loadGoldHistory(it) } }
+        }
+    }
+
+    /**
+     * Backfills the gold history once, up to the frame of [stats]; later refreshes extend it. It is
+     * secondary: when it fails or has nothing, the stats stay as they are, without it.
+     */
+    private suspend fun loadGoldHistory(stats: GameStats) {
+        val until = stats.frameTime ?: return
+        val history = try {
+            repository.getGoldHistory(gameId, until)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        } ?: return
+        _uiState.update { state ->
+            val shown = state.stats
+            if (state.status != LoadStatus.Content || shown == null) state
+            else state.copy(goldHistory = history.including(shown))
         }
     }
 }

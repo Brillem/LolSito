@@ -123,4 +123,10 @@ data class PlayerDetails(
 interface GameStatsRepository {
     /** Latest stats of game [gameId], or null when the feed has no frames for it. */
     suspend fun getGameStats(gameId: String): GameStats?
+
+    /**
+     * Gold difference of game [gameId] from its first frame up to [until], or null when it cannot be
+     * built. It is secondary to the stats: a repository without it has none.
+     */
+    suspend fun getGoldHistory(gameId: String, until: Instant): GoldHistory? = null
 }

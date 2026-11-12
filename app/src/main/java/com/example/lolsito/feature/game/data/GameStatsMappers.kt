@@ -2,6 +2,7 @@ package com.example.lolsito.feature.game.data
 
 import com.example.lolsito.core.datadragon.dataDragonVersion
 import com.example.lolsito.core.network.dto.LiveStatsDetailsResponse
+import com.example.lolsito.core.network.dto.LiveStatsFrameDto
 import com.example.lolsito.core.network.dto.LiveStatsParticipantDetailsDto
 import com.example.lolsito.core.network.dto.LiveStatsParticipantFrameDto
 import com.example.lolsito.core.network.dto.LiveStatsParticipantMetadataDto
@@ -10,6 +11,7 @@ import com.example.lolsito.core.network.dto.LiveStatsTeamMetadataDto
 import com.example.lolsito.core.network.dto.LiveStatsWindowResponse
 import com.example.lolsito.feature.game.domain.GameDetails
 import com.example.lolsito.feature.game.domain.GameStats
+import com.example.lolsito.feature.game.domain.GoldSample
 import com.example.lolsito.feature.game.domain.PlayerDetails
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
@@ -79,6 +81,17 @@ fun LiveStatsDetailsResponse.toGameDetails(): GameDetails? {
 
 /** The details of [toGameDetails] without their frame time. */
 fun LiveStatsDetailsResponse.toPlayerDetails(): Map<Int, PlayerDetails>? = toGameDetails()?.players
+
+/** Team gold of the first frame (the game's start, for a first-frames window); null without a timed frame. */
+fun LiveStatsWindowResponse.firstGoldSample(): GoldSample? = frames.orEmpty().firstOrNull()?.toGoldSample()
+
+/** Team gold of the last frame; null when there are no frames or the last one has no time. */
+fun LiveStatsWindowResponse.lastGoldSample(): GoldSample? = frames.orEmpty().lastOrNull()?.toGoldSample()
+
+private fun LiveStatsFrameDto.toGoldSample(): GoldSample? {
+    val time = rfc460Timestamp.toInstantOrNull() ?: return null
+    return GoldSample(time, blueGold = blueTeam?.totalGold ?: 0, redGold = redTeam?.totalGold ?: 0)
+}
 
 private fun String?.toInstantOrNull(): Instant? = this?.let { runCatching { Instant.parse(it) }.getOrNull() }
 

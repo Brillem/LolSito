@@ -10,11 +10,16 @@ import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import com.example.lolsito.feature.schedule.domain.mergeEvents
+import com.example.lolsito.feature.teams.domain.RosterSplit
+import com.example.lolsito.feature.teams.domain.TeamLineupRepository
 import com.example.lolsito.feature.teams.domain.TeamProfile
 import com.example.lolsito.feature.teams.domain.TeamsRepository
 import com.example.lolsito.feature.teams.domain.buildTeamMatches
 import com.example.lolsito.feature.teams.domain.homeLeagueId
+import com.example.lolsito.feature.teams.domain.findLineup
 import com.example.lolsito.feature.teams.domain.isPlayedBy
+import com.example.lolsito.feature.teams.domain.lineupCandidateMatchIds
+import com.example.lolsito.feature.teams.domain.splitRoster
 import com.example.lolsito.feature.teams.domain.teamScheduleLeagueIds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -44,6 +49,11 @@ data class TeamProfileUiState(
     val noSpoilers: Boolean = false,
     /** The star: whether the team is one of the user's favorites. Remembered between launches. */
     val isFavorite: Boolean = false,
+    /**
+     * The roster split into the players of the team's last game and the rest; null until known, and
+     * for good when it cannot be found. The roster itself is always in [profile].
+     */
+    val lineup: RosterSplit? = null,
     val zoneId: ZoneId = ZoneOffset.UTC,
 )
 
@@ -59,6 +69,11 @@ data class TeamProfileUiState(
  * The star ([toggleFavorite]) marks or unmarks the team in the stored favorites. It flips at once; a
  * failed read or save is ignored (an unreadable list is never overwritten), and an unreadable list
  * counts as "not a favorite" when the profile opens.
+ *
+ * Starters are secondary: once the first page of matches is known, the lineup of the team's last
+ * played game is looked up in the background ([findLineup] over the newest finished matches) and
+ * the roster is split with it. It never delays the roster or the matches, and any failure leaves the
+ * profile as it is, with no error.
  */
 class TeamProfileViewModel(
     private val teamId: String,
@@ -67,6 +82,7 @@ class TeamProfileViewModel(
     private val scheduleRepository: ScheduleRepository,
     private val leaguesRepository: LeaguesRepository,
     private val preferences: UserPreferences,
+    private val lineupRepository: TeamLineupRepository,
     private val zoneId: ZoneId,
 ) : ViewModel() {
 
@@ -79,6 +95,7 @@ class TeamProfileViewModel(
     private var olderToken: String? = null
     private var loadJob: Job? = null
     private var pagingJob: Job? = null
+    private var lineupJob: Job? = null
 
     init {
         load()
@@ -126,6 +143,7 @@ class TeamProfileViewModel(
     private fun load() {
         loadJob?.cancel()
         pagingJob?.cancel()
+        lineupJob?.cancel()
         events = emptyList()
         olderToken = null
         _uiState.update {
@@ -154,11 +172,22 @@ class TeamProfileViewModel(
                 events = mergeEvents(emptyList(), page.events.filter { it.isPlayedBy(profile.name) })
                 olderToken = page.olderToken
                 publishMatches(profile)
+                loadLineup(profile)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _uiState.update { it.copy(matchesStatus = LoadStatus.Error(e.toMessage())) }
             }
+        }
+    }
+
+    /** Runs on its own, so the matches and "Load older" never wait for it. */
+    private fun loadLineup(profile: TeamProfile) {
+        val candidates = lineupCandidateMatchIds(events)
+        lineupJob = viewModelScope.launch {
+            val ids = findLineup(candidates) { lineupRepository.getLineup(it, profile.id) } ?: return@launch
+            val split = splitRoster(profile.roster, ids) ?: return@launch
+            _uiState.update { it.copy(lineup = split) }
         }
     }
 

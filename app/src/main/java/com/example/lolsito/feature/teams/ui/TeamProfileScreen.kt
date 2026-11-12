@@ -46,6 +46,8 @@ import com.example.lolsito.feature.schedule.ui.EventRow
 import com.example.lolsito.feature.schedule.ui.StarIcon
 import com.example.lolsito.feature.schedule.ui.StarOutlineIcon
 import com.example.lolsito.feature.teams.domain.Player
+import com.example.lolsito.feature.teams.domain.RoleGroup
+import com.example.lolsito.feature.teams.domain.RosterSplit
 import com.example.lolsito.feature.teams.domain.TeamProfile
 import java.time.ZoneId
 
@@ -99,7 +101,7 @@ fun TeamProfileContent(
             val profile = state.profile ?: return@LoadStatusView
             LazyColumn(Modifier.fillMaxSize()) {
                 item(key = "header") { ProfileHeader(profile) }
-                rosterRows(profile)
+                rosterRows(profile, state.lineup)
                 matchRows(state, onRetry, onLoadOlder, onMatchClick)
             }
         }
@@ -138,12 +140,24 @@ private fun ProfileHeader(profile: TeamProfile) {
     }
 }
 
-private fun LazyListScope.rosterRows(profile: TeamProfile) {
+private fun LazyListScope.rosterRows(profile: TeamProfile, lineup: RosterSplit?) {
+    if (lineup != null) {
+        item(key = "starters") { SectionTitle("Starters") }
+        item(key = "starters-caption") { InfoText("Lineup of the last game played") }
+        itemsIndexed(lineup.starters, key = { index, _ -> "starter:$index" }) { _, player -> PlayerRow(player) }
+        item(key = "roster") { SectionTitle("Rest of the roster") }
+        roleGroups(lineup.rest)
+        return
+    }
     item(key = "roster") { SectionTitle("Roster") }
     if (profile.roster.isEmpty()) {
         item(key = "roster-empty") { InfoText("No players listed") }
     }
-    profile.roster.forEach { group ->
+    roleGroups(profile.roster)
+}
+
+private fun LazyListScope.roleGroups(groups: List<RoleGroup>) {
+    groups.forEach { group ->
         item(key = "role:${group.role}") { RoleTitle(group.role.label) }
         itemsIndexed(group.players, key = { index, _ -> "player:${group.role}:$index" }) { _, player -> PlayerRow(player) }
     }

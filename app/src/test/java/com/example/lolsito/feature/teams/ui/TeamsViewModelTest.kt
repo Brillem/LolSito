@@ -1,0 +1,177 @@
+package com.example.lolsito.feature.teams.ui
+
+import com.example.lolsito.core.leagues.LeaguesRepository
+import com.example.lolsito.core.model.League
+import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.feature.standings.domain.Ranking
+import com.example.lolsito.feature.standings.domain.Standings
+import com.example.lolsito.feature.standings.domain.StandingsRepository
+import com.example.lolsito.feature.standings.domain.StandingsSection
+import com.example.lolsito.feature.standings.domain.StandingsStage
+import com.example.lolsito.feature.standings.domain.Tournament
+import com.example.lolsito.feature.teams.domain.TeamSummary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import java.io.IOException
+import java.time.Clock
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class TeamsViewModelTest {
+
+    private val dispatcher = StandardTestDispatcher()
+    private val clock = Clock.fixed(Instant.parse("2026-11-11T12:00:00Z"), ZoneOffset.UTC)
+    private val repository = FakeStandingsRepository()
+    private var leaguesError: Throwable? = null
+    private val leaguesRepository = LeaguesRepository {
+        leaguesError?.let { throw it }
+        listOf(League(LCK, "lck", "LCK", "KOREA", null), League(LEC, "lec", "LEC", "EMEA", null))
+    }
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(dispatcher)
+        repository.tournaments[LCK] = listOf(Tournament("lck-now", "lck", LocalDate.parse("2026-10-01"), LocalDate.parse("2026-12-01")))
+        repository.tournaments[LEC] = listOf(Tournament("lec-now", "lec", LocalDate.parse("2026-10-01"), LocalDate.parse("2026-12-01")))
+        repository.standings["lck-now"] = standingsOf(team("T1", "T1", "1"), team("Gen.G", "GEN", "2"))
+        repository.standings["lec-now"] = standingsOf(team("G2 Esports", "G2", "3"))
+    }
+
+    @After
+    fun tearDown() = Dispatchers.resetMain()
+
+    private fun viewModel() = TeamsViewModel(repository, leaguesRepository, clock, defaultLeagueId = LCK)
+
+    @Test
+    fun `loads the leagues and the default league's current teams`() = runTest(dispatcher) {
+        val vm = viewModel()
+        assertEquals(LoadStatus.Loading, vm.uiState.value.status)
+
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(LoadStatus.Content, state.leaguesStatus)
+        assertEquals(listOf(LCK, LEC), state.leagues.map { it.id })
+        assertEquals(LCK, state.selectedLeagueId)
+        assertEquals("LCK", state.selectedLeagueName)
+        assertEquals(LoadStatus.Content, state.status)
+        assertEquals(listOf(TeamSummary("2", "Gen.G", "GEN", null), TeamSummary("1", "T1", "T1", null)), state.teams)
+        assertEquals(listOf("lck-now"), repository.standingsRequests)
+    }
+
+    @Test
+    fun `picking another league shows its teams`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.selectLeague(LEC)
+        assertEquals(LoadStatus.Loading, vm.uiState.value.status)
+        advanceUntilIdle()
+
+        assertEquals(LEC, vm.uiState.value.selectedLeagueId)
+        assertEquals(listOf("G2 Esports"), vm.uiState.value.teams.map { it.name })
+        assertEquals(listOf("lck-now", "lec-now"), repository.standingsRequests)
+    }
+
+    @Test
+    fun `picking the selected league again sends no request`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.selectLeague(LCK)
+        advanceUntilIdle()
+
+        assertEquals(listOf("lck-now"), repository.standingsRequests)
+    }
+
+    @Test
+    fun `a league without current teams is empty`() = runTest(dispatcher) {
+        repository.tournaments[LCK] = emptyList()
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(LoadStatus.Empty, vm.uiState.value.status)
+        assertEquals(emptyList<TeamSummary>(), vm.uiState.value.teams)
+    }
+
+    @Test
+    fun `a failed load is an error and retry loads again`() = runTest(dispatcher) {
+        repository.error = IOException("offline")
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(LoadStatus.Error("offline"), vm.uiState.value.status)
+        assertEquals(emptyList<TeamSummary>(), vm.uiState.value.teams)
+
+        repository.error = null
+        vm.retry()
+        advanceUntilIdle()
+
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertEquals(listOf("Gen.G", "T1"), vm.uiState.value.teams.map { it.name })
+    }
+
+    @Test
+    fun `failed leagues do not block the teams and retry loads them again`() = runTest(dispatcher) {
+        leaguesError = IOException("no leagues")
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.leaguesStatus is LoadStatus.Error)
+        assertEquals(emptyList<League>(), vm.uiState.value.leagues)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertEquals("League", vm.uiState.value.selectedLeagueName)
+
+        leaguesError = null
+        vm.retryLeagues()
+        advanceUntilIdle()
+
+        assertEquals(LoadStatus.Content, vm.uiState.value.leaguesStatus)
+        assertEquals(listOf(LCK, LEC), vm.uiState.value.leagues.map { it.id })
+    }
+
+    private fun team(name: String, code: String, id: String) = Team(name, code, null, null, null, id = id)
+
+    private fun standingsOf(vararg teams: Team) = Standings(
+        listOf(StandingsStage("Season", null, listOf(StandingsSection("Table", teams.mapIndexed { i, t -> Ranking(i + 1, t, 0, 0) }, emptyList())))),
+    )
+
+    private class FakeStandingsRepository : StandingsRepository {
+        val tournaments = mutableMapOf<String, List<Tournament>>()
+        val standings = mutableMapOf<String, Standings>()
+        val standingsRequests = mutableListOf<String>()
+        var error: Throwable? = null
+
+        override suspend fun getTournaments(leagueId: String): List<Tournament> {
+            error?.let { throw it }
+            return tournaments[leagueId].orEmpty()
+        }
+
+        override suspend fun getStandings(tournamentId: String): Standings {
+            error?.let { throw it }
+            standingsRequests += tournamentId
+            return standings.getValue(tournamentId)
+        }
+    }
+
+    private companion object {
+        const val LCK = "98767991310872058"
+        const val LEC = "98767991302996019"
+    }
+}

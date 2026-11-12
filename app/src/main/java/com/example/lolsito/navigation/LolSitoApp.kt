@@ -42,14 +42,28 @@ import com.example.lolsito.feature.schedule.ui.ScheduleScreen
 import com.example.lolsito.feature.schedule.ui.ScheduleViewModel
 import com.example.lolsito.feature.standings.ui.StandingsScreen
 import com.example.lolsito.feature.standings.ui.StandingsViewModel
+import com.example.lolsito.feature.teams.ui.TeamProfileScreen
+import com.example.lolsito.feature.teams.ui.TeamProfileViewModel
+import com.example.lolsito.feature.teams.ui.TeamsScreen
+import com.example.lolsito.feature.teams.ui.TeamsViewModel
 
 object Routes {
     const val SCHEDULE = "schedule"
     const val STANDINGS = "standings"
+    const val TEAMS = "teams"
     const val MATCH_ID_ARG = "matchId"
     const val MATCH = "match/{$MATCH_ID_ARG}"
 
     fun match(matchId: String): String = "match/${Uri.encode(matchId)}"
+
+    const val TEAM_ID_ARG = "teamId"
+    const val TEAM_LEAGUE_ID_ARG = "leagueId"
+
+    /** The league the team was opened from is an optional query argument. */
+    const val TEAM = "team/{$TEAM_ID_ARG}?$TEAM_LEAGUE_ID_ARG={$TEAM_LEAGUE_ID_ARG}"
+
+    fun team(teamId: String, leagueId: String): String =
+        "team/${Uri.encode(teamId)}?$TEAM_LEAGUE_ID_ARG=${Uri.encode(leagueId)}"
 
     const val GAME_ID_ARG = "gameId"
     private const val TEAM1_ID_ARG = "team1Id"
@@ -97,6 +111,7 @@ internal fun gameTeams(argument: (String) -> String?): Map<String, GameTeam> =
 private enum class TopLevelDestination(val route: String, val label: String, @DrawableRes val icon: Int) {
     SCHEDULE(Routes.SCHEDULE, "Schedule", R.drawable.ic_tab_schedule),
     STANDINGS(Routes.STANDINGS, "Standings", R.drawable.ic_tab_standings),
+    TEAMS(Routes.TEAMS, "Teams", R.drawable.ic_tab_teams),
 }
 
 internal const val START_ROUTE = Routes.SCHEDULE
@@ -182,6 +197,53 @@ fun LolSitoApp(container: AppContainer) {
                 )
                 StandingsScreen(
                     viewModel = vm,
+                    onMatchClick = { matchId -> navController.navigateFrom(entry, Routes.match(matchId)) },
+                )
+            }
+            composable(Routes.TEAMS) { entry ->
+                val vm: TeamsViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer {
+                            TeamsViewModel(
+                                standingsRepository = container.standingsRepository,
+                                leaguesRepository = container.leaguesRepository,
+                                clock = container.clock(),
+                            )
+                        }
+                    }
+                )
+                TeamsScreen(
+                    viewModel = vm,
+                    onTeamClick = { teamId, leagueId -> navController.navigateFrom(entry, Routes.team(teamId, leagueId)) },
+                )
+            }
+            composable(
+                Routes.TEAM,
+                arguments = listOf(
+                    navArgument(Routes.TEAM_ID_ARG) { type = NavType.StringType },
+                    navArgument(Routes.TEAM_LEAGUE_ID_ARG) { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
+            ) { entry ->
+                val teamId = requireNotNull(entry.arguments?.getString(Routes.TEAM_ID_ARG))
+                val originLeagueId = entry.arguments?.getString(Routes.TEAM_LEAGUE_ID_ARG)
+                val vm: TeamProfileViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer {
+                            TeamProfileViewModel(
+                                teamId = teamId,
+                                originLeagueId = originLeagueId,
+                                teamsRepository = container.teamsRepository,
+                                scheduleRepository = container.scheduleRepository,
+                                leaguesRepository = container.leaguesRepository,
+                                preferences = container.userPreferences,
+                                zoneId = container.zoneId(),
+                            )
+                        }
+                    }
+                )
+                TeamProfileScreen(
+                    viewModel = vm,
+                    onBack = { navController.navigateUp() },
                     onMatchClick = { matchId -> navController.navigateFrom(entry, Routes.match(matchId)) },
                 )
             }

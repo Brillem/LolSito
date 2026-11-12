@@ -5,6 +5,7 @@ import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.SchedulePage
@@ -266,6 +267,131 @@ class TeamProfileViewModelTest {
         assertEquals(emptyList<Any>(), vm.uiState.value.upcomingDays)
         assertEquals(emptyList<Any>(), vm.uiState.value.previousDays)
         assertTrue(vm.uiState.value.canLoadOlder)
+    }
+
+    private val t1Favorite = FavoriteTeam(T1_ID, "t1", "T1", "T1", null)
+    private val other = FavoriteTeam("777", "gen-g", "Gen.G", "GEN", "https://img/geng.png")
+
+    @Test
+    fun `a team that is not a favorite starts unmarked and nothing is saved`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isFavorite)
+        assertTrue(preferences.savedFavoriteTeams.isEmpty())
+    }
+
+    @Test
+    fun `a stored favorite shows as marked`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(other, t1Favorite)
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.isFavorite)
+    }
+
+    @Test
+    fun `marking saves the team with id, slug, name, code and logo and keeps the other favorites`() = runTest(dispatcher) {
+        teams.profiles[T1_ID] = teams.profiles.getValue(T1_ID).copy(imageUrl = "https://img/t1.png")
+        preferences.favoriteTeams = listOf(other)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleFavorite()
+        assertTrue("flips at once", vm.uiState.value.isFavorite)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.isFavorite)
+        assertEquals(
+            listOf(listOf(other, FavoriteTeam(T1_ID, "t1", "T1", "T1", "https://img/t1.png"))),
+            preferences.savedFavoriteTeams,
+        )
+    }
+
+    @Test
+    fun `unmarking removes only this team`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(t1Favorite, other)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleFavorite()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isFavorite)
+        assertEquals(listOf(listOf(other)), preferences.savedFavoriteTeams)
+    }
+
+    @Test
+    fun `the mark is remembered by the next profile of the team`() = runTest(dispatcher) {
+        val first = viewModel()
+        advanceUntilIdle()
+        first.toggleFavorite()
+        advanceUntilIdle()
+
+        val second = viewModel()
+        advanceUntilIdle()
+        assertTrue(second.uiState.value.isFavorite)
+
+        second.toggleFavorite()
+        advanceUntilIdle()
+        val third = viewModel()
+        advanceUntilIdle()
+        assertFalse(third.uiState.value.isFavorite)
+        assertEquals(emptyList<FavoriteTeam>(), preferences.favoriteTeams)
+    }
+
+    @Test
+    fun `a failed save is ignored and the star still flips`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        preferences.writeFails = true
+
+        vm.toggleFavorite()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.isFavorite)
+        assertTrue(preferences.savedFavoriteTeams.isEmpty())
+    }
+
+    @Test
+    fun `unreadable favorites count as none, and a toggle then saves nothing so the stored ones are not lost`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(other)
+        preferences.readFails = true
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isFavorite)
+
+        vm.toggleFavorite()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.isFavorite)
+        assertTrue(preferences.savedFavoriteTeams.isEmpty())
+        assertEquals(listOf(other), preferences.favoriteTeams)
+    }
+
+    @Test
+    fun `toggling before the profile is known does nothing`() = runTest(dispatcher) {
+        val vm = viewModel()
+
+        vm.toggleFavorite()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isFavorite)
+        assertTrue(preferences.savedFavoriteTeams.isEmpty())
+    }
+
+    @Test
+    fun `toggling for an unknown team does nothing`() = runTest(dispatcher) {
+        teams.profiles.clear()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleFavorite()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isFavorite)
+        assertTrue(preferences.savedFavoriteTeams.isEmpty())
     }
 
     @Test

@@ -46,6 +46,14 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
         dataStore.edit { it[NO_SPOILERS] = enabled }
     }
 
+    /** An unparseable stored value reads as no favorites instead of failing. */
+    override suspend fun getFavoriteTeams(): List<FavoriteTeam>? =
+        dataStore.data.first()[FAVORITE_TEAMS]?.let(::decodeFavoriteTeams)
+
+    override suspend fun saveFavoriteTeams(teams: List<FavoriteTeam>) {
+        dataStore.edit { it[FAVORITE_TEAMS] = encodeFavoriteTeams(teams) }
+    }
+
     companion object {
         /** A corrupt file is replaced by empty preferences, so persistence recovers instead of failing forever. */
         internal val corruptionHandler = ReplaceFileCorruptionHandler<Preferences> { emptyPreferences() }
@@ -54,6 +62,7 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
         internal val STANDINGS_LEAGUE_ID = stringPreferencesKey("standings.leagueId")
         internal val STANDINGS_TOURNAMENT_ID = stringPreferencesKey("standings.tournamentId")
         internal val NO_SPOILERS = booleanPreferencesKey("noSpoilers")
+        internal val FAVORITE_TEAMS = stringPreferencesKey("favoriteTeams")
 
         fun create(context: Context): UserPreferences =
             DataStoreUserPreferences(context.applicationContext.userPreferencesDataStore)

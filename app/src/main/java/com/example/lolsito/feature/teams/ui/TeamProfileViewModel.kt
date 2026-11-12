@@ -3,6 +3,7 @@ package com.example.lolsito.feature.teams.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
+import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
@@ -41,6 +42,8 @@ data class TeamProfileUiState(
     val olderError: String? = null,
     /** The no-spoilers mode set in Schedule: previous results are hidden the same way. */
     val noSpoilers: Boolean = false,
+    /** The star: whether the team is one of the user's favorites. Remembered between launches. */
+    val isFavorite: Boolean = false,
     val zoneId: ZoneId = ZoneOffset.UTC,
 )
 
@@ -52,6 +55,10 @@ data class TeamProfileUiState(
  * was opened from) stands in for it. "Load older" pages back with the same filter.
  *
  * The no-spoilers mode is read before any match is shown; an unreadable preference counts as off.
+ *
+ * The star ([toggleFavorite]) marks or unmarks the team in the stored favorites. It flips at once; a
+ * failed read or save is ignored (an unreadable list is never overwritten), and an unreadable list
+ * counts as "not a favorite" when the profile opens.
  */
 class TeamProfileViewModel(
     private val teamId: String,
@@ -78,6 +85,23 @@ class TeamProfileViewModel(
     }
 
     fun retry() = load()
+
+    /** Does nothing until the profile is known. */
+    fun toggleFavorite() {
+        val profile = _uiState.value.profile ?: return
+        val on = !_uiState.value.isFavorite
+        _uiState.update { it.copy(isFavorite = on) }
+        viewModelScope.launch {
+            try {
+                val others = preferences.getFavoriteTeams().orEmpty().filterNot { it.id == profile.id }
+                preferences.saveFavoriteTeams(if (on) others + profile.toFavorite() else others)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Not remembering the star is better than failing the toggle.
+            }
+        }
+    }
 
     fun loadOlder() {
         val token = olderToken ?: return
@@ -122,7 +146,8 @@ class TeamProfileViewModel(
                 _uiState.update { it.copy(status = LoadStatus.Empty, matchesStatus = LoadStatus.Empty) }
                 return@launch
             }
-            _uiState.update { it.copy(status = LoadStatus.Content, profile = profile) }
+            val isFavorite = readIsFavorite(profile.id)
+            _uiState.update { it.copy(status = LoadStatus.Content, profile = profile, isFavorite = isFavorite) }
             try {
                 leagueIds = teamScheduleLeagueIds(resolveHomeLeagueId(profile) ?: originLeagueId)
                 val page = scheduleRepository.getSchedule(leagueIds, pageToken = null)
@@ -148,6 +173,16 @@ class TeamProfileViewModel(
         }
         return homeLeagueId(leagues, profile.homeLeagueName)
     }
+
+    private suspend fun readIsFavorite(id: String): Boolean = try {
+        preferences.getFavoriteTeams().orEmpty().any { it.id == id }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun TeamProfile.toFavorite() = FavoriteTeam(id, slug, name, code, imageUrl)
 
     private suspend fun readNoSpoilers(): Boolean = try {
         preferences.getNoSpoilers() ?: false

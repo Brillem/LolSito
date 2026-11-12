@@ -3,6 +3,7 @@ package com.example.lolsito.feature.teams.ui
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.Standings
@@ -11,6 +12,7 @@ import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.feature.teams.domain.TeamSummary
+import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -35,6 +37,7 @@ class TeamsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val clock = Clock.fixed(Instant.parse("2026-11-11T12:00:00Z"), ZoneOffset.UTC)
     private val repository = FakeStandingsRepository()
+    private val preferences = FakeUserPreferences()
     private var leaguesError: Throwable? = null
     private val leaguesRepository = LeaguesRepository {
         leaguesError?.let { throw it }
@@ -53,7 +56,7 @@ class TeamsViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun viewModel() = TeamsViewModel(repository, leaguesRepository, clock, defaultLeagueId = LCK)
+    private fun viewModel() = TeamsViewModel(repository, leaguesRepository, preferences, clock, defaultLeagueId = LCK)
 
     @Test
     fun `loads the leagues and the default league's current teams`() = runTest(dispatcher) {
@@ -124,6 +127,88 @@ class TeamsViewModelTest {
 
         assertEquals(LoadStatus.Content, vm.uiState.value.status)
         assertEquals(listOf("Gen.G", "T1"), vm.uiState.value.teams.map { it.name })
+    }
+
+    private val t1 = FavoriteTeam("1", "t1", "T1", "T1", "https://img/t1.png")
+    private val g2 = FavoriteTeam("3", "g2-esports", "G2 Esports", "G2", null)
+
+    @Test
+    fun `the stored favorites are listed, in stored order, whatever league is selected`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(g2, t1)
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf(g2, t1), vm.uiState.value.favorites)
+        // G2 is not in the selected league (LCK) and is listed anyway; no extra request was needed.
+        assertEquals(listOf("lck-now"), repository.standingsRequests)
+        vm.selectLeague(LEC)
+        advanceUntilIdle()
+        assertEquals(listOf(g2, t1), vm.uiState.value.favorites)
+    }
+
+    @Test
+    fun `with no stored favorites the list is empty`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(emptyList<FavoriteTeam>(), vm.uiState.value.favorites)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+    }
+
+    @Test
+    fun `unreadable favorites leave the list empty and do not block the teams`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(t1)
+        preferences.readFails = true
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(emptyList<FavoriteTeam>(), vm.uiState.value.favorites)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertEquals(listOf("Gen.G", "T1"), vm.uiState.value.teams.map { it.name })
+    }
+
+    @Test
+    fun `refreshing shows a favorite marked or unmarked meanwhile`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        preferences.favoriteTeams = listOf(t1)
+        vm.refreshFavorites()
+        advanceUntilIdle()
+        assertEquals(listOf(t1), vm.uiState.value.favorites)
+
+        preferences.favoriteTeams = emptyList()
+        vm.refreshFavorites()
+        advanceUntilIdle()
+        assertEquals(emptyList<FavoriteTeam>(), vm.uiState.value.favorites)
+    }
+
+    @Test
+    fun `a failed refresh keeps the favorites already shown`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(t1)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        preferences.readFails = true
+        vm.refreshFavorites()
+        advanceUntilIdle()
+
+        assertEquals(listOf(t1), vm.uiState.value.favorites)
+    }
+
+    @Test
+    fun `changing the league or retrying does not touch the favorites`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(t1)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.selectLeague(LEC)
+        vm.retry()
+        assertEquals(listOf(t1), vm.uiState.value.favorites)
+        advanceUntilIdle()
+        assertEquals(listOf(t1), vm.uiState.value.favorites)
     }
 
     @Test

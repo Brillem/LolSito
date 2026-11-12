@@ -4,13 +4,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -29,28 +34,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.feature.teams.domain.TeamSummary
 import com.example.lolsito.ui.theme.LolSitoTheme
 
-/** Container: wires the ViewModel to the stateless [TeamsContent]. [onTeamClick] receives the team id and the selected league id. */
+/**
+ * Container: wires the ViewModel to the stateless [TeamsContent]. [onTeamClick] receives the team id and the
+ * selected league id; [onFavoriteClick] only the team id, since a favorite belongs to no selected league.
+ */
 @Composable
 fun TeamsScreen(
     viewModel: TeamsViewModel,
     onTeamClick: (teamId: String, leagueId: String) -> Unit,
+    onFavoriteClick: (teamId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // Favorites are starred in a team's profile: read them again whenever this tab comes back.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshFavorites() }
     TeamsContent(
         state = state,
         onSelectLeague = viewModel::selectLeague,
         onRetry = viewModel::retry,
         onRetryLeagues = viewModel::retryLeagues,
         onTeamClick = { teamId -> onTeamClick(teamId, state.selectedLeagueId) },
+        onFavoriteClick = onFavoriteClick,
         modifier = modifier,
     )
 }
@@ -63,8 +78,10 @@ fun TeamsContent(
     onRetryLeagues: () -> Unit,
     onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onFavoriteClick: (String) -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
+        if (state.favorites.isNotEmpty()) FavoritesRow(state.favorites, onFavoriteClick)
         LeaguePicker(
             label = state.selectedLeagueName,
             leagues = state.leagues,
@@ -85,6 +102,37 @@ fun TeamsContent(
         LoadStatusView(state.status, "No teams for this league right now", onRetry) {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(state.teams, key = { it.id }) { team -> TeamRow(team, onClick = { onTeamClick(team.id) }) }
+            }
+        }
+    }
+}
+
+/** The favorites above the league picker, one compact card each; tapping one opens its profile. */
+@Composable
+private fun FavoritesRow(favorites: List<FavoriteTeam>, onClick: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Text(
+            "Favorites",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            items(favorites, key = { it.id }) { team ->
+                Row(
+                    Modifier
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                        .clickable { onClick(team.id) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TeamLogo(team.imageUrl, contentDescription = team.name, size = 28.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(team.code, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                }
             }
         }
     }
@@ -143,6 +191,7 @@ private fun TeamsContentPreview() {
                 selectedLeagueId = "lck",
                 status = LoadStatus.Content,
                 teams = listOf(TeamSummary("1", "Gen.G Esports", "GEN", null), TeamSummary("2", "T1", "T1", null)),
+                favorites = listOf(FavoriteTeam("2", "t1", "T1", "T1", null)),
             ),
             onSelectLeague = {},
             onRetry = {},

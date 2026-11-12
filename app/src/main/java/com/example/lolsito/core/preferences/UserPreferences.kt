@@ -18,4 +18,9 @@ interface UserPreferences {
 
     /** Saves league and tournament together, so a stored tournament always belongs to the stored league. */
     suspend fun saveStandingsSelection(selection: StandingsSelection)
+
+    /** Whether the no-spoilers mode (finished results hidden) is on; null when the user never chose. */
+    suspend fun getNoSpoilers(): Boolean?
+
+    suspend fun saveNoSpoilers(enabled: Boolean)
 }

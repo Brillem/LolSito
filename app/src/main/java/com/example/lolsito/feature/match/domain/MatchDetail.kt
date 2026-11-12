@@ -71,9 +71,12 @@ data class MatchDetail(
      * LazyColumn keys aligned with [visibleGames]. Based on the game id (or the number when the id
      * is missing) plus an occurrence ordinal, so repeated API data never yields duplicate keys.
      */
-    val gameKeys: List<String> by lazy {
+    val gameKeys: List<String> by lazy { keysOf(visibleGames) }
+
+    /** Same keys as [gameKeys], for any list of this match's games (for example all of them, unneeded ones included). */
+    fun keysOf(games: List<MatchGame>): List<String> {
         val unique = UniqueKeys()
-        visibleGames.map { game -> unique.next(game.id?.let { "game:$it" } ?: "game-number:${game.number}") }
+        return games.map { game -> unique.next(game.id?.let { "game:$it" } ?: "game-number:${game.number}") }
     }
 
     /** Stream to offer as "Watch live": only while the series is in progress. */

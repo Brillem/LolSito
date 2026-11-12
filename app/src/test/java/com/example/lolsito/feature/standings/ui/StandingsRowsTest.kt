@@ -203,3 +203,47 @@ class StandingsRowsTest {
 
     private fun match(id: String) = SectionMatch(MatchState.UNSTARTED, Match(id, emptyList(), format = null))
 }
+
+class MatchRowResultTest {
+
+    private fun row(state: MatchState, outcomes: Boolean = true) = StandingsRow.MatchRow(
+        key = "match:m",
+        sectionMatch = SectionMatch(
+            state,
+            Match(
+                id = "m",
+                teams = listOf(
+                    Team("T1", "T1", null, com.example.lolsito.core.model.MatchOutcome.WIN.takeIf { outcomes }, 2),
+                    Team("Gen.G", "GEN", null, com.example.lolsito.core.model.MatchOutcome.LOSS.takeIf { outcomes }, 1),
+                ),
+                format = SeriesFormat(SeriesType.BEST_OF, 3),
+            ),
+        ),
+    )
+
+    @Test
+    fun `with the mode off the result is the formatted one`() {
+        val row = row(MatchState.COMPLETED)
+
+        assertEquals(row.result, row.displayedResult(noSpoilers = false))
+        assertEquals("2 - 1", row.displayedResult(noSpoilers = false).score)
+    }
+
+    @Test
+    fun `with the mode on a finished match has no score and no loser`() {
+        val result = row(MatchState.COMPLETED).displayedResult(noSpoilers = true)
+
+        assertEquals(null, result.score)
+        assertEquals(null, result.winnerIndex)
+        assertEquals(com.example.lolsito.core.model.TeamEmphasis.NEUTRAL, result.emphasisFor(0))
+        assertEquals(com.example.lolsito.core.model.TeamEmphasis.NEUTRAL, result.emphasisFor(1))
+        assertEquals("Bo3", result.formatLabel)
+    }
+
+    @Test
+    fun `an unfinished match is the same with the mode on or off`() {
+        val row = row(MatchState.UNSTARTED, outcomes = false)
+
+        assertEquals(row.displayedResult(noSpoilers = false), row.displayedResult(noSpoilers = true))
+    }
+}

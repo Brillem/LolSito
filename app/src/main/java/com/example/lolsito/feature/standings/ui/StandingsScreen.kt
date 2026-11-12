@@ -32,6 +32,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
@@ -59,6 +61,8 @@ fun StandingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // The mode is toggled in Schedule: read it again whenever this tab comes back.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshNoSpoilers() }
     StandingsContent(
         state = state,
         onSelectLeague = viewModel::selectLeague,
@@ -110,7 +114,7 @@ fun StandingsContent(
         }
         LoadStatusView(state.tournamentsStatus, "No tournaments for this league", onRetryTournaments) {
             LoadStatusView(state.standingsStatus, "No standings for this tournament yet", onRetryStandings) {
-                StandingsList(state.rows, onMatchClick)
+                StandingsList(state.rows, onMatchClick, noSpoilers = state.noSpoilers)
             }
         }
     }
@@ -169,7 +173,12 @@ private fun <T> Picker(
 }
 
 @Composable
-fun StandingsList(rows: List<StandingsRow>, onMatchClick: (String) -> Unit, modifier: Modifier = Modifier) {
+fun StandingsList(
+    rows: List<StandingsRow>,
+    onMatchClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    noSpoilers: Boolean = false,
+) {
     LazyColumn(modifier.fillMaxSize()) {
         items(rows, key = { it.key }) { row ->
             when (row) {
@@ -179,7 +188,7 @@ fun StandingsList(rows: List<StandingsRow>, onMatchClick: (String) -> Unit, modi
                 is StandingsRow.RankingRow -> RankingRow(row)
                 is StandingsRow.EmptySection -> InfoText("No standings for this section yet")
                 is StandingsRow.EliminationNotice -> EliminationNotice()
-                is StandingsRow.MatchRow -> SectionMatchRow(row, onClick = { onMatchClick(row.sectionMatch.match.id) })
+                is StandingsRow.MatchRow -> SectionMatchRow(row, onClick = { onMatchClick(row.sectionMatch.match.id) }, noSpoilers = noSpoilers)
             }
         }
     }
@@ -267,9 +276,14 @@ private fun InfoText(text: String) {
 
 /** Undecided (TBD) matches are not clickable: see [StandingsRow.MatchRow.isNavigable]. */
 @Composable
-fun SectionMatchRow(row: StandingsRow.MatchRow, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun SectionMatchRow(
+    row: StandingsRow.MatchRow,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    noSpoilers: Boolean = false,
+) {
     val teams = row.sectionMatch.match.teams
-    val result = row.result
+    val result = row.displayedResult(noSpoilers)
     Row(
         modifier
             .fillMaxWidth()

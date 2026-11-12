@@ -4,9 +4,15 @@ import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.model.Match
+import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.preferences.StandingsSelection
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.feature.standings.domain.Ranking
+import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
+import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
@@ -23,6 +29,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -77,6 +84,68 @@ class StandingsViewModelTest {
         savedStateHandle = savedStateHandle,
         defaultLeagueId = LCK,
     )
+
+    @Test
+    fun `no spoilers is off by default`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.noSpoilers)
+    }
+
+    @Test
+    fun `a stored no spoilers mode is read and the rows are the same as with it off`() = runTest(dispatcher) {
+        val ranked = StandingsSection("Group", listOf(Ranking(1, Team("T1", "T1", null, null, null), 5, 3)), emptyList())
+        val played = StandingsSection(
+            "Playoffs",
+            emptyList(),
+            listOf(SectionMatch(MatchState.COMPLETED, Match("m1", listOf(Team("A", "A", null, null, 2), Team("B", "B", null, null, 0)), null))),
+        )
+        repository.standings[LCK_SUMMER] = Standings(listOf(StandingsStage("Stage", "stage", listOf(ranked, played))))
+        val off = viewModel()
+        advanceUntilIdle()
+        val rowsOff = off.uiState.value.rows
+
+        preferences.noSpoilers = true
+        val on = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(on.uiState.value.noSpoilers)
+        assertEquals(LoadStatus.Content, on.uiState.value.standingsStatus)
+        assertEquals(rowsOff, on.uiState.value.rows)
+        assertTrue(on.uiState.value.rows.any { it is StandingsRow.RankingRow })
+    }
+
+    @Test
+    fun `refreshing picks up a change made in Schedule and a change back`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.noSpoilers)
+
+        preferences.noSpoilers = true
+        vm.refreshNoSpoilers()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.noSpoilers)
+
+        preferences.noSpoilers = false
+        vm.refreshNoSpoilers()
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.noSpoilers)
+    }
+
+    @Test
+    fun `an unreadable no spoilers preference keeps the current mode`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.noSpoilers)
+
+        preferences.readFails = true
+        vm.refreshNoSpoilers()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.noSpoilers)
+    }
+
 
     private val StandingsUiState.stageNames: List<String>
         get() = rows.filterIsInstance<StandingsRow.StageHeader>().map { it.name }

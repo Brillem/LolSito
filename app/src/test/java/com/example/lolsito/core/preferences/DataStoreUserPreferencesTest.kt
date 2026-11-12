@@ -31,6 +31,7 @@ class DataStoreUserPreferencesTest {
         val preferences = preferences()
         assertNull(preferences.getScheduleLeagueIds())
         assertNull(preferences.getStandingsSelection())
+        assertNull(preferences.getNoSpoilers())
     }
 
     @Test
@@ -51,6 +52,27 @@ class DataStoreUserPreferencesTest {
 
         preferences.saveStandingsSelection(StandingsSelection("worlds", null))
         assertEquals(StandingsSelection("worlds", null), preferences.getStandingsSelection())
+    }
+
+    @Test
+    fun `no spoilers round trips in both directions`() = runTest(UnconfinedTestDispatcher()) {
+        val preferences = preferences()
+        preferences.saveNoSpoilers(true)
+        assertEquals(true, preferences.getNoSpoilers())
+
+        preferences.saveNoSpoilers(false)
+        assertEquals(false, preferences.getNoSpoilers())
+    }
+
+    @Test
+    fun `saving no spoilers leaves the other preferences alone`() = runTest(UnconfinedTestDispatcher()) {
+        val preferences = preferences()
+        preferences.saveScheduleLeagueIds(setOf("a"))
+        preferences.saveStandingsSelection(StandingsSelection("lck", null))
+        preferences.saveNoSpoilers(true)
+
+        assertEquals(setOf("a"), preferences.getScheduleLeagueIds())
+        assertEquals(StandingsSelection("lck", null), preferences.getStandingsSelection())
     }
 
     @Test

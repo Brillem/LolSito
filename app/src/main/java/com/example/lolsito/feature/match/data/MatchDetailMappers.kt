@@ -5,6 +5,7 @@ import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.network.dto.EventDetailsResponse
 import com.example.lolsito.core.network.dto.GameDto
+import com.example.lolsito.core.network.dto.WatchMediaDto
 import com.example.lolsito.core.network.toHttps
 import com.example.lolsito.core.network.toSeriesFormat
 import com.example.lolsito.core.network.toTeam
@@ -12,6 +13,9 @@ import com.example.lolsito.feature.match.domain.GameSide
 import com.example.lolsito.feature.match.domain.GameState
 import com.example.lolsito.feature.match.domain.MatchDetail
 import com.example.lolsito.feature.match.domain.MatchGame
+import com.example.lolsito.feature.match.domain.WatchLink
+import com.example.lolsito.feature.match.domain.pickWatchLink
+import com.example.lolsito.feature.match.domain.toWatchProvider
 
 /** Returns null when the response has no event, no event id, or no match. */
 fun EventDetailsResponse.toMatchDetail(): MatchDetail? {
@@ -31,6 +35,7 @@ fun EventDetailsResponse.toMatchDetail(): MatchDetail? {
         teams = teams,
         format = format,
         games = games,
+        liveStream = pickWatchLink(event.streams.toWatchLinks()),
     )
 }
 
@@ -57,7 +62,15 @@ private fun GameDto.toDomain(index: Int): MatchGame = MatchGame(
         val side = team.side.toSide() ?: return@mapNotNull null
         teamId to side
     }.toMap(),
+    vod = pickWatchLink(vods.toWatchLinks()),
 )
+
+/** Keeps only entries with a known provider and a non-blank id, in API order. */
+private fun List<WatchMediaDto>?.toWatchLinks(): List<WatchLink> = orEmpty().mapNotNull { media ->
+    val provider = media.provider.toWatchProvider() ?: return@mapNotNull null
+    val parameter = media.parameter?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+    WatchLink(provider, parameter, media.locale)
+}
 
 /**
  * Series state from team results first, then from game states.

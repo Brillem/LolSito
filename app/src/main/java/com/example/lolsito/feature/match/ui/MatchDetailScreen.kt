@@ -16,11 +16,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -29,6 +32,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.SeriesFormat
@@ -45,6 +52,7 @@ import com.example.lolsito.feature.match.domain.GameState
 import com.example.lolsito.feature.match.domain.GameStatsLink
 import com.example.lolsito.feature.match.domain.MatchDetail
 import com.example.lolsito.feature.match.domain.MatchGame
+import com.example.lolsito.feature.match.domain.WatchLink
 
 /** Container: wires the ViewModel to the stateless [MatchDetailContent]. */
 @Composable
@@ -95,7 +103,16 @@ fun MatchDetailContent(
 
 @Composable
 private fun MatchDetailBody(detail: MatchDetail, onGameClick: (GameStatsLink) -> Unit) {
+    val context = LocalContext.current
     LazyColumn(Modifier.fillMaxSize()) {
+        detail.liveLink?.let { live ->
+            item(key = "watch-live") {
+                Button(
+                    onClick = { context.openWatchLink(live) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                ) { Text("Watch live") }
+            }
+        }
         item(key = "header") { MatchHeader(detail) }
         item(key = "games-title") {
             Text(
@@ -119,7 +136,12 @@ private fun MatchDetailBody(detail: MatchDetail, onGameClick: (GameStatsLink) ->
         items(games.size, key = { keys[it] }) { index ->
             val game = games[index]
             val statsLink = game.statsLink(detail.teams)
-            GameRow(game, detail.teams, onClick = statsLink?.let { link -> { onGameClick(link) } })
+            GameRow(
+                game,
+                detail.teams,
+                onClick = statsLink?.let { link -> { onGameClick(link) } },
+                onWatch = game.vodLink?.let { vod -> { context.openWatchLink(vod) } },
+            )
             HorizontalDivider()
         }
     }
@@ -181,7 +203,13 @@ private fun HeaderTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier = 
 }
 
 @Composable
-fun GameRow(game: MatchGame, teams: List<Team>, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
+fun GameRow(
+    game: MatchGame,
+    teams: List<Team>,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    onWatch: (() -> Unit)? = null,
+) {
     Row(
         modifier
             .fillMaxWidth()
@@ -208,6 +236,9 @@ fun GameRow(game: MatchGame, teams: List<Team>, onClick: (() -> Unit)?, modifier
             style = MaterialTheme.typography.labelMedium,
             color = if (game.state == GameState.IN_PROGRESS) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (onWatch != null) {
+            OutlinedButton(onClick = onWatch, modifier = Modifier.padding(start = 8.dp)) { Text("Watch") }
+        }
         if (onClick != null) {
             Text(
                 "›",
@@ -216,6 +247,16 @@ fun GameRow(game: MatchGame, teams: List<Team>, onClick: (() -> Unit)?, modifier
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
+    }
+}
+
+/** Opens [link] in the provider app or the browser; does nothing when no app can handle it. */
+private fun Context.openWatchLink(link: WatchLink) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        // Nothing can open it: ignore.
     }
 }
 

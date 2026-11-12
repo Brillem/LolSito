@@ -8,6 +8,7 @@ import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
 import com.example.lolsito.feature.standings.domain.StandingsStage
+import com.example.lolsito.feature.standings.domain.buildBracket
 
 /** Flat, display-ready rows of a standings list. Every [key] is unique within one list. */
 sealed interface StandingsRow {
@@ -44,8 +45,18 @@ sealed interface StandingsRow {
 
         /** An undecided match (TBD) has no detail worth opening. */
         val isNavigable: Boolean get() = hasBothTeams
+
+        /** Game wins of the team at [index] as text, only when [displayedResult] shows a score. */
+        fun displayedGameWins(index: Int, noSpoilers: Boolean): String? =
+            displayedResult(noSpoilers).score?.let { sectionMatch.match.teams.getOrNull(index)?.gameWins?.toString() }
     }
+
+    /** Single-elimination section drawn as a bracket instead of a match list; see [buildBracket]. */
+    data class BracketRow(override val key: String, val rounds: List<BracketColumn>) : StandingsRow
 }
+
+/** One bracket round as display rows: its name and its matches, top to bottom. */
+data class BracketColumn(val name: String, val matches: List<StandingsRow.MatchRow>)
 
 /**
  * Win-loss record as text: "5-3" when complete, "-" when missing. A record with only one value
@@ -59,7 +70,8 @@ fun formatRecord(wins: Int?, losses: Int?): String = when {
 
 /**
  * Stages in API order. Each section decides on its own: rankings show a table, matches without
- * rankings show the match list, and a section with neither shows an empty row. Elimination stages
+ * rankings show a bracket when they form a single-elimination one (see [buildBracket]) and the match
+ * list otherwise, and a section with neither shows an empty row. Elimination stages
  * (bracket or Swiss) also get a notice, and skip their rounds that are not scheduled yet.
  */
 fun buildStandingsRows(standings: Standings): List<StandingsRow> {
@@ -90,8 +102,15 @@ fun buildStandingsRows(standings: Standings): List<StandingsRow> {
                         rows += StandingsRow.RankingRow(key("rank:$sectionBase/$teamId"), ranking)
                     }
                 }
-                section.isMatchOnly -> section.matches.forEach { match ->
-                    rows += StandingsRow.MatchRow(key("match:$sectionBase/${match.match.id}"), match)
+                section.isMatchOnly -> {
+                    fun matchRow(match: SectionMatch) = StandingsRow.MatchRow(key("match:$sectionBase/${match.match.id}"), match)
+                    val bracket = buildBracket(section)
+                    if (bracket != null) {
+                        val bracketKey = key("bracket:$sectionBase")
+                        rows += StandingsRow.BracketRow(bracketKey, bracket.map { round -> BracketColumn(round.name, round.matches.map(::matchRow)) })
+                    } else {
+                        section.matches.forEach { rows += matchRow(it) }
+                    }
                 }
                 else -> rows += StandingsRow.EmptySection(key("empty:$sectionBase"))
             }

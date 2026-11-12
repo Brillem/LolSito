@@ -60,6 +60,7 @@ fun MatchDetailScreen(
     viewModel: MatchDetailViewModel,
     onBack: () -> Unit,
     onGameClick: (GameStatsLink) -> Unit,
+    onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -70,6 +71,7 @@ fun MatchDetailScreen(
         onRetry = viewModel::retry,
         onShowResult = viewModel::revealResult,
         onGameClick = onGameClick,
+        onTeamClick = onTeamClick,
         modifier = modifier,
     )
 }
@@ -83,6 +85,7 @@ fun MatchDetailContent(
     onGameClick: (GameStatsLink) -> Unit,
     modifier: Modifier = Modifier,
     onShowResult: () -> Unit = {},
+    onTeamClick: (String) -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         TopAppBar(
@@ -98,7 +101,7 @@ fun MatchDetailContent(
         when (state) {
             MatchDetailUiState.Loading -> LoadingView()
             is MatchDetailUiState.Error -> ErrorView(state.message, onRetry)
-            is MatchDetailUiState.Content -> MatchDetailBody(state, onShowResult, onGameClick)
+            is MatchDetailUiState.Content -> MatchDetailBody(state, onShowResult, onGameClick, onTeamClick)
         }
     }
 }
@@ -108,6 +111,7 @@ private fun MatchDetailBody(
     content: MatchDetailUiState.Content,
     onShowResult: () -> Unit,
     onGameClick: (GameStatsLink) -> Unit,
+    onTeamClick: (String) -> Unit,
 ) {
     val detail = content.detail
     val context = LocalContext.current
@@ -120,7 +124,7 @@ private fun MatchDetailBody(
                 ) { Text("Watch live") }
             }
         }
-        item(key = "header") { MatchHeader(content) }
+        item(key = "header") { MatchHeader(content, onTeamClick) }
         if (content.resultsHidden) {
             item(key = "show-result") {
                 OutlinedButton(
@@ -164,7 +168,11 @@ private fun MatchDetailBody(
 }
 
 @Composable
-fun MatchHeader(content: MatchDetailUiState.Content, modifier: Modifier = Modifier) {
+fun MatchHeader(
+    content: MatchDetailUiState.Content,
+    onTeamClick: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val detail = content.detail
     val result = content.displayedResult
     Column(
@@ -183,7 +191,7 @@ fun MatchHeader(content: MatchDetailUiState.Content, modifier: Modifier = Modifi
         val teams = detail.teams
         if (teams.size >= 2) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                HeaderTeam(teams[0], result.emphasisFor(0), Modifier.weight(1f))
+                HeaderTeam(teams[0], result.emphasisFor(0), onTeamClick, Modifier.weight(1f))
                 Text(
                     text = content.headerLabel,
                     style = MaterialTheme.typography.headlineMedium,
@@ -195,7 +203,7 @@ fun MatchHeader(content: MatchDetailUiState.Content, modifier: Modifier = Modifi
                     },
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
-                HeaderTeam(teams[1], result.emphasisFor(1), Modifier.weight(1f))
+                HeaderTeam(teams[1], result.emphasisFor(1), onTeamClick, Modifier.weight(1f))
             }
         } else {
             Text("TBD", style = MaterialTheme.typography.headlineSmall)
@@ -204,9 +212,23 @@ fun MatchHeader(content: MatchDetailUiState.Content, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun HeaderTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier = Modifier) {
+private fun HeaderTeam(
+    team: Team,
+    emphasis: TeamEmphasis,
+    onTeamClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val profileId = team.profileId()
     Column(
-        modifier.alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
+        modifier
+            .alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f)
+            .then(
+                if (profileId != null) {
+                    Modifier.clickable(onClickLabel = "View team", onClick = { onTeamClick(profileId) })
+                } else {
+                    Modifier
+                },
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         TeamLogo(team.imageUrl, contentDescription = team.name, size = 56.dp)

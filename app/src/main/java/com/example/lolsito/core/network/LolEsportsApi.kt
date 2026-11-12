@@ -4,6 +4,7 @@ import com.example.lolsito.core.network.dto.EventDetailsResponse
 import com.example.lolsito.core.network.dto.LeaguesResponse
 import com.example.lolsito.core.network.dto.ScheduleResponse
 import com.example.lolsito.core.network.dto.StandingsResponse
+import com.example.lolsito.core.network.dto.TeamsResponse
 import com.example.lolsito.core.network.dto.TournamentsResponse
 import retrofit2.http.GET
 import retrofit2.http.Query
@@ -38,4 +39,11 @@ interface LolEsportsApi {
     /** Rankings are empty for bracket and Swiss stages. */
     @GET("getStandings")
     suspend fun getStandings(@Query("tournamentId") tournamentId: String): StandingsResponse
+
+    /**
+     * One team with its players. [id] is the team id or slug; never call it without one, since the
+     * unfiltered answer is every team ever listed (about 1.5 MB).
+     */
+    @GET("getTeams")
+    suspend fun getTeams(@Query("id") id: String): TeamsResponse
 }

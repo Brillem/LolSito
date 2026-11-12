@@ -17,6 +17,8 @@ import com.example.lolsito.feature.schedule.domain.LiveMatchesRepository
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import com.example.lolsito.feature.standings.data.StandingsRepositoryImpl
 import com.example.lolsito.feature.standings.domain.StandingsRepository
+import com.example.lolsito.feature.teams.data.TeamsRepositoryImpl
+import com.example.lolsito.feature.teams.domain.TeamsRepository
 import okhttp3.OkHttpClient
 import java.time.Clock
 import java.time.ZoneId
@@ -35,6 +37,7 @@ class AppContainer(private val context: Context) {
     val liveMatchesRepository: LiveMatchesRepository by lazy { LiveMatchesRepositoryImpl(api) }
     val matchDetailRepository: MatchDetailRepository by lazy { MatchDetailRepositoryImpl(api) }
     val standingsRepository: StandingsRepository by lazy { StandingsRepositoryImpl(api) }
+    val teamsRepository: TeamsRepository by lazy { TeamsRepositoryImpl(api) }
     val gameStatsRepository: GameStatsRepository by lazy { GameStatsRepositoryImpl(liveStatsApi, clock()) }
 
     val userPreferences: UserPreferences by lazy { DataStoreUserPreferences.create(context) }

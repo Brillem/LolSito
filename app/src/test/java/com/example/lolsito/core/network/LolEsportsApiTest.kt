@@ -115,6 +115,24 @@ class LolEsportsApiTest {
     }
 
     @Test
+    fun `getTeams sends api key, locale and the team id and parses one team with its players`() = runTest {
+        server.enqueue(MockResponse.Builder().body(Fixtures.read("getTeams_t1.json")).build())
+
+        val response = api.getTeams(id = "98767991853197861")
+
+        val request = server.takeRequest()
+        assertEquals(ApiConfig.API_KEY, request.headers["x-api-key"])
+        assertEquals("/persisted/gw/getTeams", request.url.encodedPath)
+        assertEquals("en-US", request.url.queryParameter("hl"))
+        assertEquals("98767991853197861", request.url.queryParameter("id"))
+        val team = response.data.teams.single()
+        assertEquals("t1", team.slug)
+        assertEquals("LCK", team.homeLeague?.name)
+        assertEquals(14, team.players.size)
+        assertEquals("Faker", team.players.single { it.id == "98767991747728851" }.summonerName)
+    }
+
+    @Test
     fun `getLive parses the empty fixture as no events`() = runTest {
         server.enqueue(MockResponse.Builder().body(Fixtures.read("getLive.json")).build())
 

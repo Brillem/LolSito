@@ -199,6 +199,7 @@ fun LolSitoApp(container: AppContainer) {
                 StandingsScreen(
                     viewModel = vm,
                     onMatchClick = { matchId -> navController.navigateFrom(entry, Routes.match(matchId)) },
+                    onTeamClick = { teamId -> navController.navigateFrom(entry, Routes.team(teamId, vm.uiState.value.selectedLeagueId)) },
                 )
             }
             composable(Routes.TEAMS) { entry ->

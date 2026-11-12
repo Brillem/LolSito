@@ -16,6 +16,7 @@ Header: `x-api-key: 0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z` (public web key; 4
 | getStandings_lck.json | `getStandings?hl=en-US&tournamentId=115548147890329817` (populated rankings) |
 | getStandings_worlds2026.json | `getStandings?hl=en-US&tournamentId=115660540725177488` (empty rankings: bracket/swiss stages) |
 | getStandings_worlds2026_knockouts.json | Same request, captured 2026-11-11 with Knockouts played up to the Final (7 matches: 4 + 2 + 1, Final unstarted); `previousMatchIds` is still empty, so the bracket comes from match order |
+| getStandings_msi2026.json | `getStandings?hl=en-US&tournamentId=115570934354631452` captured 2026-11-12 (MSI 2026, fully played): two double-elimination sections, "Play In Knockouts" (4 teams, 6 matches, not listed in play order) and "Knockouts" (8 teams, 14 matches) |
 | getEventDetails.json | `getEventDetails?hl=en-US&id=115660588583040710` (MVK vs FUR, Bo5; game ids here) |
 | getTeams_t1.json | `getTeams?hl=en-US&id=t1` captured 2026-11-11 (T1, 14 players; `id` also accepts the team id `98767991853197861`). Never call `getTeams` without `id`: it returns every team (~1.5 MB) |
 

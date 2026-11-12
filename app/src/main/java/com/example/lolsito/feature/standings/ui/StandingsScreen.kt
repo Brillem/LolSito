@@ -58,6 +58,7 @@ import java.time.LocalDate
 fun StandingsScreen(
     viewModel: StandingsViewModel,
     onMatchClick: (String) -> Unit,
+    onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -71,6 +72,7 @@ fun StandingsScreen(
         onRetryTournaments = viewModel::retryTournaments,
         onRetryStandings = viewModel::retryStandings,
         onMatchClick = onMatchClick,
+        onTeamClick = onTeamClick,
         modifier = modifier,
     )
 }
@@ -84,6 +86,7 @@ fun StandingsContent(
     onRetryTournaments: () -> Unit,
     onRetryStandings: () -> Unit,
     onMatchClick: (String) -> Unit,
+    onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -114,7 +117,7 @@ fun StandingsContent(
         }
         LoadStatusView(state.tournamentsStatus, "No tournaments for this league", onRetryTournaments) {
             LoadStatusView(state.standingsStatus, "No standings for this tournament yet", onRetryStandings) {
-                StandingsList(state.rows, onMatchClick, noSpoilers = state.noSpoilers)
+                StandingsList(state.rows, onMatchClick, onTeamClick, noSpoilers = state.noSpoilers)
             }
         }
     }
@@ -176,6 +179,7 @@ private fun <T> Picker(
 fun StandingsList(
     rows: List<StandingsRow>,
     onMatchClick: (String) -> Unit,
+    onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     noSpoilers: Boolean = false,
 ) {
@@ -185,11 +189,13 @@ fun StandingsList(
                 is StandingsRow.StageHeader -> StageHeader(row.name)
                 is StandingsRow.SectionHeader -> SectionHeader(row.name)
                 is StandingsRow.TableHeader -> TableHeader()
-                is StandingsRow.RankingRow -> RankingRow(row)
+                is StandingsRow.RankingRow -> RankingRow(row, onTeamClick)
                 is StandingsRow.EmptySection -> InfoText("No standings for this section yet")
                 is StandingsRow.EliminationNotice -> EliminationNotice()
                 is StandingsRow.MatchRow -> SectionMatchRow(row, onClick = { onMatchClick(row.sectionMatch.match.id) }, noSpoilers = noSpoilers)
                 is StandingsRow.BracketRow -> BracketView(row, onMatchClick, noSpoilers = noSpoilers)
+                is StandingsRow.DoubleEliminationRow -> DoubleEliminationView(row, onMatchClick, noSpoilers = noSpoilers)
+                is StandingsRow.SwissRow -> SwissView(row, onMatchClick, noSpoilers = noSpoilers)
             }
         }
     }
@@ -229,11 +235,16 @@ private fun TableHeader() {
     }
 }
 
+/** Opens the team profile on tap, unless the team has nothing to open: see [StandingsRow.RankingRow.teamId]. */
 @Composable
-fun RankingRow(row: StandingsRow.RankingRow, modifier: Modifier = Modifier) {
+fun RankingRow(row: StandingsRow.RankingRow, onTeamClick: (String) -> Unit, modifier: Modifier = Modifier) {
     val team = row.ranking.team
+    val teamId = row.teamId
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier
+            .fillMaxWidth()
+            .then(if (teamId != null) Modifier.clickable { onTeamClick(teamId) } else Modifier)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(row.position, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.width(POSITION_WIDTH))
@@ -305,7 +316,7 @@ fun SectionMatchRow(
         } else {
             Text("TBD", style = MaterialTheme.typography.bodyMedium)
         }
-        if (row.sectionMatch.state == MatchState.IN_PROGRESS) {
+        if (row.isLive) {
             Text("LIVE", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
         }
     }
@@ -387,7 +398,7 @@ private fun StandingsContentPreview() {
             standingsStatus = LoadStatus.Content,
             rows = buildStandingsRows(previewStandings),
         ),
-        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {},
+        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
     )
 }
 
@@ -401,7 +412,7 @@ private fun StandingsErrorPreview() {
             selectedLeagueId = "1",
             tournamentsStatus = LoadStatus.Error("Could not load tournaments"),
         ),
-        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {},
+        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
     )
 }
 
@@ -418,6 +429,6 @@ private fun StandingsLeaguesErrorPreview() {
             standingsStatus = LoadStatus.Content,
             rows = buildStandingsRows(previewStandings),
         ),
-        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {},
+        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
     )
 }

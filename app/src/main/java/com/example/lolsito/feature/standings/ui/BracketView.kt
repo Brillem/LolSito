@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -33,12 +34,12 @@ import androidx.compose.ui.unit.dp
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.ui.LOSER_ALPHA
+import com.example.lolsito.core.ui.LiveBadge
 import com.example.lolsito.core.ui.TeamLogo
 
 /**
  * Single-elimination bracket: one column per round, each match a card, and lines joining every
- * pair of matches to the one they feed. Scrolls horizontally when it does not fit. Every round
- * doubles the vertical slot of the previous one, so a match sits centered between its two feeders.
+ * pair of matches to the one they feed. Scrolls horizontally when it does not fit.
  */
 @Composable
 fun BracketView(
@@ -47,8 +48,99 @@ fun BracketView(
     modifier: Modifier = Modifier,
     noSpoilers: Boolean = false,
 ) {
+    BracketColumns(row.rounds, onMatchClick, noSpoilers, modifier)
+}
+
+/** Double elimination: the upper bracket, the lower bracket and the grand final, each with its own columns. */
+@Composable
+fun DoubleEliminationView(
+    row: StandingsRow.DoubleEliminationRow,
+    onMatchClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    noSpoilers: Boolean = false,
+) {
+    Column(modifier.fillMaxWidth()) {
+        BracketPartTitle("Upper bracket")
+        BracketColumns(row.upper, onMatchClick, noSpoilers)
+        BracketPartTitle("Lower bracket")
+        BracketColumns(row.lower, onMatchClick, noSpoilers)
+        BracketColumns(listOf(row.grandFinal), onMatchClick, noSpoilers)
+    }
+}
+
+/**
+ * Swiss stage: one column per round, scrolling horizontally. Inside a round the matches sit under the record
+ * their teams had going in; with [noSpoilers] on, the round lists its matches without records.
+ */
+@Composable
+fun SwissView(
+    row: StandingsRow.SwissRow,
+    onMatchClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    noSpoilers: Boolean = false,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(CONNECTOR_WIDTH),
+    ) {
+        row.rounds.forEach { round ->
+            Column(Modifier.width(CARD_WIDTH), verticalArrangement = Arrangement.spacedBy(CARD_GAP)) {
+                ColumnTitle(round.name)
+                round.displayedGroups(noSpoilers).forEach { group ->
+                    if (group.record != null) {
+                        Text(
+                            group.record,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    group.matches.forEach { match ->
+                        BracketMatchCard(match, onClick = { onMatchClick(match.sectionMatch.match.id) }, noSpoilers = noSpoilers, modifier = Modifier)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BracketPartTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+    )
+}
+
+@Composable
+private fun ColumnTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        maxLines = 1,
+        modifier = Modifier.height(TITLE_HEIGHT),
+    )
+}
+
+/**
+ * Columns of match cards with connector lines. The tallest column sets the height and every column splits it
+ * evenly, so a match sits centered between the matches that feed it. Lines are drawn only between columns
+ * whose link is known: an elbow from each pair when the next column halves, a straight line when it keeps its
+ * size.
+ */
+@Composable
+private fun BracketColumns(
+    columns: List<BracketColumn>,
+    onMatchClick: (String) -> Unit,
+    noSpoilers: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val firstSlot = CARD_HEIGHT + CARD_GAP
-    val height = firstSlot * (row.rounds.firstOrNull()?.matches?.size ?: 0)
+    val height = firstSlot * (columns.maxOfOrNull { it.matches.size } ?: 0)
     val lineColor = MaterialTheme.colorScheme.outlineVariant
     Row(
         modifier
@@ -56,34 +148,32 @@ fun BracketView(
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        row.rounds.forEachIndexed { roundIndex, round ->
-            val slot = firstSlot * (1 shl roundIndex)
+        columns.forEachIndexed { index, column ->
+            val slot = height / column.matches.size.coerceAtLeast(1)
             Column(Modifier.width(CARD_WIDTH)) {
-                Text(
-                    round.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    modifier = Modifier.height(TITLE_HEIGHT),
-                )
+                ColumnTitle(column.name)
                 Box(Modifier.height(height)) {
-                    round.matches.forEachIndexed { index, match ->
+                    column.matches.forEachIndexed { matchIndex, match ->
                         BracketMatchCard(
                             match,
                             onClick = { onMatchClick(match.sectionMatch.match.id) },
                             noSpoilers = noSpoilers,
-                            modifier = Modifier.offset(y = slot * index + (slot - CARD_HEIGHT) / 2),
+                            modifier = Modifier.offset(y = slot * matchIndex + (slot - CARD_HEIGHT) / 2),
                         )
                     }
                 }
             }
-            if (roundIndex < row.rounds.lastIndex) {
-                BracketConnectors(
-                    feeders = round.matches.size,
-                    slot = slot,
-                    color = lineColor,
-                    modifier = Modifier.padding(top = TITLE_HEIGHT).size(CONNECTOR_WIDTH, height),
-                )
+            val next = columns.getOrNull(index + 1)
+            if (next != null) {
+                val connectorModifier = Modifier.padding(top = TITLE_HEIGHT).size(CONNECTOR_WIDTH, height)
+                when {
+                    !column.linkedToNext -> Spacer(connectorModifier)
+                    next.matches.size * 2 == column.matches.size ->
+                        BracketConnectors(feeders = column.matches.size, slot = slot, color = lineColor, modifier = connectorModifier)
+                    next.matches.size == column.matches.size ->
+                        StraightConnectors(count = column.matches.size, slot = slot, color = lineColor, modifier = connectorModifier)
+                    else -> Spacer(connectorModifier)
+                }
             }
         }
     }
@@ -108,6 +198,19 @@ private fun BracketConnectors(feeders: Int, slot: Dp, color: Color, modifier: Mo
     }
 }
 
+/** A straight line from each match k to the next-round match k, for rounds of the same size. */
+@Composable
+private fun StraightConnectors(count: Int, slot: Dp, color: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        val slotPx = slot.toPx()
+        val stroke = 1.dp.toPx()
+        for (k in 0 until count) {
+            val y = slotPx * (k + 0.5f)
+            drawLine(color, Offset(0f, y), Offset(size.width, y), stroke)
+        }
+    }
+}
+
 /** Undecided (TBD) matches are not clickable: see [StandingsRow.MatchRow.isNavigable]. */
 @Composable
 private fun BracketMatchCard(
@@ -118,7 +221,7 @@ private fun BracketMatchCard(
 ) {
     val teams = row.sectionMatch.match.teams
     val result = row.displayedResult(noSpoilers)
-    Column(
+    Box(
         modifier
             .width(CARD_WIDTH)
             .height(CARD_HEIGHT)
@@ -126,13 +229,18 @@ private fun BracketMatchCard(
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(if (row.isNavigable) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.SpaceEvenly,
     ) {
-        if (row.hasBothTeams) {
-            BracketTeamLine(teams[0], result.emphasisFor(0), row.displayedGameWins(0, noSpoilers))
-            BracketTeamLine(teams[1], result.emphasisFor(1), row.displayedGameWins(1, noSpoilers))
-        } else {
-            Text("TBD", style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceEvenly) {
+            if (row.hasBothTeams) {
+                BracketTeamLine(teams[0], result.emphasisFor(0), row.displayedGameWins(0, noSpoilers))
+                BracketTeamLine(teams[1], result.emphasisFor(1), row.displayedGameWins(1, noSpoilers))
+            } else {
+                Text("TBD", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        // A live match shows no score, so the badge takes the room the game wins would use.
+        if (row.isLive) {
+            LiveBadge(Modifier.align(Alignment.CenterEnd))
         }
     }
 }

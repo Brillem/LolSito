@@ -189,6 +189,7 @@ fun StandingsList(
                 is StandingsRow.EmptySection -> InfoText("No standings for this section yet")
                 is StandingsRow.EliminationNotice -> EliminationNotice()
                 is StandingsRow.MatchRow -> SectionMatchRow(row, onClick = { onMatchClick(row.sectionMatch.match.id) }, noSpoilers = noSpoilers)
+                is StandingsRow.BracketRow -> BracketView(row, onMatchClick, noSpoilers = noSpoilers)
             }
         }
     }

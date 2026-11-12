@@ -15,6 +15,7 @@ Header: `x-api-key: 0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z` (public web key; 4
 | getTournamentsForLeague_worlds.json | `getTournamentsForLeague?hl=en-US&leagueId=98767975604431411` |
 | getStandings_lck.json | `getStandings?hl=en-US&tournamentId=115548147890329817` (populated rankings) |
 | getStandings_worlds2026.json | `getStandings?hl=en-US&tournamentId=115660540725177488` (empty rankings: bracket/swiss stages) |
+| getStandings_worlds2026_knockouts.json | Same request, captured 2026-11-11 with Knockouts played up to the Final (7 matches: 4 + 2 + 1, Final unstarted); `previousMatchIds` is still empty, so the bracket comes from match order |
 | getEventDetails.json | `getEventDetails?hl=en-US&id=115660588583040710` (MVK vs FUR, Bo5; game ids here) |
 
 ## Livestats (no key)

@@ -6,6 +6,7 @@ import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
@@ -68,7 +69,8 @@ data class TeamProfileUiState(
  *
  * The star ([toggleFavorite]) marks or unmarks the team in the stored favorites. It flips at once; a
  * failed read or save is ignored (an unreadable list is never overwritten), and an unreadable list
- * counts as "not a favorite" when the profile opens.
+ * counts as "not a favorite" when the profile opens. A saved change asks [reminderSync] for a reminder
+ * sync, since the match reminders follow the favorites.
  *
  * Starters are secondary: once the first page of matches is known, the lineup of the team's last
  * played game is looked up in the background ([findLineup] over the newest finished matches) and
@@ -84,6 +86,7 @@ class TeamProfileViewModel(
     private val preferences: UserPreferences,
     private val lineupRepository: TeamLineupRepository,
     private val zoneId: ZoneId,
+    private val reminderSync: ReminderSyncTrigger,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TeamProfileUiState(zoneId = zoneId))
@@ -112,6 +115,8 @@ class TeamProfileViewModel(
             try {
                 val others = preferences.getFavoriteTeams().orEmpty().filterNot { it.id == profile.id }
                 preferences.saveFavoriteTeams(if (on) others + profile.toFavorite() else others)
+                // The match reminders follow the favorites.
+                reminderSync.requestSync()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

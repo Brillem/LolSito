@@ -1,5 +1,10 @@
 package com.example.lolsito.feature.teams.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +24,8 @@ import androidx.compose.foundation.border
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -30,10 +37,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -59,6 +71,20 @@ fun TeamsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     // Favorites are starred in a team's profile: read them again whenever this tab comes back.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshFavorites() }
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.onNotificationPermissionResult(granted)
+    }
+    val onToggleReminders = {
+        when {
+            state.remindersEnabled -> viewModel.disableReminders()
+            // Android 13+ needs the permission to notify; the system asks only when it is not granted yet.
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED ->
+                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            else -> viewModel.enableReminders()
+        }
+    }
     TeamsContent(
         state = state,
         onSelectLeague = viewModel::selectLeague,
@@ -66,6 +92,7 @@ fun TeamsScreen(
         onRetryLeagues = viewModel::retryLeagues,
         onTeamClick = { teamId -> onTeamClick(teamId, state.selectedLeagueId) },
         onFavoriteClick = onFavoriteClick,
+        onToggleReminders = onToggleReminders,
         modifier = modifier,
     )
 }
@@ -79,9 +106,12 @@ fun TeamsContent(
     onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     onFavoriteClick: (String) -> Unit = {},
+    onToggleReminders: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
-        if (state.favorites.isNotEmpty()) FavoritesRow(state.favorites, onFavoriteClick)
+        if (state.favorites.isNotEmpty()) {
+            FavoritesRow(state.favorites, state.remindersEnabled, state.remindersNotice, onFavoriteClick, onToggleReminders)
+        }
         LeaguePicker(
             label = state.selectedLeagueName,
             leagues = state.leagues,
@@ -107,16 +137,37 @@ fun TeamsContent(
     }
 }
 
-/** The favorites above the league picker, one compact card each; tapping one opens its profile. */
+/**
+ * The favorites above the league picker, one compact card each; tapping one opens its profile. The
+ * bell next to the title turns the start-of-match reminders for all of them on and off; [remindersNotice]
+ * (why it could not be turned on) shows under the title.
+ */
 @Composable
-private fun FavoritesRow(favorites: List<FavoriteTeam>, onClick: (String) -> Unit) {
+private fun FavoritesRow(
+    favorites: List<FavoriteTeam>,
+    remindersEnabled: Boolean,
+    remindersNotice: String?,
+    onClick: (String) -> Unit,
+    onToggleReminders: () -> Unit,
+) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        Text(
-            "Favorites",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Favorites",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            RemindersBell(remindersEnabled, onToggleReminders)
+        }
+        if (remindersNotice != null) {
+            Text(
+                remindersNotice,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -135,6 +186,24 @@ private fun FavoritesRow(favorites: List<FavoriteTeam>, onClick: (String) -> Uni
                 }
             }
         }
+    }
+}
+
+/** Bell next to the favorites: filled means start-of-match reminders are on. */
+@Composable
+private fun RemindersBell(enabled: Boolean, onToggle: () -> Unit) {
+    IconButton(
+        onClick = onToggle,
+        modifier = Modifier.semantics {
+            contentDescription = if (enabled) "Turn off match reminders" else "Turn on match reminders"
+            stateDescription = if (enabled) "Match reminders on" else "Match reminders off"
+        },
+    ) {
+        Icon(
+            imageVector = if (enabled) BellIcon else BellOutlineIcon,
+            contentDescription = null,
+            tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -192,6 +261,7 @@ private fun TeamsContentPreview() {
                 status = LoadStatus.Content,
                 teams = listOf(TeamSummary("1", "Gen.G Esports", "GEN", null), TeamSummary("2", "T1", "T1", null)),
                 favorites = listOf(FavoriteTeam("2", "t1", "T1", "T1", null)),
+                remindersEnabled = true,
             ),
             onSelectLeague = {},
             onRetry = {},

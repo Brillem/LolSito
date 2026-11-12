@@ -11,6 +11,7 @@ class FakeUserPreferences(
     var standingsSelection: StandingsSelection? = null,
     var noSpoilers: Boolean? = null,
     var favoriteTeams: List<FavoriteTeam>? = null,
+    var matchRemindersEnabled: Boolean? = null,
 ) : UserPreferences {
     var readFails = false
     var writeFails = false
@@ -19,6 +20,7 @@ class FakeUserPreferences(
     val savedStandingsSelections = mutableListOf<StandingsSelection>()
     val savedNoSpoilers = mutableListOf<Boolean>()
     val savedFavoriteTeams = mutableListOf<List<FavoriteTeam>>()
+    val savedMatchRemindersEnabled = mutableListOf<Boolean>()
 
     override suspend fun getScheduleLeagueIds(): Set<String>? {
         reads++
@@ -65,5 +67,16 @@ class FakeUserPreferences(
         if (writeFails) throw IOException("write failed")
         savedFavoriteTeams += teams
         favoriteTeams = teams
+    }
+
+    override suspend fun getMatchRemindersEnabled(): Boolean? {
+        if (readFails) throw IOException("read failed")
+        return matchRemindersEnabled
+    }
+
+    override suspend fun saveMatchRemindersEnabled(enabled: Boolean) {
+        if (writeFails) throw IOException("write failed")
+        savedMatchRemindersEnabled += enabled
+        matchRemindersEnabled = enabled
     }
 }

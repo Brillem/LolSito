@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">LolSito</string>
+    <string name="reminders_channel_name">Match reminders</string>
+    <string name="reminders_channel_description">A reminder about 15 minutes before a favorite team\'s match starts.</string>
 </resources>

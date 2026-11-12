@@ -7,6 +7,8 @@ import com.example.lolsito.core.model.League
 import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.feature.reminders.domain.ReminderScheduler
+import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.teams.domain.TeamSummary
 import com.example.lolsito.feature.teams.domain.currentTeams
@@ -29,6 +31,10 @@ data class TeamsUiState(
     val teams: List<TeamSummary> = emptyList(),
     /** The teams the user starred, listed above the league picker whatever league is selected. */
     val favorites: List<FavoriteTeam> = emptyList(),
+    /** The bell next to the favorites: start-of-match reminders for them. Off until the user turns it on. */
+    val remindersEnabled: Boolean = false,
+    /** Why the bell could not be turned on, shown next to it until it is tried again; null when there is nothing to say. */
+    val remindersNotice: String? = null,
 ) {
     /** The picker's label; "League" until the leagues are known. */
     val selectedLeagueName: String get() = leagues.firstOrNull { it.id == selectedLeagueId }?.name ?: "League"
@@ -41,12 +47,19 @@ data class TeamsUiState(
  *
  * The favorites (marked in a team's profile) come from [preferences]; they need no request, are read
  * again by [refreshFavorites] whenever the tab comes back, and unreadable ones count as none.
+ *
+ * The bell next to the favorites turns the start-of-match reminders on and off for all of them. It is
+ * off until the user turns it on and is remembered. Turning it on asks [reminderSync] for a sync;
+ * turning it off cancels every reminder through [reminderScheduler] at once. The screen asks for the
+ * notification permission first when the system needs it ([onNotificationPermissionResult]).
  */
 class TeamsViewModel(
     private val standingsRepository: StandingsRepository,
     private val leaguesRepository: LeaguesRepository,
     private val preferences: UserPreferences,
     private val clock: Clock,
+    private val reminderScheduler: ReminderScheduler,
+    private val reminderSync: ReminderSyncTrigger,
     defaultLeagueId: String = DEFAULT_LEAGUE_ID,
 ) : ViewModel() {
 
@@ -54,9 +67,11 @@ class TeamsViewModel(
     val uiState: StateFlow<TeamsUiState> = _uiState.asStateFlow()
 
     private var leaguesJob: Job? = null
+    private var remindersLoadJob: Job? = null
     private var teamsJob: Job? = null
 
     init {
+        loadRemindersEnabled()
         refreshFavorites()
         loadLeagues()
         loadTeams()
@@ -78,6 +93,36 @@ class TeamsViewModel(
             } catch (e: Exception) {
                 // Keep showing the current favorites.
             }
+        }
+    }
+
+    /**
+     * Turns the bell on (the notification permission is already granted or not needed): it flips at
+     * once, is remembered, and a sync is asked for so the reminders get scheduled.
+     */
+    fun enableReminders() {
+        remindersLoadJob?.cancel() // The user's choice wins over the stored one still loading.
+        _uiState.update { it.copy(remindersEnabled = true, remindersNotice = null) }
+        viewModelScope.launch {
+            saveRemindersEnabled(true)
+            reminderSync.requestSync()
+        }
+    }
+
+    /** Turns the bell off: every reminder is cancelled at once, without waiting for a sync or a network. */
+    fun disableReminders() {
+        remindersLoadJob?.cancel()
+        _uiState.update { it.copy(remindersEnabled = false, remindersNotice = null) }
+        reminderScheduler.cancelAll()
+        viewModelScope.launch { saveRemindersEnabled(false) }
+    }
+
+    /** The answer to the notification permission asked when turning the bell on; denied leaves it off and says why. */
+    fun onNotificationPermissionResult(granted: Boolean) {
+        if (granted) {
+            enableReminders()
+        } else {
+            _uiState.update { it.copy(remindersEnabled = false, remindersNotice = PERMISSION_DENIED_NOTICE) }
         }
     }
 
@@ -121,9 +166,37 @@ class TeamsViewModel(
         }
     }
 
+    /** An unreadable preference counts as off, the default. */
+    private fun loadRemindersEnabled() {
+        remindersLoadJob = viewModelScope.launch {
+            val enabled = try {
+                preferences.getMatchRemindersEnabled() ?: false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
+            _uiState.update { it.copy(remindersEnabled = enabled) }
+        }
+    }
+
+    /** Not remembering the bell is better than failing the toggle. */
+    private suspend fun saveRemindersEnabled(enabled: Boolean) {
+        try {
+            preferences.saveMatchRemindersEnabled(enabled)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Ignored, like the favorites star.
+        }
+    }
+
     private fun Exception.toMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Something went wrong"
 
     companion object {
         const val DEFAULT_LEAGUE_ID = "98767991310872058" // LCK
+
+        const val PERMISSION_DENIED_NOTICE =
+            "Reminders need permission to send notifications. Allow notifications for LolSito in the system settings."
     }
 }

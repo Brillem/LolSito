@@ -18,6 +18,7 @@ import com.example.lolsito.feature.teams.domain.RoleGroup
 import com.example.lolsito.feature.teams.domain.TeamLineupRepository
 import com.example.lolsito.feature.teams.domain.TeamProfile
 import com.example.lolsito.feature.teams.domain.TeamsRepository
+import com.example.lolsito.testutil.FakeReminderSyncTrigger
 import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -48,6 +49,7 @@ class TeamProfileViewModelTest {
     private val schedule = FakeScheduleRepository()
     private val preferences = FakeUserPreferences()
     private val lineups = FakeTeamLineupRepository()
+    private val reminderSync = FakeReminderSyncTrigger()
     private var leaguesError: Throwable? = null
     private val leaguesRepository = LeaguesRepository {
         leaguesError?.let { throw it }
@@ -93,6 +95,7 @@ class TeamProfileViewModelTest {
         preferences = preferences,
         lineupRepository = lineups,
         zoneId = ZoneOffset.UTC,
+        reminderSync = reminderSync,
     )
 
     private val TeamProfileUiState.upcomingIds get() = upcomingDays.flatMap { day -> day.events.map { it.matchId } }
@@ -346,6 +349,33 @@ class TeamProfileViewModelTest {
         advanceUntilIdle()
         assertFalse(third.uiState.value.isFavorite)
         assertEquals(emptyList<FavoriteTeam>(), preferences.favoriteTeams)
+    }
+
+    @Test
+    fun `marking and unmarking a favorite each ask for a reminder sync once saved`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals("opening the profile changes no favorite", 0, reminderSync.requests)
+
+        vm.toggleFavorite()
+        advanceUntilIdle()
+        assertEquals(1, reminderSync.requests)
+
+        vm.toggleFavorite()
+        advanceUntilIdle()
+        assertEquals(2, reminderSync.requests)
+    }
+
+    @Test
+    fun `a failed save changes no favorite and asks for no reminder sync`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        preferences.writeFails = true
+
+        vm.toggleFavorite()
+        advanceUntilIdle()
+
+        assertEquals(0, reminderSync.requests)
     }
 
     @Test

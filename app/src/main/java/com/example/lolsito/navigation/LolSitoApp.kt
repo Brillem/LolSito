@@ -266,6 +266,9 @@ fun LolSitoApp(container: AppContainer) {
                     onGameClick = { link ->
                         navController.navigateFrom(entry, Routes.game(link.gameId, link.teams))
                     },
+                    onTeamClick = { teamId ->
+                        navController.navigateFrom(entry, Routes.team(teamId))
+                    },
                 )
             }
             composable(

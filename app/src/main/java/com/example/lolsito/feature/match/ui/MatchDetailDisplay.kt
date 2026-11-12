@@ -2,6 +2,7 @@ package com.example.lolsito.feature.match.ui
 
 import com.example.lolsito.core.model.MatchResultDisplay
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.Team
 import com.example.lolsito.feature.match.domain.GameStatsLink
 import com.example.lolsito.feature.match.domain.MatchGame
 import com.example.lolsito.feature.match.domain.WatchLink
@@ -37,3 +38,6 @@ fun MatchDetailUiState.Content.statsLinkFor(game: MatchGame): GameStatsLink? =
 
 /** "Watch live" is not a result, so it stays while hidden. */
 val MatchDetailUiState.Content.liveLink: WatchLink? get() = detail.liveLink
+
+/** Id to open this team's profile with, or null when it is not tappable: no id, or a "TBD" placeholder. */
+fun Team.profileId(): String? = id?.takeIf { it.isNotBlank() && it != "0" && code != "TBD" }

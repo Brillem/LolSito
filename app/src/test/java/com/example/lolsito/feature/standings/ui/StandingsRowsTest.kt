@@ -51,10 +51,11 @@ class StandingsRowsTest {
         assertEquals(3, rows.count { it is StandingsRow.EliminationNotice })
         assertTrue(rows.none { it is StandingsRow.EmptySection })
         val matches = rows.filterIsInstance<StandingsRow.MatchRow>()
-        // Play-Ins (6) and Swiss (33) stay lists; the 7 Knockouts matches form a bracket.
-        assertEquals(39, matches.size)
+        // The unpaired Swiss (33) stays a list; Play-Ins is a double elimination and the 7 Knockouts matches a bracket.
+        assertEquals(33, matches.size)
         assertEquals(1, rows.count { it is StandingsRow.BracketRow })
-        assertEquals("3 - 0", matches.first().result.score)
+        val playIns = rows.filterIsInstance<StandingsRow.DoubleEliminationRow>().single()
+        assertEquals("3 - 0", playIns.upper.first().matches.first().result.score)
     }
 
     @Test

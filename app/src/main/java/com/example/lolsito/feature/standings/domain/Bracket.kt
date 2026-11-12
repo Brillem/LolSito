@@ -4,7 +4,7 @@ import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.formatMatchResult
 
 /** One column of a single-elimination bracket, e.g. "Quarterfinals" with its 4 matches. */
-data class BracketRound(val name: String, val matches: List<SectionMatch>)
+data class BracketRound(val name: String, val matches: List<SectionMatch>, val linkedToNext: Boolean = true)
 
 /**
  * A section as a single-elimination bracket, or null when it does not look like one.
@@ -50,5 +50,23 @@ private fun roundName(matches: Int): String = when (matches) {
 private fun SectionMatch.winner(): Team? =
     formatMatchResult(state, match.teams, match.format).winnerIndex?.let { match.teams[it] }
 
+/** The winner of a match between two known teams, null while undecided or while a team is a placeholder. */
+internal fun SectionMatch.decidedWinner(): Team? = if (hasBothRealTeams()) winner() else null
+
+/** The other team of a decided match between two known teams. */
+internal fun SectionMatch.decidedLoser(): Team? = decidedWinner()?.let { w -> match.teams.take(2).first { it.identity != w.identity } }
+
 /** Standings teams carry an id; the code is the fallback when it is missing. */
-private val Team.identity: String get() = id ?: code
+internal val Team.identity: String get() = id ?: code
+
+/** A "TBD" slot the API fills once the team is known (id "0", code "TBD"): never a participant or a winner. */
+internal val Team.isPlaceholder: Boolean get() = id == PLACEHOLDER_TEAM_ID || code == PLACEHOLDER_TEAM_CODE
+
+/** Both teams of the match are known. */
+internal fun SectionMatch.hasBothRealTeams(): Boolean = match.teams.size >= 2 && match.teams.take(2).none { it.isPlaceholder }
+
+/** The teams of the match that are known, without placeholders. */
+internal val SectionMatch.realTeams: List<Team> get() = match.teams.take(2).filterNot { it.isPlaceholder }
+
+private const val PLACEHOLDER_TEAM_ID = "0"
+private const val PLACEHOLDER_TEAM_CODE = "TBD"

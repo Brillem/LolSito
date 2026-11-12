@@ -39,16 +39,15 @@ class StandingsBracketRowsTest {
     }
 
     @Test
-    fun `played worlds knockouts is a bracket while play-ins and swiss stay lists`() {
+    fun `played worlds knockouts is a bracket while play-ins and swiss get their own views`() {
         played.assertUniqueKeys()
         assertEquals(listOf("Play-Ins", "Swiss", "Knockouts"), played.filterIsInstance<StandingsRow.StageHeader>().map { it.name })
 
+        // Play-Ins is a double elimination and Swiss is drawn by round (see StandingsFormatsRowsTest).
         val playIns = played.ofStage("Play-Ins")
-        assertEquals(6, playIns.count { it is StandingsRow.MatchRow })
-        assertTrue(playIns.none { it is StandingsRow.BracketRow })
+        assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.DoubleEliminationRow::class), playIns.map { it::class })
         val swiss = played.ofStage("Swiss")
-        assertEquals(33, swiss.count { it is StandingsRow.MatchRow })
-        assertTrue(swiss.none { it is StandingsRow.BracketRow })
+        assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.SwissRow::class), swiss.map { it::class })
 
         val knockouts = played.ofStage("Knockouts")
         assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.BracketRow::class), knockouts.map { it::class })

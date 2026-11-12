@@ -5,6 +5,8 @@ import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.polling.LIVE_SECTION_POLL_INTERVAL
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.schedule.domain.LiveMatchesRepository
@@ -1093,6 +1095,269 @@ class ScheduleViewModelTest {
         leagueSlug = "worlds",
         match = Match(id = id, teams = emptyList(), format = null),
     )
+
+    private fun teamEvent(id: String, hour: Long, state: MatchState, vararg names: String, leagueId: String = WORLDS) =
+        event(id, hour, state).copy(
+            leagueId = leagueId,
+            match = Match(id = id, teams = names.map { Team(it, it.take(3), null, null, null) }, format = null),
+        )
+
+    private fun favorite(name: String) = FavoriteTeam("id-$name", name.lowercase(), name, name.take(3), null)
+
+    private fun favoritesSetUp() {
+        repository.pages[key(setOf(WORLDS), null)] = page(
+            listOf(
+                teamEvent("up-t1", 1, MatchState.UNSTARTED, "T1", "Gen.G"),
+                teamEvent("up-other", 2, MatchState.UNSTARTED, "KT Rolster", "DRX"),
+                teamEvent("res-t1", -5, MatchState.COMPLETED, "Hanwha", "t1"),
+                teamEvent("res-other", -6, MatchState.COMPLETED, "KT Rolster", "DRX"),
+            ),
+        )
+        liveRepository.events = listOf(
+            teamEvent("live-t1", 0, MatchState.IN_PROGRESS, "T1", "DRX"),
+            teamEvent("live-other", 0, MatchState.IN_PROGRESS, "KT Rolster", "DRX"),
+            teamEvent("live-lck-t1", 0, MatchState.IN_PROGRESS, "T1", "DK", leagueId = LCK),
+        )
+    }
+
+    @Test
+    fun `without favorites the filter is off and nothing changes`() = runTest(dispatcher) {
+        favoritesSetUp()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertFalse(state.favoritesOnly)
+        assertEquals(emptyList<String>(), state.favoriteNames)
+        assertEquals(listOf("up-t1", "up-other"), state.upcomingIds())
+        assertEquals(listOf("res-t1", "res-other"), state.resultIds())
+        assertEquals(listOf("live-t1", "live-other"), state.liveEvents.map { it.matchId })
+        assertNull(state.favoritesEmptyMessage)
+    }
+
+    @Test
+    fun `the stored favorites are restored as trimmed names`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite(" T1 "), favorite("Gen.G"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf("T1", "Gen.G"), vm.uiState.value.favoriteNames)
+        // They do not filter anything until the toggle is on.
+        assertEquals(listOf("up-t1", "up-other"), vm.uiState.value.upcomingIds())
+    }
+
+    @Test
+    fun `favorites are read before the first schedule request`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        val gate = CompletableDeferred<Unit>()
+        repository.gate = gate
+        val vm = viewModel()
+        advanceUntilIdle()
+        // The first request is still in flight and the stored favorites are already applied.
+        assertEquals(1, repository.scheduleCalls)
+        assertEquals(LoadStatus.Loading, vm.uiState.value.status)
+        assertEquals(listOf("T1"), vm.uiState.value.favoriteNames)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+    }
+
+    @Test
+    fun `unreadable favorites count as none and the schedule still loads`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        preferences.readFails = true
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertEquals(emptyList<String>(), vm.uiState.value.favoriteNames)
+        assertEquals(listOf("up-t1", "up-other"), vm.uiState.value.upcomingIds())
+    }
+
+    @Test
+    fun `the favorites toggle keeps only matches of favorites in every section`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("t1"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleFavoritesOnly()
+
+        val on = vm.uiState.value
+        assertTrue(on.favoritesOnly)
+        assertEquals(listOf("up-t1"), on.upcomingIds())
+        assertEquals(listOf("res-t1"), on.resultIds())
+        assertEquals(listOf("live-t1"), on.liveEvents.map { it.matchId })
+        assertNull(on.favoritesEmptyMessage)
+        // The league selection and the loaded schedule are untouched, and no request was made.
+        assertEquals(setOf(WORLDS), on.selectedLeagueIds)
+        assertEquals(1, repository.scheduleCalls)
+
+        vm.toggleFavoritesOnly()
+
+        val off = vm.uiState.value
+        assertFalse(off.favoritesOnly)
+        assertEquals(listOf("up-t1", "up-other"), off.upcomingIds())
+        assertEquals(listOf("res-t1", "res-other"), off.resultIds())
+        assertEquals(listOf("live-t1", "live-other"), off.liveEvents.map { it.matchId })
+        assertEquals(1, repository.scheduleCalls)
+    }
+
+    @Test
+    fun `with LIVE and favorites both on only live matches of favorites show, of every league`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleLiveOnly()
+        vm.toggleFavoritesOnly()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertTrue(state.liveOnly)
+        assertTrue(state.favoritesOnly)
+        assertEquals(listOf("live-t1", "live-lck-t1"), state.liveEvents.map { it.matchId })
+
+        vm.toggleFavoritesOnly()
+        assertEquals(listOf("live-t1", "live-other", "live-lck-t1"), vm.uiState.value.liveEvents.map { it.matchId })
+    }
+
+    @Test
+    fun `when no loaded match is a favorite's, the filter shows an empty message`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("Fnatic"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleFavoritesOnly()
+
+        val state = vm.uiState.value
+        assertEquals(emptyList<String>(), state.upcomingIds())
+        assertEquals(emptyList<String>(), state.resultIds())
+        assertEquals(emptyList<ScheduleEvent>(), state.liveEvents)
+        assertEquals("No matches of your favorites in the loaded range", state.favoritesEmptyMessage)
+        assertEquals(LoadStatus.Content, state.status)
+    }
+
+    @Test
+    fun `with the filter on and no favorites the message says so`() = runTest(dispatcher) {
+        favoritesSetUp()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleFavoritesOnly()
+
+        assertEquals("No favorite teams yet. Star a team in its profile.", vm.uiState.value.favoritesEmptyMessage)
+        assertEquals(emptyList<String>(), vm.uiState.value.upcomingIds())
+    }
+
+    @Test
+    fun `LIVE and favorites on with no live match of a favorite shows its own message`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("Fnatic"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleLiveOnly()
+        vm.toggleFavoritesOnly()
+        advanceUntilIdle()
+
+        assertEquals("No live matches of your favorites right now", vm.uiState.value.favoritesEmptyMessage)
+    }
+
+    @Test
+    fun `the filter applies to pages loaded later`() = runTest(dispatcher) {
+        favoritesSetUp()
+        repository.pages[key(setOf(WORLDS), null)] = page(
+            listOf(teamEvent("up-t1", 1, MatchState.UNSTARTED, "T1", "Gen.G")),
+            older = "o1",
+        )
+        repository.pages[key(setOf(WORLDS), "o1")] = page(
+            listOf(
+                teamEvent("old-t1", -9, MatchState.COMPLETED, "T1", "DRX"),
+                teamEvent("old-other", -8, MatchState.COMPLETED, "KT Rolster", "DRX"),
+            ),
+        )
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.toggleFavoritesOnly()
+
+        vm.loadOlder()
+        advanceUntilIdle()
+
+        assertEquals(listOf("old-t1"), vm.uiState.value.resultIds())
+    }
+
+    @Test
+    fun `the favorites toggle is not remembered`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.toggleFavoritesOnly()
+        advanceUntilIdle()
+
+        assertTrue(preferences.savedFavoriteTeams.isEmpty())
+        assertTrue(preferences.savedNoSpoilers.isEmpty())
+        assertTrue(preferences.savedScheduleLeagueIds.isEmpty())
+        assertFalse("a new launch starts with the filter off", viewModel().also { advanceUntilIdle() }.uiState.value.favoritesOnly)
+    }
+
+    @Test
+    fun `refreshing picks up favorites marked or unmarked meanwhile and re-applies the filter`() = runTest(dispatcher) {
+        favoritesSetUp()
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.toggleFavoritesOnly()
+        assertEquals(emptyList<String>(), vm.uiState.value.upcomingIds())
+
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        vm.refreshFavorites()
+        advanceUntilIdle()
+        assertEquals(listOf("T1"), vm.uiState.value.favoriteNames)
+        assertEquals(listOf("up-t1"), vm.uiState.value.upcomingIds())
+        assertNull(vm.uiState.value.favoritesEmptyMessage)
+
+        preferences.favoriteTeams = emptyList()
+        vm.refreshFavorites()
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), vm.uiState.value.favoriteNames)
+        assertEquals(emptyList<String>(), vm.uiState.value.upcomingIds())
+    }
+
+    @Test
+    fun `a failed refresh keeps the favorites already known`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        preferences.readFails = true
+        vm.refreshFavorites()
+        advanceUntilIdle()
+
+        assertEquals(listOf("T1"), vm.uiState.value.favoriteNames)
+    }
+
+    @Test
+    fun `reading favorites does not count as a schedule or standings read`() = runTest(dispatcher) {
+        favoritesSetUp()
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val readsAfterLoad = preferences.reads
+
+        vm.refreshFavorites()
+        advanceUntilIdle()
+
+        assertEquals(readsAfterLoad, preferences.reads)
+    }
 
     private class FakeLiveMatchesRepository : LiveMatchesRepository {
         var events: List<ScheduleEvent> = emptyList()

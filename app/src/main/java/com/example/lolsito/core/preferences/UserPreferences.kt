@@ -23,4 +23,10 @@ interface UserPreferences {
     suspend fun getNoSpoilers(): Boolean?
 
     suspend fun saveNoSpoilers(enabled: Boolean)
+
+    /** The teams the user starred, in the order they were marked; null when the user never marked one. */
+    suspend fun getFavoriteTeams(): List<FavoriteTeam>?
+
+    /** Replaces the whole list; callers read, change and save it. */
+    suspend fun saveFavoriteTeams(teams: List<FavoriteTeam>)
 }

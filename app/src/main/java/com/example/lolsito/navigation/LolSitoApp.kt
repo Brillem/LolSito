@@ -62,8 +62,9 @@ object Routes {
     /** The league the team was opened from is an optional query argument. */
     const val TEAM = "team/{$TEAM_ID_ARG}?$TEAM_LEAGUE_ID_ARG={$TEAM_LEAGUE_ID_ARG}"
 
-    fun team(teamId: String, leagueId: String): String =
-        "team/${Uri.encode(teamId)}?$TEAM_LEAGUE_ID_ARG=${Uri.encode(leagueId)}"
+    /** [leagueId] is null when the team is opened from the favorites, which belong to no selected league. */
+    fun team(teamId: String, leagueId: String? = null): String =
+        "team/${Uri.encode(teamId)}" + (leagueId?.let { "?$TEAM_LEAGUE_ID_ARG=${Uri.encode(it)}" } ?: "")
 
     const val GAME_ID_ARG = "gameId"
     private const val TEAM1_ID_ARG = "team1Id"
@@ -207,6 +208,7 @@ fun LolSitoApp(container: AppContainer) {
                             TeamsViewModel(
                                 standingsRepository = container.standingsRepository,
                                 leaguesRepository = container.leaguesRepository,
+                                preferences = container.userPreferences,
                                 clock = container.clock(),
                             )
                         }
@@ -215,6 +217,7 @@ fun LolSitoApp(container: AppContainer) {
                 TeamsScreen(
                     viewModel = vm,
                     onTeamClick = { teamId, leagueId -> navController.navigateFrom(entry, Routes.team(teamId, leagueId)) },
+                    onFavoriteClick = { teamId -> navController.navigateFrom(entry, Routes.team(teamId)) },
                 )
             }
             composable(

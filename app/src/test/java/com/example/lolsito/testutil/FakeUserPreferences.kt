@@ -1,5 +1,6 @@
 package com.example.lolsito.testutil
 
+import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.preferences.StandingsSelection
 import com.example.lolsito.core.preferences.UserPreferences
 import java.io.IOException
@@ -9,6 +10,7 @@ class FakeUserPreferences(
     var scheduleLeagueIds: Set<String>? = null,
     var standingsSelection: StandingsSelection? = null,
     var noSpoilers: Boolean? = null,
+    var favoriteTeams: List<FavoriteTeam>? = null,
 ) : UserPreferences {
     var readFails = false
     var writeFails = false
@@ -16,6 +18,7 @@ class FakeUserPreferences(
     val savedScheduleLeagueIds = mutableListOf<Set<String>>()
     val savedStandingsSelections = mutableListOf<StandingsSelection>()
     val savedNoSpoilers = mutableListOf<Boolean>()
+    val savedFavoriteTeams = mutableListOf<List<FavoriteTeam>>()
 
     override suspend fun getScheduleLeagueIds(): Set<String>? {
         reads++
@@ -50,5 +53,17 @@ class FakeUserPreferences(
         if (writeFails) throw IOException("write failed")
         savedNoSpoilers += enabled
         noSpoilers = enabled
+    }
+
+    // Like the no-spoilers reads, these do not count in [reads]: a Standings test asserts that counter.
+    override suspend fun getFavoriteTeams(): List<FavoriteTeam>? {
+        if (readFails) throw IOException("read failed")
+        return favoriteTeams
+    }
+
+    override suspend fun saveFavoriteTeams(teams: List<FavoriteTeam>) {
+        if (writeFails) throw IOException("write failed")
+        savedFavoriteTeams += teams
+        favoriteTeams = teams
     }
 }

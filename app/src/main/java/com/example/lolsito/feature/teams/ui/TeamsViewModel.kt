@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
+import com.example.lolsito.core.preferences.FavoriteTeam
+import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.teams.domain.TeamSummary
@@ -25,6 +27,8 @@ data class TeamsUiState(
     /** The teams of [selectedLeagueId]. */
     val status: LoadStatus = LoadStatus.Loading,
     val teams: List<TeamSummary> = emptyList(),
+    /** The teams the user starred, listed above the league picker whatever league is selected. */
+    val favorites: List<FavoriteTeam> = emptyList(),
 ) {
     /** The picker's label; "League" until the leagues are known. */
     val selectedLeagueName: String get() = leagues.firstOrNull { it.id == selectedLeagueId }?.name ?: "League"
@@ -34,10 +38,14 @@ data class TeamsUiState(
  * The Teams tab: the user picks a league and sees its current teams, those of the league's ongoing
  * tournament standings (see [currentTeams]). The leagues only feed the picker, so failing to load them
  * never blocks the teams of the selected league.
+ *
+ * The favorites (marked in a team's profile) come from [preferences]; they need no request, are read
+ * again by [refreshFavorites] whenever the tab comes back, and unreadable ones count as none.
  */
 class TeamsViewModel(
     private val standingsRepository: StandingsRepository,
     private val leaguesRepository: LeaguesRepository,
+    private val preferences: UserPreferences,
     private val clock: Clock,
     defaultLeagueId: String = DEFAULT_LEAGUE_ID,
 ) : ViewModel() {
@@ -49,6 +57,7 @@ class TeamsViewModel(
     private var teamsJob: Job? = null
 
     init {
+        refreshFavorites()
         loadLeagues()
         loadTeams()
     }
@@ -57,6 +66,19 @@ class TeamsViewModel(
         if (leagueId == _uiState.value.selectedLeagueId) return
         _uiState.update { it.copy(selectedLeagueId = leagueId) }
         loadTeams()
+    }
+
+    /** An unreadable preference keeps the favorites already shown (none at first). */
+    fun refreshFavorites() {
+        viewModelScope.launch {
+            try {
+                preferences.getFavoriteTeams()?.let { stored -> _uiState.update { it.copy(favorites = stored) } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Keep showing the current favorites.
+            }
+        }
     }
 
     fun retry() = loadTeams()

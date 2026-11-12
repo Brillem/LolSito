@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,6 +43,8 @@ import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.ui.DayHeader
 import com.example.lolsito.feature.schedule.ui.EventRow
+import com.example.lolsito.feature.schedule.ui.StarIcon
+import com.example.lolsito.feature.schedule.ui.StarOutlineIcon
 import com.example.lolsito.feature.teams.domain.Player
 import com.example.lolsito.feature.teams.domain.TeamProfile
 import java.time.ZoneId
@@ -60,6 +64,7 @@ fun TeamProfileScreen(
         onRetry = viewModel::retry,
         onLoadOlder = viewModel::loadOlder,
         onMatchClick = onMatchClick,
+        onToggleFavorite = viewModel::toggleFavorite,
         modifier = modifier,
     )
 }
@@ -73,12 +78,17 @@ fun TeamProfileContent(
     onLoadOlder: () -> Unit,
     onMatchClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onToggleFavorite: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text(state.profile?.name ?: "Team", maxLines = 1, overflow = TextOverflow.Ellipsis) },
             // The app Scaffold already applies the system bar insets.
             windowInsets = WindowInsets(0),
+            actions = {
+                // Only once the team is known: there is nothing to star before that.
+                if (state.profile != null) FavoriteButton(state.isFavorite, onToggleFavorite)
+            },
             navigationIcon = {
                 IconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
                     Text("←", style = MaterialTheme.typography.titleLarge)
@@ -93,6 +103,24 @@ fun TeamProfileContent(
                 matchRows(state, onRetry, onLoadOlder, onMatchClick)
             }
         }
+    }
+}
+
+/** Star in the top bar: filled means the team is a favorite. */
+@Composable
+private fun FavoriteButton(isFavorite: Boolean, onToggle: () -> Unit) {
+    IconButton(
+        onClick = onToggle,
+        modifier = Modifier.semantics {
+            contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites"
+            stateDescription = if (isFavorite) "Favorite" else "Not a favorite"
+        },
+    ) {
+        Icon(
+            imageVector = if (isFavorite) StarIcon else StarOutlineIcon,
+            contentDescription = null,
+            tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

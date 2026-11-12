@@ -46,6 +46,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
@@ -64,6 +66,7 @@ import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
+import com.example.lolsito.feature.schedule.domain.isFavoriteIn
 import com.example.lolsito.ui.theme.LolSitoTheme
 import java.time.Instant
 import java.time.LocalDate
@@ -80,10 +83,13 @@ fun ScheduleScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     WhileStarted(viewModel) { viewModel.pollWhileVisible() }
+    // Favorites are starred in a team's profile: read them again whenever this tab comes back.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshFavorites() }
     ScheduleContent(
         state = state,
         onToggleLeague = viewModel::toggleLeague,
         onToggleLiveOnly = viewModel::toggleLiveOnly,
+        onToggleFavoritesOnly = viewModel::toggleFavoritesOnly,
         onToggleNoSpoilers = viewModel::toggleNoSpoilers,
         onRetry = viewModel::retry,
         onLoadOlder = viewModel::loadOlder,
@@ -98,6 +104,7 @@ fun ScheduleContent(
     state: ScheduleUiState,
     onToggleLeague: (String) -> Unit,
     onToggleLiveOnly: () -> Unit,
+    onToggleFavoritesOnly: () -> Unit,
     onToggleNoSpoilers: () -> Unit,
     onRetry: () -> Unit,
     onLoadOlder: () -> Unit,
@@ -114,6 +121,8 @@ fun ScheduleContent(
                 onToggleLeague,
                 onToggleLiveOnly,
                 Modifier.weight(1f),
+                favoritesOnly = state.favoritesOnly,
+                onToggleFavoritesOnly = onToggleFavoritesOnly,
             )
             NoSpoilersToggle(state.noSpoilers, onToggleNoSpoilers)
         }
@@ -151,7 +160,10 @@ private fun NoSpoilersToggle(noSpoilers: Boolean, onToggle: () -> Unit, modifier
     }
 }
 
-/** The LIVE toggle, always first and always there, followed by one chip per league once they loaded. */
+/**
+ * The LIVE toggle, always first and always there, then the Favorites toggle, followed by one chip per
+ * league once they loaded. Without [onToggleFavoritesOnly] (callers that have no favorites) that chip is left out.
+ */
 @Composable
 fun ScheduleFilterRow(
     leagues: List<League>,
@@ -160,6 +172,8 @@ fun ScheduleFilterRow(
     onToggleLeague: (String) -> Unit,
     onToggleLiveOnly: () -> Unit,
     modifier: Modifier = Modifier,
+    favoritesOnly: Boolean = false,
+    onToggleFavoritesOnly: (() -> Unit)? = null,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     LazyRow(
@@ -193,6 +207,27 @@ fun ScheduleFilterRow(
                 ),
             )
         }
+        if (onToggleFavoritesOnly != null) {
+            item(key = "favorites-toggle") {
+                FilterChip(
+                    selected = favoritesOnly,
+                    onClick = onToggleFavoritesOnly,
+                    label = { Text("Favorites") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = StarIcon,
+                            contentDescription = null,
+                            modifier = Modifier.size(FilterChipDefaults.IconSize),
+                        )
+                    },
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = favoritesOnly,
+                        selectedBorderColor = accent,
+                    ),
+                )
+            }
+        }
         items(leagues, key = { it.id }) { league ->
             val selected = league.id in selectedIds
             FilterChip(
@@ -213,7 +248,7 @@ fun ScheduleFilterRow(
 @Composable
 private fun LiveOnlyList(state: ScheduleUiState, onMatchClick: (String) -> Unit) {
     if (state.liveEvents.isEmpty()) {
-        MessageView("No live matches right now")
+        MessageView(state.favoritesEmptyMessage ?: "No live matches right now")
         return
     }
     LazyColumn(Modifier.fillMaxSize()) {
@@ -223,7 +258,7 @@ private fun LiveOnlyList(state: ScheduleUiState, onMatchClick: (String) -> Unit)
 
 private fun LazyListScope.liveRows(state: ScheduleUiState, onMatchClick: (String) -> Unit) {
     itemsIndexed(state.liveEvents, key = { index, _ -> state.liveKeys[index] }) { _, event ->
-        EventRow(event, state.zoneId, isLive = true, noSpoilers = state.noSpoilers, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+        EventRow(event, state.zoneId, isLive = true, noSpoilers = state.noSpoilers, favoriteNames = state.favoriteNames, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
     }
 }
 
@@ -239,13 +274,23 @@ private fun ScheduleList(
     val showUpcoming = state.upcomingDays.isNotEmpty() || state.canLoadNewer
     val showResults = state.resultDays.isNotEmpty() || state.canLoadOlder
     LazyColumn(Modifier.fillMaxSize()) {
+        state.favoritesEmptyMessage?.let { message ->
+            item(key = "favorites-empty") {
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                )
+            }
+        }
         if (state.liveEvents.isNotEmpty()) {
             item(key = "live-header") { SectionHeader("Live now", accent = true) }
             liveRows(state, onMatchClick)
         }
         if (showUpcoming) {
             item(key = "upcoming-header") { SectionHeader("Upcoming") }
-            dayRows(state.upcomingDays, state.zoneId, state.noSpoilers, onMatchClick)
+            dayRows(state.upcomingDays, state.zoneId, state.noSpoilers, state.favoriteNames, onMatchClick)
             item(key = "newer") {
                 PagingButton(
                     "Load newer",
@@ -259,7 +304,7 @@ private fun ScheduleList(
         }
         if (showResults) {
             item(key = "results-header") { SectionHeader("Results") }
-            dayRows(state.resultDays, state.zoneId, state.noSpoilers, onMatchClick)
+            dayRows(state.resultDays, state.zoneId, state.noSpoilers, state.favoriteNames, onMatchClick)
             item(key = "older") {
                 PagingButton(
                     "Load older",
@@ -289,13 +334,14 @@ private fun LazyListScope.dayRows(
     days: List<ScheduleDay>,
     zoneId: ZoneId,
     noSpoilers: Boolean,
+    favoriteNames: List<String>,
     onMatchClick: (String) -> Unit,
 ) {
     days.forEach { day ->
         stickyHeader(key = day.headerKey) { DayHeader(day.date) }
         itemsIndexed(day.events, key = { index, _ -> day.keys[index] }) { _, event ->
             // Live matches have their own section, so a row here is never live, whatever its state says.
-            EventRow(event, zoneId, isLive = false, noSpoilers = noSpoilers, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+            EventRow(event, zoneId, isLive = false, noSpoilers = noSpoilers, favoriteNames = favoriteNames, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
         }
     }
 }
@@ -371,6 +417,8 @@ fun EventRow(
     isLive: Boolean = event.state == MatchState.IN_PROGRESS,
     /** Hides a finished match's score and winner (see [eventRowDisplay]). */
     noSpoilers: Boolean = false,
+    /** Names of the starred teams: a team with one of them gets a small star. Empty draws no star. */
+    favoriteNames: List<String> = emptyList(),
     /** Null for rows without a match, which are not clickable. */
     onClick: (() -> Unit)? = null,
 ) {
@@ -396,7 +444,7 @@ fun EventRow(
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                    if (hasTeams) TeamCell(teams[0], result.emphasisFor(0))
+                    if (hasTeams) TeamCell(teams[0], result.emphasisFor(0), favorite = teams[0].isFavoriteIn(favoriteNames))
                 }
                 Column(
                     Modifier.widthIn(min = 72.dp).padding(horizontal = 8.dp),
@@ -413,7 +461,7 @@ fun EventRow(
                     }
                 }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    if (hasTeams) TeamCell(teams[1], result.emphasisFor(1), mirrored = true)
+                    if (hasTeams) TeamCell(teams[1], result.emphasisFor(1), mirrored = true, favorite = teams[1].isFavoriteIn(favoriteNames))
                 }
             }
             if (caption.isNotEmpty()) {
@@ -432,9 +480,12 @@ fun EventRow(
     }
 }
 
-/** Logo and code; [mirrored] puts the code first, so the two teams of a row mirror each other around the result. */
+/**
+ * Logo and code; [mirrored] puts the code first, so the two teams of a row mirror each other around the
+ * result. A [favorite] team gets a small star on the outer side, away from the result.
+ */
 @Composable
-internal fun TeamCell(team: Team, emphasis: TeamEmphasis = TeamEmphasis.NEUTRAL, mirrored: Boolean = false) {
+internal fun TeamCell(team: Team, emphasis: TeamEmphasis = TeamEmphasis.NEUTRAL, mirrored: Boolean = false, favorite: Boolean = false) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
@@ -451,11 +502,25 @@ internal fun TeamCell(team: Team, emphasis: TeamEmphasis = TeamEmphasis.NEUTRAL,
                 modifier = Modifier.weight(1f, fill = false),
             )
         }
+        val star = @Composable {
+            if (favorite) {
+                Icon(
+                    imageVector = StarIcon,
+                    contentDescription = "Favorite",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(12.dp),
+                )
+            }
+        }
         if (mirrored) {
             code()
             Spacer(Modifier.width(6.dp))
             logo()
+            if (favorite) Spacer(Modifier.width(4.dp))
+            star()
         } else {
+            star()
+            if (favorite) Spacer(Modifier.width(4.dp))
             logo()
             Spacer(Modifier.width(6.dp))
             code()
@@ -512,7 +577,7 @@ private fun PreviewContent(state: ScheduleUiState) {
     LolSitoTheme {
         ScheduleContent(
             state = state,
-            onToggleLeague = {}, onToggleLiveOnly = {}, onToggleNoSpoilers = {}, onRetry = {}, onLoadOlder = {}, onLoadNewer = {}, onMatchClick = {},
+            onToggleLeague = {}, onToggleLiveOnly = {}, onToggleFavoritesOnly = {}, onToggleNoSpoilers = {}, onRetry = {}, onLoadOlder = {}, onLoadNewer = {}, onMatchClick = {},
         )
     }
 }
@@ -564,3 +629,9 @@ private fun LongCodesEventRowPreview() {
 @Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun ScheduleNoSpoilersPreview() = PreviewContent(previewState.copy(noSpoilers = true))
+
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
+@Composable
+private fun ScheduleFavoritesPreview() = PreviewContent(
+    previewState.copy(favoriteNames = listOf("T1"), favoritesOnly = true, resultDays = emptyList(), liveEvents = emptyList()),
+)

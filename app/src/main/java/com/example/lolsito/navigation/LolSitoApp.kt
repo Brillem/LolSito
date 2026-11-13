@@ -274,7 +274,17 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                 val matchId = requireNotNull(entry.arguments?.getString(Routes.MATCH_ID_ARG))
                 val vm: MatchDetailViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { MatchDetailViewModel(matchId, container.matchDetailRepository, container.userPreferences) }
+                        initializer {
+                            MatchDetailViewModel(
+                                matchId = matchId,
+                                repository = container.matchDetailRepository,
+                                preferences = container.userPreferences,
+                                teamsRepository = container.teamsRepository,
+                                scheduleRepository = container.scheduleRepository,
+                                leaguesRepository = container.leaguesRepository,
+                                zoneId = container.zoneId(),
+                            )
+                        }
                     }
                 )
                 MatchDetailScreen(
@@ -286,6 +296,7 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                     onTeamClick = { teamId ->
                         navController.navigateFrom(entry, Routes.team(teamId))
                     },
+                    onMatchClick = { otherMatchId -> navController.openMatchFromMatch(entry, otherMatchId) },
                 )
             }
             composable(
@@ -321,6 +332,15 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
 private fun NavHostController.navigateFrom(from: NavBackStackEntry, route: String) {
     if (!canNavigateFrom(from.lifecycle.currentState)) return
     navigate(route) { launchSingleTop = true }
+}
+
+/**
+ * Pushes Match detail of [matchId] from the Match detail [from] (a previous meeting of its teams). Not single
+ * top: that would reuse [from], which keeps showing its own match. The resumed check alone drops a double tap.
+ */
+private fun NavHostController.openMatchFromMatch(from: NavBackStackEntry, matchId: String) {
+    if (!canNavigateFrom(from.lifecycle.currentState)) return
+    navigate(Routes.match(matchId))
 }
 
 /**

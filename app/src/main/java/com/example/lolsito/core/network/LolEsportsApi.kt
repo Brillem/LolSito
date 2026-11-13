@@ -36,9 +36,12 @@ interface LolEsportsApi {
     @GET("getTournamentsForLeague")
     suspend fun getTournamentsForLeague(@Query("leagueId") leagueId: String): TournamentsResponse
 
-    /** Rankings are empty for bracket and Swiss stages. */
-    @GET("getStandings")
-    suspend fun getStandings(@Query("tournamentId") tournamentId: String): StandingsResponse
+    /**
+     * Standings of a tournament: rankings for group sections, and for bracket sections (Swiss included) the
+     * official layout in columns and cells, with where every match slot's team comes from.
+     */
+    @GET("getStandingsV3")
+    suspend fun getStandingsV3(@Query("tournamentId") tournamentId: String): StandingsResponse
 
     /**
      * One team with its players. [id] is the team id or slug; never call it without one, since the

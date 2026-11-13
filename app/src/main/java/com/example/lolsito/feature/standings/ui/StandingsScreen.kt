@@ -194,7 +194,6 @@ fun StandingsList(
                 is StandingsRow.EliminationNotice -> EliminationNotice()
                 is StandingsRow.MatchRow -> SectionMatchRow(row, onClick = { onMatchClick(row.sectionMatch.match.id) }, noSpoilers = noSpoilers)
                 is StandingsRow.BracketRow -> BracketView(row, onMatchClick, noSpoilers = noSpoilers)
-                is StandingsRow.DoubleEliminationRow -> DoubleEliminationView(row, onMatchClick, noSpoilers = noSpoilers)
                 is StandingsRow.SwissRow -> SwissView(row, onMatchClick, noSpoilers = noSpoilers)
             }
         }

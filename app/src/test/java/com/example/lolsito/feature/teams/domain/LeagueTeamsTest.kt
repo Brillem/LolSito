@@ -66,21 +66,37 @@ class LeagueTeamsTest {
     }
 
     @Test
-    fun `the LCK fixture lists its ten teams`() {
-        val standings = LolEsportsJson.decodeFromString<StandingsResponse>(Fixtures.read("getStandings_lck.json")).toDomainStandings()
+    fun `the LCK fixture lists the same ten teams as before, now partly from the bracket columns`() {
+        val standings = LolEsportsJson.decodeFromString<StandingsResponse>(Fixtures.read("getStandingsV3_lck.json")).toDomainStandings()
 
         val teams = teamsOfStandings(standings)
 
-        assertEquals(10, teams.size)
+        // The list getStandings gave for this tournament, sorted by name.
+        assertEquals(listOf("BFX", "DNS", "DK", "GEN", "BRO", "HLE", "KRX", "KT", "NS", "T1"), teams.map { it.code })
         assertEquals(teams.map { it.id }.distinct(), teams.map { it.id })
         assertEquals("98767991853197861", teams.single { it.name == "T1" }.id)
     }
 
     @Test
-    fun `the Worlds bracket fixture drops its TBD placeholder`() {
-        val standings = LolEsportsJson.decodeFromString<StandingsResponse>(Fixtures.read("getStandings_worlds2026.json")).toDomainStandings()
+    fun `bracket-only fixtures list every team of their columns`() {
+        fun teams(fixture: String) =
+            teamsOfStandings(LolEsportsJson.decodeFromString<StandingsResponse>(Fixtures.read(fixture)).toDomainStandings())
 
-        assertEquals(listOf("C9", "FUR", "KC", "MVK"), teamsOfStandings(standings).map { it.code }.sorted())
+        assertEquals(19, teams("getStandingsV3_worlds2026.json").size)
+        assertEquals(11, teams("getStandingsV3_msi2026.json").size)
+    }
+
+    @Test
+    fun `TBD slots of a bracket column are left out`() {
+        val standings = LolEsportsJson.decodeFromString<StandingsResponse>(
+            """{"data":{"standings":[{"stages":[{"name":"Knockouts","sections":[{"name":"Knockouts","type":"bracket","columns":[
+                {"cells":[{"name":"Finals","matches":[{"id":"f","structuralId":"match_f","state":"unstarted","teams":[
+                    {"id":"98767991853197861","code":"T1","name":"T1","origin":{"structuralId":"dp","type":"decisionPoint","slot":1}},
+                    {"id":"0","code":"TBD","name":"TBD","origin":{"structuralId":"dp","type":"decisionPoint","slot":2}}]}]}]}
+            ]}]}]}]}}"""
+        ).toDomainStandings()
+
+        assertEquals(listOf("T1"), teamsOfStandings(standings).map { it.code })
     }
 
     @Test

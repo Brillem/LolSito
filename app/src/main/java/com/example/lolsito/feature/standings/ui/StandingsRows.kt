@@ -8,10 +8,8 @@ import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
 import com.example.lolsito.feature.standings.domain.StandingsStage
-import com.example.lolsito.feature.standings.domain.BracketRound
+import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.SwissRound
-import com.example.lolsito.feature.standings.domain.buildBracket
-import com.example.lolsito.feature.standings.domain.buildDoubleElimination
 import com.example.lolsito.feature.standings.domain.buildSwiss
 import com.example.lolsito.feature.standings.domain.isPlaceholder
 
@@ -62,16 +60,11 @@ sealed interface StandingsRow {
             displayedResult(noSpoilers).score?.let { sectionMatch.match.teams.getOrNull(index)?.gameWins?.toString() }
     }
 
-    /** Single-elimination section drawn as a bracket instead of a match list; see [buildBracket]. */
-    data class BracketRow(override val key: String, val rounds: List<BracketColumn>) : StandingsRow
-
-    /** Double-elimination section: upper bracket, lower bracket and grand final; see [buildDoubleElimination]. */
-    data class DoubleEliminationRow(
-        override val key: String,
-        val upper: List<BracketColumn>,
-        val lower: List<BracketColumn>,
-        val grandFinal: BracketColumn,
-    ) : StandingsRow
+    /**
+     * Bracket section drawn from its official layout: [columns] left to right, and a [lines] entry from each
+     * match to the match its winner plays next.
+     */
+    data class BracketRow(override val key: String, val columns: List<BracketColumn>, val lines: List<BracketLine>) : StandingsRow
 
     /** Swiss section drawn by round, each round grouped by record; see [buildSwiss]. */
     data class SwissRow(override val key: String, val rounds: List<SwissColumn>) : StandingsRow
@@ -90,11 +83,14 @@ data class SwissColumn(val name: String, val matches: List<StandingsRow.MatchRow
 /** Matches of a Swiss round under one record such as "1-0"; null for matches still to be paired or no grouping. */
 data class SwissGroupColumn(val record: String?, val matches: List<StandingsRow.MatchRow>)
 
-/**
- * One bracket round as display rows: its name and its matches, top to bottom. [linkedToNext] is false when the
- * matches it feeds in the next column are not known yet, so no connector lines are drawn.
- */
-data class BracketColumn(val name: String, val matches: List<StandingsRow.MatchRow>, val linkedToNext: Boolean = true)
+/** One column of a bracket: its cells top to bottom. */
+data class BracketColumn(val cells: List<BracketColumnCell>)
+
+/** A cell of a bracket column as display rows: its official title and its match cards, top to bottom. */
+data class BracketColumnCell(val name: String, val matches: List<StandingsRow.MatchRow>)
+
+/** A line from the card with key [fromKey] to the card with key [toKey], which its winner plays next. */
+data class BracketLine(val fromKey: String, val toKey: String)
 
 /**
  * Win-loss record as text: "5-3" when complete, "-" when missing. A record with only one value
@@ -108,10 +104,9 @@ fun formatRecord(wins: Int?, losses: Int?): String = when {
 
 /**
  * Stages in API order. Each section decides on its own: rankings show a table; matches without rankings
- * show a single-elimination bracket (see [buildBracket]), else a double-elimination one (see
- * [buildDoubleElimination]), else a Swiss view (see [buildSwiss]), else the match list; and a section with
- * neither shows an empty row. Elimination stages (bracket or Swiss) also get a notice, and skip their
- * rounds that are not scheduled yet.
+ * show the official layout when the section has columns (a Swiss view by round when no match feeds another,
+ * see [buildSwiss], otherwise a bracket), else the match list; and a section with neither shows an empty
+ * row. Elimination stages (bracket or Swiss) also get a notice, and skip their sections with no matches.
  */
 fun buildStandingsRows(standings: Standings): List<StandingsRow> {
     // Same "#ordinal" suffix as ScheduleDay.keys, applied to the whole list.
@@ -143,28 +138,13 @@ fun buildStandingsRows(standings: Standings): List<StandingsRow> {
                 }
                 section.isMatchOnly -> {
                     fun matchRow(match: SectionMatch) = StandingsRow.MatchRow(key("match:$sectionBase/${match.match.id}"), match)
-                    fun column(round: BracketRound) = BracketColumn(round.name, round.matches.map(::matchRow), round.linkedToNext)
-                    val bracket = buildBracket(section)
-                    val doubleElimination = if (bracket == null) buildDoubleElimination(section) else null
-                    val swiss = if (bracket == null && doubleElimination == null) buildSwiss(section) else null
+                    val swiss = buildSwiss(section)
                     when {
-                        bracket != null -> {
-                            val bracketKey = key("bracket:$sectionBase")
-                            rows += StandingsRow.BracketRow(bracketKey, bracket.map(::column))
-                        }
-                        doubleElimination != null -> {
-                            val bracketKey = key("double:$sectionBase")
-                            rows += StandingsRow.DoubleEliminationRow(
-                                bracketKey,
-                                doubleElimination.upper.map(::column),
-                                doubleElimination.lower.map(::column),
-                                column(doubleElimination.grandFinal),
-                            )
-                        }
                         swiss != null -> {
                             val swissKey = key("swiss:$sectionBase")
                             rows += StandingsRow.SwissRow(swissKey, swiss.map { round -> swissColumn(round, ::matchRow) })
                         }
+                        section.columns.isNotEmpty() -> rows += bracketRow(key("bracket:$sectionBase"), section, ::matchRow)
                         else -> section.matches.forEach { rows += matchRow(it) }
                     }
                 }
@@ -178,6 +158,27 @@ fun buildStandingsRows(standings: Standings): List<StandingsRow> {
 /** A single section named like its stage adds nothing, so its header is skipped. */
 private fun StandingsStage.showsSectionHeaders(): Boolean =
     sections.size > 1 || sections.any { it.name.isNotBlank() && it.name != name }
+
+/**
+ * A section's official layout as display rows. Every match row is built once; each winner link becomes a
+ * line between the cards of its two matches (the first card of a match id, should one repeat).
+ */
+private fun bracketRow(key: String, section: StandingsSection, matchRow: (SectionMatch) -> StandingsRow.MatchRow): StandingsRow.BracketRow {
+    val cardsById = mutableMapOf<String, StandingsRow.MatchRow>()
+    val columns = section.columns.map { column ->
+        BracketColumn(
+            column.cells.map { cell ->
+                BracketColumnCell(cell.name, cell.matches.map { match -> matchRow(match).also { cardsById.putIfAbsent(match.match.id, it) } })
+            },
+        )
+    }
+    val lines = section.winnerLinks.mapNotNull { link ->
+        val from = cardsById[link.fromMatchId] ?: return@mapNotNull null
+        val to = cardsById[link.toMatchId] ?: return@mapNotNull null
+        BracketLine(from.key, to.key)
+    }
+    return StandingsRow.BracketRow(key, columns, lines)
+}
 
 /** A Swiss round as display rows; every match row is built once and shared by the round and its group. */
 private fun swissColumn(round: SwissRound, matchRow: (SectionMatch) -> StandingsRow.MatchRow): SwissColumn {

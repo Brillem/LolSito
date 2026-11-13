@@ -8,12 +8,16 @@ import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.network.LolEsportsJson
 import com.example.lolsito.core.network.dto.StandingsResponse
 import com.example.lolsito.feature.standings.data.toDomainStandings
+import com.example.lolsito.feature.standings.domain.BracketCell
+import com.example.lolsito.feature.standings.domain.BracketLayoutColumn
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
 import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.StandingsStage
+import com.example.lolsito.feature.standings.domain.WinnerLink
 import com.example.lolsito.testutil.Fixtures
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -24,10 +28,18 @@ class StandingsBracketRowsTest {
     private fun fixture(name: String): Standings =
         LolEsportsJson.decodeFromString<StandingsResponse>(Fixtures.read(name)).toDomainStandings()
 
-    private val played by lazy { buildStandingsRows(fixture("getStandings_worlds2026_knockouts.json")) }
+    private val worlds by lazy { buildStandingsRows(fixture("getStandingsV3_worlds2026.json")) }
+    private val msi by lazy { buildStandingsRows(fixture("getStandingsV3_msi2026.json")) }
 
+    /** Every key in the list, including the cards drawn inside bracket and Swiss rows. */
     private fun List<StandingsRow>.assertUniqueKeys() {
-        val keys = this.flatMap { row -> listOf(row.key) + ((row as? StandingsRow.BracketRow)?.rounds?.flatMap { c -> c.matches.map { it.key } } ?: emptyList()) }
+        val keys = flatMap { row ->
+            listOf(row.key) + when (row) {
+                is StandingsRow.BracketRow -> row.cards.map { it.key }
+                is StandingsRow.SwissRow -> row.rounds.flatMap { c -> c.matches.map { it.key } }
+                else -> emptyList()
+            }
+        }
         assertEquals("duplicate keys in $keys", keys.size, keys.toSet().size)
     }
 
@@ -38,96 +50,141 @@ class StandingsBracketRowsTest {
         return subList(start + 1, end)
     }
 
+    private val StandingsRow.BracketRow.cards get() = columns.flatMap { c -> c.cells.flatMap { it.matches } }
+
+    private fun StandingsRow.BracketRow.cellNames() = columns.map { c -> c.cells.map { it.name } }
+
+    private fun StandingsRow.BracketRow.card(id: String) = cards.single { it.sectionMatch.match.id == id }
+
+    /** Lines as match ids, so they read like the API links. */
+    private fun StandingsRow.BracketRow.lineIds(): List<Pair<String, String>> {
+        val ids = cards.associate { it.key to it.sectionMatch.match.id }
+        return lines.map { ids.getValue(it.fromKey) to ids.getValue(it.toKey) }
+    }
+
     @Test
-    fun `played worlds knockouts is a bracket while play-ins and swiss get their own views`() {
-        played.assertUniqueKeys()
-        assertEquals(listOf("Play-Ins", "Swiss", "Knockouts"), played.filterIsInstance<StandingsRow.StageHeader>().map { it.name })
+    fun `worlds draws its play-ins and knockouts as brackets and its swiss by round`() {
+        worlds.assertUniqueKeys()
+        assertEquals(listOf("Play-Ins", "Swiss", "Knockouts"), worlds.filterIsInstance<StandingsRow.StageHeader>().map { it.name })
+        assertTrue(worlds.none { it is StandingsRow.MatchRow })
 
-        // Play-Ins is a double elimination and Swiss is drawn by round (see StandingsFormatsRowsTest).
-        val playIns = played.ofStage("Play-Ins")
-        assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.DoubleEliminationRow::class), playIns.map { it::class })
-        val swiss = played.ofStage("Swiss")
-        assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.SwissRow::class), swiss.map { it::class })
-
-        val knockouts = played.ofStage("Knockouts")
+        assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.BracketRow::class), worlds.ofStage("Play-Ins").map { it::class })
+        assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.SwissRow::class), worlds.ofStage("Swiss").map { it::class })
+        val knockouts = worlds.ofStage("Knockouts")
         assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.BracketRow::class), knockouts.map { it::class })
         val bracket = knockouts.filterIsInstance<StandingsRow.BracketRow>().single()
-        assertEquals(listOf("Quarterfinals", "Semifinals", "Final"), bracket.rounds.map { it.name })
-        assertEquals(listOf(4, 2, 1), bracket.rounds.map { it.matches.size })
+        assertEquals(listOf(listOf("Quarterfinals"), listOf("Semifinals"), listOf("Finals")), bracket.cellNames())
+        assertEquals(listOf(4, 2, 1), bracket.columns.map { c -> c.cells.single().matches.size })
     }
 
     @Test
-    fun `played bracket keeps the api match order and every decided winner advances`() {
-        val section = fixture("getStandings_worlds2026_knockouts.json").stages.single { it.name == "Knockouts" }.sections.single()
-        val bracket = played.filterIsInstance<StandingsRow.BracketRow>().single()
+    fun `bracket cards keep the api layout order`() {
+        val section = fixture("getStandingsV3_msi2026.json").stages.single { it.name == "Knockouts" }.sections.single()
+        val bracket = msi.ofStage("Knockouts").filterIsInstance<StandingsRow.BracketRow>().single()
 
-        assertEquals(section.matches.map { it.match.id }, bracket.rounds.flatMap { c -> c.matches.map { it.sectionMatch.match.id } })
-        bracket.rounds.zipWithNext().forEach { (round, next) ->
-            round.matches.forEachIndexed { i, row ->
-                val winner = row.result.winnerIndex?.let { row.sectionMatch.match.teams[it] } ?: return@forEachIndexed
-                assertTrue(next.matches[i / 2].sectionMatch.match.teams.any { it.id == winner.id })
-            }
+        assertEquals(section.matches.map { it.match.id }, bracket.cards.map { it.sectionMatch.match.id })
+        assertEquals(
+            listOf(
+                listOf("Upper Bracket - Round 1"),
+                listOf("Upper Bracket - Round 2", "Lower Bracket - Round 1"),
+                listOf("Upper Bracket - Round 3", "Lower Bracket - Round 2"),
+                listOf("Lower Bracket - Round 3"),
+                listOf("Lower Bracket - Round 4"),
+                listOf("Finals"),
+            ),
+            bracket.cellNames(),
+        )
+    }
+
+    @Test
+    fun `lines join each match to the match its winner plays next, never to a lower-bracket drop`() {
+        val bracket = msi.ofStage("Knockouts").filterIsInstance<StandingsRow.BracketRow>().single()
+
+        assertEquals(13, bracket.lines.size)
+        bracket.lineIds().forEach { (from, to) ->
+            val winner = bracket.card(from).let { row -> row.result.winnerIndex?.let { row.sectionMatch.match.teams[it] } }
+            assertNotNull(winner)
+            assertTrue(bracket.card(to).sectionMatch.match.teams.any { it.id == winner!!.id })
         }
+        // Upper round 1 sends its first loser to lower round 1: no line for that drop.
+        assertFalse(("115570934355614527" to "115570934355614563") in bracket.lineIds())
+        // The upper round 3 winner goes straight to the final, three columns later.
+        assertTrue(("115570934355614575" to "115570934355614605") in bracket.lineIds())
     }
 
     @Test
-    fun `unplayed worlds knockouts is a bracket of placeholder matches`() {
-        val rows = buildStandingsRows(fixture("getStandings_worlds2026.json"))
+    fun `lck and lec formats that used to be lists are drawn as brackets`() {
+        val lck = buildStandingsRows(fixture("getStandingsV3_lck.json"))
+        val lec = buildStandingsRows(fixture("getStandingsV3_lec.json"))
+
+        lck.assertUniqueKeys()
+        lec.assertUniqueKeys()
+        assertTrue(lck.none { it is StandingsRow.MatchRow })
+        assertTrue(lec.none { it is StandingsRow.MatchRow })
+        assertEquals(listOf(StandingsRow.EliminationNotice::class, StandingsRow.BracketRow::class), lck.ofStage("Play-Ins").map { it::class })
+        val regional = lck.ofStage("Regional Championship").filterIsInstance<StandingsRow.BracketRow>().single()
+        assertEquals(10, regional.cards.size)
+        assertEquals(listOf("Loser's Bracket - Round 3"), regional.cellNames()[3])
+        assertEquals(7, regional.lines.size)
+        val playoffs = lec.ofStage("Playoffs").filterIsInstance<StandingsRow.BracketRow>().single()
+        assertEquals(8, playoffs.cards.size)
+        assertEquals(7, playoffs.lines.size)
+    }
+
+    @Test
+    fun `matches without teams are drawn as TBD in their place from the start, with their lines`() {
+        val semis = listOf(tbd("s1"), tbd("s2"))
+        val final = SectionMatch(MatchState.UNSTARTED, Match("f", emptyList(), format = null))
+        val section = StandingsSection(
+            "Knockouts", emptyList(), semis + final,
+            columns = listOf(BracketLayoutColumn(listOf(BracketCell("Semifinals", semis))), BracketLayoutColumn(listOf(BracketCell("Finals", listOf(final))))),
+            winnerLinks = listOf(WinnerLink("s1", "f"), WinnerLink("s2", "f")),
+        )
+        val rows = buildStandingsRows(Standings(listOf(StandingsStage("Knockouts", "knockouts", listOf(section)))))
 
         rows.assertUniqueKeys()
-        val bracket = rows.ofStage("Knockouts").filterIsInstance<StandingsRow.BracketRow>().single()
-        assertEquals(listOf(4, 2, 1), bracket.rounds.map { it.matches.size })
-        assertTrue(rows.ofStage("Knockouts").none { it is StandingsRow.MatchRow })
+        val bracket = rows.filterIsInstance<StandingsRow.BracketRow>().single()
+        assertEquals(listOf(listOf("Semifinals"), listOf("Finals")), bracket.cellNames())
+        assertEquals(listOf("s1", "s2", "f"), bracket.cards.map { it.sectionMatch.match.id })
+        assertEquals(listOf("s1" to "f", "s2" to "f"), bracket.lineIds())
+        assertTrue(bracket.card("s1").sectionMatch.match.teams.all { it.code == "TBD" })
+        assertFalse(bracket.card("f").hasBothTeams)
+        assertFalse(bracket.card("f").isNavigable)
     }
 
     @Test
-    fun `ranked sections keep their tables and get no bracket`() {
-        val rows = buildStandingsRows(fixture("getStandings_lck.json"))
-
-        assertTrue(rows.none { it is StandingsRow.BracketRow })
-        assertEquals(10, rows.count { it is StandingsRow.RankingRow })
-    }
-
-    @Test
-    fun `a seven-match section whose winners do not advance falls back to the list`() {
-        val matches = listOf(won("q1", "a", "b")) + List(6) { pending("m$it", "x$it", "y$it") }
+    fun `a bracket section without columns falls back to the match list`() {
+        val matches = listOf(won("q1", "a", "b"), pending("q2", "c", "d"), pending("f", "a", "c"))
         val rows = buildStandingsRows(Standings(listOf(StandingsStage("Knockouts", "knockouts", listOf(StandingsSection("Knockouts", emptyList(), matches))))))
 
-        assertTrue(rows.none { it is StandingsRow.BracketRow })
+        assertTrue(rows.none { it is StandingsRow.BracketRow || it is StandingsRow.SwissRow })
         assertEquals(matches.map { it.match.id }, rows.filterIsInstance<StandingsRow.MatchRow>().map { it.sectionMatch.match.id })
     }
 
     @Test
-    fun `bracket in a stage with other sections keeps the section header and the other lists`() {
-        val semis = listOf(won("s1", "a", "b"), won("s2", "c", "d"), pending("f", "a", "c"))
-        val stage = StandingsStage(
-            "Playoffs", "playoffs",
-            listOf(
-                StandingsSection("Upper", emptyList(), semis),
-                StandingsSection("Lower", emptyList(), listOf(pending("l1", "b", "d"))),
-            ),
-        )
+    fun `a bracket section with neither columns nor matches shows an empty section`() {
+        val stage = StandingsStage("Playoffs", "playoffs", listOf(StandingsSection("Playoffs", emptyList(), emptyList())))
         val rows = buildStandingsRows(Standings(listOf(stage)))
 
-        rows.assertUniqueKeys()
-        assertEquals(
-            listOf(
-                StandingsRow.StageHeader::class,
-                StandingsRow.EliminationNotice::class,
-                StandingsRow.SectionHeader::class,
-                StandingsRow.BracketRow::class,
-                StandingsRow.SectionHeader::class,
-                StandingsRow.MatchRow::class,
-            ),
-            rows.map { it::class },
-        )
+        assertEquals(1, rows.count { it is StandingsRow.EmptySection })
+        assertTrue(rows.none { it is StandingsRow.BracketRow || it is StandingsRow.MatchRow })
+    }
+
+    @Test
+    fun `ranked sections keep their tables and get no bracket`() {
+        val rows = buildStandingsRows(fixture("getStandingsV3_lck.json"))
+
+        assertEquals(2, rows.count { it is StandingsRow.TableHeader })
+        assertEquals(10, rows.count { it is StandingsRow.RankingRow })
+        val groups = rows.ofStage("Groups")
+        assertTrue(groups.none { it is StandingsRow.BracketRow || it is StandingsRow.MatchRow })
     }
 
     @Test
     fun `with no spoilers the bracket hides scores and winners but still shows who advanced`() {
-        val bracket = played.filterIsInstance<StandingsRow.BracketRow>().single()
-        val completed = bracket.rounds.flatMap { it.matches }.filter { it.sectionMatch.state == MatchState.COMPLETED }
-        assertTrue(completed.isNotEmpty())
+        val bracket = msi.ofStage("Knockouts").filterIsInstance<StandingsRow.BracketRow>().single()
+        val completed = bracket.cards.filter { it.sectionMatch.state == MatchState.COMPLETED }
+        assertEquals(14, completed.size)
 
         completed.forEach { row ->
             val shown = row.displayedResult(noSpoilers = false)
@@ -144,9 +201,8 @@ class StandingsBracketRowsTest {
             assertNull(row.displayedGameWins(0, noSpoilers = true))
             assertNull(row.displayedGameWins(1, noSpoilers = true))
         }
-        // The semifinals list the teams that advanced, whatever the mode.
-        val semis = bracket.rounds[1].matches
-        assertTrue(semis.all { row -> row.hasBothTeams && row.sectionMatch.match.teams.none { it.code == "TBD" } })
+        // The final lists the teams that advanced, whatever the mode.
+        assertTrue(bracket.columns.last().cells.single().matches.single().sectionMatch.match.teams.none { it.code == "TBD" })
     }
 
     @Test
@@ -169,4 +225,9 @@ class StandingsBracketRowsTest {
 
     private fun pending(id: String, first: String, second: String) =
         SectionMatch(MatchState.UNSTARTED, Match(id, listOf(team(first), team(second)), format = null))
+
+    private fun tbd(id: String): SectionMatch {
+        val placeholder = Team("TBD", "TBD", null, null, null, id = "0")
+        return SectionMatch(MatchState.UNSTARTED, Match(id, listOf(placeholder, placeholder), format = null))
+    }
 }

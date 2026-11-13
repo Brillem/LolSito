@@ -63,6 +63,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import com.example.lolsito.feature.match.domain.MatchGame
 import com.example.lolsito.feature.match.domain.WatchLink
+import com.example.lolsito.ui.theme.WinGreen
 
 /** Container: wires the ViewModel to the stateless [MatchDetailContent]. */
 @Composable
@@ -163,48 +164,52 @@ private fun MatchDetailBody(
                 ) { Text("Show result") }
             }
         }
-        item(key = "games-title") {
-            Text(
-                "Games",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
-        val games = content.displayedGames
-        if (games.isEmpty()) {
-            item(key = "no-games") {
+        if (content.showsGames) {
+            item(key = "games-title") {
                 Text(
-                    "No games yet",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                    "Games",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
+            val games = content.displayedGames
+            if (games.isEmpty()) {
+                item(key = "no-games") {
+                    Text(
+                        "No games yet",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            }
+            val keys = content.displayedGameKeys
+            items(games.size, key = { keys[it] }) { index ->
+                val game = games[index]
+                val statsLink = content.statsLinkFor(game)
+                GameRow(
+                    game,
+                    detail.teams,
+                    onClick = statsLink?.let { link -> { onGameClick(link) } },
+                    onWatch = content.watchLinkFor(game)?.let { vod -> { context.openWatchLink(vod) } },
+                    showState = content.showsGameState,
+                )
+                HorizontalDivider()
+            }
         }
-        val keys = content.displayedGameKeys
-        items(games.size, key = { keys[it] }) { index ->
-            val game = games[index]
-            val statsLink = content.statsLinkFor(game)
-            GameRow(
-                game,
-                detail.teams,
-                onClick = statsLink?.let { link -> { onGameClick(link) } },
-                onWatch = content.watchLinkFor(game)?.let { vod -> { context.openWatchLink(vod) } },
-                showState = content.showsGameState,
-            )
-            HorizontalDivider()
-        }
-        historySections(history, detail.teams, onRetryHistory, onMatchClick)
+        historySections(history, detail.teams, content.showsHeadToHead, onRetryHistory, onMatchClick)
     }
 }
 
 /**
- * "Recent form" and "Head to head", below the games. Nothing for [MatchHistoryUiState.None]; while loading or
- * after a failure each section says so under its title, the failure with a retry.
+ * "Recent form" and, with [showHeadToHead], "Head to head", below the games. Nothing for
+ * [MatchHistoryUiState.None]; while loading or after a failure each section says so under its title, the failure
+ * with a retry.
  */
 private fun LazyListScope.historySections(
     history: MatchHistoryUiState,
     teams: List<Team>,
+    showHeadToHead: Boolean,
     onRetry: () -> Unit,
     onMatchClick: (String) -> Unit,
 ) {
@@ -216,6 +221,7 @@ private fun LazyListScope.historySections(
     } else {
         items(loaded.form.size, key = { "form:$it" }) { index -> TeamFormRow(loaded.form[index]) }
     }
+    if (!showHeadToHead) return
     item(key = "h2h-title") { SectionTitle("Head to head") }
     when {
         loaded == null -> item(key = "h2h-status") { HistoryStatus(history, onRetry) }
@@ -302,7 +308,7 @@ private fun FormMark(entry: FormEntry) {
             if (won) "W" else "L",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = if (won) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            color = if (won) WinGreen else MaterialTheme.colorScheme.error,
         )
         Text(
             entry.opponentCode,

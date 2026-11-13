@@ -41,3 +41,9 @@ val MatchDetailUiState.Content.liveLink: WatchLink? get() = detail.liveLink
 
 /** Id to open this team's profile with, or null when it is not tappable: no id, or a "TBD" placeholder. */
 fun Team.profileId(): String? = id?.takeIf { it.isNotBlank() && it != "0" && code != "TBD" }
+
+/** The games list (title included) is left out until the series starts: before that every game only says "Upcoming". */
+val MatchDetailUiState.Content.showsGames: Boolean get() = detail.state != MatchState.UNSTARTED
+
+/** The head to head is context for a series still to be decided, so a finished series leaves it out. */
+val MatchDetailUiState.Content.showsHeadToHead: Boolean get() = detail.state != MatchState.COMPLETED

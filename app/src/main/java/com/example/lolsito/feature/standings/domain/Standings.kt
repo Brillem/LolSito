@@ -24,17 +24,34 @@ data class Ranking(
     val losses: Int?,
 )
 
-/** A match listed under a section; used as the fallback for bracket and Swiss stages. */
+/** A match of a bracket or Swiss section. */
 data class SectionMatch(
     val state: MatchState,
     val match: Match,
 )
 
-/** A ranked section shows a table; a match-only one (bracket, Swiss) lists its matches instead. */
+/** A named group of matches inside a bracket column, as the API titles it, e.g. "Lower Bracket - Finals". */
+data class BracketCell(val name: String, val matches: List<SectionMatch>)
+
+/** One column of the official bracket layout: its cells top to bottom. */
+data class BracketLayoutColumn(val cells: List<BracketCell>)
+
+/** The winner of match [fromMatchId] plays match [toMatchId]. Drops to a lower bracket are not links. */
+data class WinnerLink(val fromMatchId: String, val toMatchId: String)
+
+/**
+ * A ranked section shows a table; a match-only one (bracket, Swiss) shows its matches instead.
+ *
+ * [columns] is the official layout of a bracket section, left to right, and [winnerLinks] where each winner
+ * goes next; [matches] holds every match of the section, those of [columns] in column then cell order. A
+ * match-only section without [columns] shows [matches] as a list.
+ */
 data class StandingsSection(
     val name: String,
     val rankings: List<Ranking>,
     val matches: List<SectionMatch>,
+    val columns: List<BracketLayoutColumn> = emptyList(),
+    val winnerLinks: List<WinnerLink> = emptyList(),
 ) {
     val isRanked: Boolean get() = rankings.isNotEmpty()
     val isMatchOnly: Boolean get() = rankings.isEmpty() && matches.isNotEmpty()

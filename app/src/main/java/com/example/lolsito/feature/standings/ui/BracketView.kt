@@ -21,15 +21,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
@@ -38,8 +37,9 @@ import com.example.lolsito.core.ui.LiveBadge
 import com.example.lolsito.core.ui.TeamLogo
 
 /**
- * Single-elimination bracket: one column per round, each match a card, and lines joining every
- * pair of matches to the one they feed. Scrolls horizontally when it does not fit.
+ * A bracket drawn from its official layout: one column per API column, each cell under its official title,
+ * each match a card, and a line from every match to the match its winner plays next. Drops to a lower
+ * bracket get no line; the cell titles tell them apart. Scrolls horizontally when it does not fit.
  */
 @Composable
 fun BracketView(
@@ -48,24 +48,7 @@ fun BracketView(
     modifier: Modifier = Modifier,
     noSpoilers: Boolean = false,
 ) {
-    BracketColumns(row.rounds, onMatchClick, noSpoilers, modifier)
-}
-
-/** Double elimination: the upper bracket, the lower bracket and the grand final, each with its own columns. */
-@Composable
-fun DoubleEliminationView(
-    row: StandingsRow.DoubleEliminationRow,
-    onMatchClick: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    noSpoilers: Boolean = false,
-) {
-    Column(modifier.fillMaxWidth()) {
-        BracketPartTitle("Upper bracket")
-        BracketColumns(row.upper, onMatchClick, noSpoilers)
-        BracketPartTitle("Lower bracket")
-        BracketColumns(row.lower, onMatchClick, noSpoilers)
-        BracketColumns(listOf(row.grandFinal), onMatchClick, noSpoilers)
-    }
+    BracketColumns(row.columns, row.lines, onMatchClick, noSpoilers, modifier)
 }
 
 /**
@@ -107,106 +90,72 @@ fun SwissView(
 }
 
 @Composable
-private fun BracketPartTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
-    )
-}
-
-@Composable
-private fun ColumnTitle(text: String) {
+private fun ColumnTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.primary,
         maxLines = 1,
-        modifier = Modifier.height(TITLE_HEIGHT),
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier.height(TITLE_HEIGHT),
     )
 }
 
 /**
- * Columns of match cards with connector lines. The tallest column sets the height and every column splits it
- * evenly, so a match sits centered between the matches that feed it. Lines are drawn only between columns
- * whose link is known: an elbow from each pair when the next column halves, a straight line when it keeps its
- * size.
+ * Columns of match cards placed by [placeBracket], with the cell titles above their cards and the lines
+ * behind them. A line leaves a card on its right, runs level to the gap just before the target's column,
+ * turns there and enters the target card from its left.
  */
 @Composable
 private fun BracketColumns(
     columns: List<BracketColumn>,
+    lines: List<BracketLine>,
     onMatchClick: (String) -> Unit,
     noSpoilers: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val firstSlot = CARD_HEIGHT + CARD_GAP
-    val height = firstSlot * (columns.maxOfOrNull { it.matches.size } ?: 0)
+    val slot = CARD_HEIGHT + CARD_GAP
+    val step = CARD_WIDTH + CONNECTOR_WIDTH
+    val placement = remember(columns, lines) { placeBracket(columns, lines, titleSpace = TITLE_HEIGHT / slot) }
+    val width = if (columns.isEmpty()) 0.dp else step * columns.size - CONNECTOR_WIDTH
     val lineColor = MaterialTheme.colorScheme.outlineVariant
-    Row(
+    Box(
         modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        columns.forEachIndexed { index, column ->
-            val slot = height / column.matches.size.coerceAtLeast(1)
-            Column(Modifier.width(CARD_WIDTH)) {
-                ColumnTitle(column.name)
-                Box(Modifier.height(height)) {
-                    column.matches.forEachIndexed { matchIndex, match ->
+        Box(Modifier.size(width, slot * placement.height)) {
+            Canvas(Modifier.matchParentSize()) {
+                val stroke = 1.dp.toPx()
+                lines.forEach { line ->
+                    val from = placement.cards[line.fromKey] ?: return@forEach
+                    val to = placement.cards[line.toKey] ?: return@forEach
+                    if (from.column >= to.column) return@forEach
+                    val start = Offset((step * from.column + CARD_WIDTH).toPx(), (slot * from.top + CARD_HEIGHT / 2).toPx())
+                    val turnX = (step * to.column - CONNECTOR_WIDTH / 2).toPx()
+                    val end = Offset((step * to.column).toPx(), (slot * to.top + CARD_HEIGHT / 2).toPx())
+                    drawLine(lineColor, start, Offset(turnX, start.y), stroke)
+                    drawLine(lineColor, Offset(turnX, start.y), Offset(turnX, end.y), stroke)
+                    drawLine(lineColor, Offset(turnX, end.y), end, stroke)
+                }
+            }
+            placement.titles.forEach { title ->
+                ColumnTitle(title.name, Modifier.offset(x = step * title.column, y = slot * title.top).width(CARD_WIDTH))
+            }
+            columns.forEach { column ->
+                column.cells.forEach { cell ->
+                    cell.matches.forEach { match ->
+                        val card = placement.cards[match.key] ?: return@forEach
                         BracketMatchCard(
                             match,
                             onClick = { onMatchClick(match.sectionMatch.match.id) },
                             noSpoilers = noSpoilers,
-                            modifier = Modifier.offset(y = slot * matchIndex + (slot - CARD_HEIGHT) / 2),
+                            modifier = Modifier.offset(x = step * card.column, y = slot * card.top),
                         )
                     }
                 }
             }
-            val next = columns.getOrNull(index + 1)
-            if (next != null) {
-                val connectorModifier = Modifier.padding(top = TITLE_HEIGHT).size(CONNECTOR_WIDTH, height)
-                when {
-                    !column.linkedToNext -> Spacer(connectorModifier)
-                    next.matches.size * 2 == column.matches.size ->
-                        BracketConnectors(feeders = column.matches.size, slot = slot, color = lineColor, modifier = connectorModifier)
-                    next.matches.size == column.matches.size ->
-                        StraightConnectors(count = column.matches.size, slot = slot, color = lineColor, modifier = connectorModifier)
-                    else -> Spacer(connectorModifier)
-                }
-            }
-        }
-    }
-}
-
-/** Elbow lines from each pair of feeder matches (2k, 2k+1) to the next-round match k. */
-@Composable
-private fun BracketConnectors(feeders: Int, slot: Dp, color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        val slotPx = slot.toPx()
-        val stroke = 1.dp.toPx()
-        val midX = size.width / 2
-        for (pair in 0 until feeders / 2) {
-            val top = slotPx * (2 * pair + 0.5f)
-            val bottom = slotPx * (2 * pair + 1.5f)
-            val target = (top + bottom) / 2
-            drawLine(color, Offset(0f, top), Offset(midX, top), stroke)
-            drawLine(color, Offset(0f, bottom), Offset(midX, bottom), stroke)
-            drawLine(color, Offset(midX, top), Offset(midX, bottom), stroke)
-            drawLine(color, Offset(midX, target), Offset(size.width, target), stroke)
-        }
-    }
-}
-
-/** A straight line from each match k to the next-round match k, for rounds of the same size. */
-@Composable
-private fun StraightConnectors(count: Int, slot: Dp, color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        val slotPx = slot.toPx()
-        val stroke = 1.dp.toPx()
-        for (k in 0 until count) {
-            val y = slotPx * (k + 0.5f)
-            drawLine(color, Offset(0f, y), Offset(size.width, y), stroke)
         }
     }
 }

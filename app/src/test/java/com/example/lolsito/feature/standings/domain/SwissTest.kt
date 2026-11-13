@@ -10,6 +10,7 @@ import com.example.lolsito.feature.standings.data.toDomainStandings
 import com.example.lolsito.testutil.Fixtures
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SwissTest {
@@ -18,7 +19,10 @@ class SwissTest {
         LolEsportsJson.decodeFromString<StandingsResponse>(Fixtures.read(fixture)).toDomainStandings()
             .stages.single { it.name == stage }.sections.single()
 
-    private val played by lazy { section("getStandings_worlds2026_knockouts.json", "Swiss") }
+    private val played by lazy { section("getStandingsV3_worlds2026.json", "Swiss") }
+
+    /** The matches of each official round (column) of the played Worlds Swiss. */
+    private val playedRounds by lazy { played.columns.map { it.cells.single().matches } }
 
     private val List<SwissRound>.sizes get() = map { it.matches.size }
 
@@ -33,16 +37,20 @@ class SwissTest {
         listOf("2-2" to 3),
     )
 
+    /** Every round shows its matches in API order under no record. */
+    private fun List<SwissRound>.assertRoundsOnly(rounds: List<List<SectionMatch>>) {
+        assertEquals(rounds, map { it.matches })
+        forEach { round -> assertEquals(listOf(SwissGroup(null, round.matches)), round.groups) }
+    }
+
     @Test
-    fun `the played worlds swiss is drawn as five rounds grouped by record`() {
+    fun `the played worlds swiss takes its five rounds from the api and groups them by record`() {
         val rounds = requireNotNull(buildSwiss(played))
 
         assertEquals(listOf("Round 1", "Round 2", "Round 3", "Round 4", "Round 5"), rounds.map { it.name })
         assertEquals(listOf(8, 8, 8, 6, 3), rounds.sizes)
         assertEquals(fullRecords, rounds.records())
-        // The list is in round order, and every match is drawn once.
-        val ids = played.matches.map { it.match.id }
-        assertEquals(listOf(ids.subList(0, 8), ids.subList(8, 16), ids.subList(16, 24), ids.subList(24, 30), ids.subList(30, 33)), rounds.map { r -> r.matches.map { it.match.id } })
+        assertEquals(playedRounds, rounds.map { it.matches })
         rounds.forEach { round -> assertEquals(round.matches.toSet(), round.groups.flatMap { it.matches }.toSet()) }
     }
 
@@ -72,89 +80,108 @@ class SwissTest {
 
     @Test
     fun `later rounds still to be paired keep the played rounds and wait under no record`() {
-        // Rounds 4 and 5 not paired yet: the API lists them as TBD placeholders.
-        val matches = played.matches.mapIndexed { i, m -> if (i >= 24) placeholder(m.match.id) else m }
-        val rounds = requireNotNull(buildSwiss(played.copy(matches = matches)))
+        // Rounds 4 and 5 not paired yet: their slots are TBD placeholders.
+        val rounds = playedRounds.mapIndexed { r, matches -> if (r >= 3) matches.map { placeholder(it.match.id) } else matches }
+        val swiss = requireNotNull(buildSwiss(swissSection(rounds)))
 
-        assertEquals(listOf(8, 8, 8, 6, 3), rounds.sizes)
-        assertEquals(fullRecords.take(3) + listOf(listOf(null to 6), listOf(null to 3)), rounds.records())
-        assertEquals(matches.subList(24, 30), rounds[3].matches)
+        assertEquals(listOf(8, 8, 8, 6, 3), swiss.sizes)
+        assertEquals(fullRecords.take(3) + listOf(listOf(null to 6), listOf(null to 3)), swiss.records())
+        assertEquals(rounds[3], swiss[3].matches)
     }
 
     @Test
     fun `a round being played is grouped by the records the teams had going in`() {
-        val matches = played.matches.mapIndexed { i, m ->
+        val rounds = playedRounds.mapIndexed { r, matches ->
             when {
-                i in 16 until 24 -> m.copy(state = if (i == 16) MatchState.IN_PROGRESS else MatchState.UNSTARTED, match = m.match.copy(teams = m.match.teams.map { it.copy(outcome = null, gameWins = 0) }))
-                i >= 24 -> placeholder(m.match.id)
-                else -> m
+                r == 2 -> matches.mapIndexed { i, m ->
+                    m.copy(state = if (i == 0) MatchState.IN_PROGRESS else MatchState.UNSTARTED, match = m.match.copy(teams = m.match.teams.map { it.copy(outcome = null, gameWins = 0) }))
+                }
+                r >= 3 -> matches.map { placeholder(it.match.id) }
+                else -> matches
             }
         }
-        val rounds = requireNotNull(buildSwiss(played.copy(matches = matches)))
+        val swiss = requireNotNull(buildSwiss(swissSection(rounds)))
 
-        assertEquals(listOf(8, 8, 8, 6, 3), rounds.sizes)
-        assertEquals(fullRecords.take(3) + listOf(listOf(null to 6), listOf(null to 3)), rounds.records())
+        assertEquals(listOf(8, 8, 8, 6, 3), swiss.sizes)
+        assertEquals(fullRecords.take(3) + listOf(listOf(null to 6), listOf(null to 3)), swiss.records())
     }
 
     @Test
-    fun `rounds the api does not list yet are simply not drawn`() {
-        val rounds = requireNotNull(buildSwiss(played.copy(matches = played.matches.take(16))))
+    fun `only the rounds the api lists are drawn`() {
+        val swiss = requireNotNull(buildSwiss(swissSection(playedRounds.take(2))))
 
-        assertEquals(listOf(8, 8), rounds.sizes)
-        assertEquals(fullRecords.take(2), rounds.records())
+        assertEquals(listOf(8, 8), swiss.sizes)
+        assertEquals(fullRecords.take(2), swiss.records())
     }
 
     @Test
-    fun `a swiss with no team known yet stays a list`() {
-        assertNull(buildSwiss(section("getStandings_worlds2026.json", "Swiss")))
+    fun `a swiss with no team known yet shows its rounds without records`() {
+        val rounds = playedRounds.map { matches -> matches.map { placeholder(it.match.id) } }
+
+        requireNotNull(buildSwiss(swissSection(rounds))).assertRoundsOnly(rounds)
     }
 
     @Test
-    fun `thirty-three matches whose teams meet with different records are not swiss`() {
+    fun `teams that meet with different records leave the rounds without records`() {
         // Flipping one first-round result leaves both teams of their second-round matches with different records.
-        val first = played.matches[0]
+        val first = playedRounds[0][0]
         val flipped = first.copy(match = first.match.copy(teams = first.match.teams.map { it.copy(outcome = if (it.outcome == MatchOutcome.WIN) MatchOutcome.LOSS else MatchOutcome.WIN) }))
-        assertNull(buildSwiss(played.copy(matches = listOf(flipped) + played.matches.drop(1))))
+        val rounds = listOf(listOf(flipped) + playedRounds[0].drop(1)) + playedRounds.drop(1)
+
+        requireNotNull(buildSwiss(swissSection(rounds))).assertRoundsOnly(rounds)
     }
 
     @Test
-    fun `thirty-three matches that are not a swiss stay a list`() {
-        // 16 teams, 33 decided matches paired with no regard for records.
+    fun `rounds paired with no regard for records show no records`() {
+        // 16 teams, five rounds of decided matches whose pairings ignore records.
         val teams = (0 until 16).map { "t$it" }
-        val matches = (0 until 33).map { i -> won("m$i", teams[i % 16], teams[(i * 5 + 3) % 16]) }
-        assertNull(buildSwiss(StandingsSection("Swiss", emptyList(), matches)))
+        val rounds = listOf(8, 8, 8, 6, 3).mapIndexed { r, size -> (0 until size).map { i -> won("m$r-$i", teams[(2 * i + r) % 16], teams[(2 * i + 5 * r + 1) % 16]) } }
+
+        requireNotNull(buildSwiss(swissSection(rounds))).assertRoundsOnly(rounds)
     }
 
     @Test
-    fun `a team that keeps playing after three wins is not swiss`() {
-        // The two teams that are 3-0 after three rounds meet in the last match instead of two 2-2 teams.
-        val wins = played.matches.take(24).mapNotNull { m -> m.match.teams.singleOrNull { it.outcome == MatchOutcome.WIN }?.id }
+    fun `a team that keeps playing after three wins leaves the rounds without records`() {
+        // The two teams that are 3-0 after three rounds meet in the last round instead of two 2-2 teams.
+        val wins = playedRounds.take(3).flatten().mapNotNull { m -> m.match.teams.singleOrNull { it.outcome == MatchOutcome.WIN }?.id }
             .groupingBy { it }.eachCount()
         val (a, b) = wins.filterValues { it == 3 }.keys.toList()
-        val section = played.copy(matches = played.matches.take(32) + won("extra", a, b))
-        assertNull(buildSwiss(section))
+        val rounds = playedRounds.take(4) + listOf(playedRounds[4].take(2) + won("extra", a, b))
+
+        requireNotNull(buildSwiss(swissSection(rounds))).assertRoundsOnly(rounds)
     }
 
     @Test
-    fun `team counts whose record groups cannot pair evenly are not swiss`() {
+    fun `team counts whose record groups cannot pair evenly show no records`() {
         // 8 teams: after three rounds the 2-1 group has three teams.
         val teams = (0 until 8).map { "t$it" }
-        val firstRound = (0 until 4).map { won("r$it", teams[2 * it], teams[2 * it + 1]) }
-        assertNull(buildSwiss(StandingsSection("Swiss", emptyList(), firstRound)))
+        val rounds = listOf((0 until 4).map { won("r$it", teams[2 * it], teams[2 * it + 1]) })
+
+        requireNotNull(buildSwiss(swissSection(rounds))).assertRoundsOnly(rounds)
     }
 
     @Test
-    fun `custom gauntlets are not swiss`() {
-        assertNull(buildSwiss(lckRegionalChampionship()))
-        assertNull(buildSwiss(lckPlayIns()))
+    fun `brackets whose matches feed each other are not swiss`() {
+        val lck = LolEsportsJson.decodeFromString<StandingsResponse>(Fixtures.read("getStandingsV3_lck.json")).toDomainStandings()
+        assertNull(buildSwiss(lck.stages.single { it.name == "Regional Championship" }.sections.single()))
+        assertNull(buildSwiss(lck.stages.single { it.name == "Play-Ins" }.sections.single()))
     }
 
     @Test
-    fun `ranked sections are not swiss`() {
-        val ranked = played.copy(rankings = listOf(Ranking(1, team("a"), 3, 0)))
-        assertNull(buildSwiss(ranked))
+    fun `sections without columns and ranked sections are not swiss`() {
+        assertNull(buildSwiss(played.copy(columns = emptyList())))
+        assertNull(buildSwiss(played.copy(rankings = listOf(Ranking(1, team("a"), 3, 0)))))
+        assertTrue(played.winnerLinks.isEmpty())
     }
 }
+
+/** A section laid out as [rounds], one column and cell per round, like the API sends a Swiss stage. */
+internal fun swissSection(rounds: List<List<SectionMatch>>) = StandingsSection(
+    "Swiss",
+    emptyList(),
+    rounds.flatten(),
+    columns = rounds.mapIndexed { i, matches -> BracketLayoutColumn(listOf(BracketCell("Round ${i + 1}", matches))) },
+)
 
 internal fun team(id: String, outcome: MatchOutcome? = null, gameWins: Int? = null) =
     Team(id, id.uppercase(), null, outcome, gameWins, id = id)
@@ -164,27 +191,8 @@ internal fun won(id: String, winner: String, loser: String) = SectionMatch(
     Match(id, listOf(team(winner, MatchOutcome.WIN, 3), team(loser, MatchOutcome.LOSS, 1)), format = null),
 )
 
-internal fun upcoming(id: String, first: String, second: String) =
-    SectionMatch(MatchState.UNSTARTED, Match(id, listOf(team(first), team(second)), format = null))
-
 /** A match whose teams are not known yet, as the API sends it. */
 internal fun placeholder(id: String): SectionMatch {
     val tbd = Team("TBD", "TBD", null, null, null, id = "0")
     return SectionMatch(MatchState.UNSTARTED, Match(id, listOf(tbd, tbd), format = null))
 }
-
-/** Shape of LCK 2026 "Regional Championship": a custom gauntlet of 6 teams and 10 matches. */
-internal fun lckRegionalChampionship() = StandingsSection(
-    "Regional Championship", emptyList(),
-    listOf(
-        won("g1", "c", "f"), won("g2", "d", "e"), won("g3", "a", "d"), won("g4", "b", "c"),
-        won("g5", "c", "e"), won("g6", "d", "f"), won("g7", "a", "b"), won("g8", "c", "d"),
-        won("g9", "b", "c"), won("g10", "a", "b"),
-    ),
-)
-
-/** Shape of LCK 2026 "Play-Ins": 4 teams, 3 matches, the third is not winner vs winner. */
-internal fun lckPlayIns() = StandingsSection(
-    "Play-Ins", emptyList(),
-    listOf(won("p1", "a", "b"), won("p2", "c", "d"), won("p3", "b", "c")),
-)

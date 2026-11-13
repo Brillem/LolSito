@@ -5,6 +5,8 @@ import com.example.lolsito.core.model.formatMatchResult
 import com.example.lolsito.core.network.LolEsportsJson
 import com.example.lolsito.core.network.dto.StandingsResponse
 import com.example.lolsito.core.network.dto.TournamentsResponse
+import com.example.lolsito.feature.standings.domain.StandingsSection
+import com.example.lolsito.feature.standings.domain.WinnerLink
 import com.example.lolsito.testutil.Fixtures
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -53,8 +55,8 @@ class StandingsMappersTest {
     }
 
     @Test
-    fun `lck standings map ranked group sections`() {
-        val mapped = standings(Fixtures.read("getStandings_lck.json"))
+    fun `lck standings map ranked group sections without a layout`() {
+        val mapped = standings(Fixtures.read("getStandingsV3_lck.json"))
 
         assertEquals(listOf("Groups", "Play-Ins", "Regional Championship"), mapped.stages.map { it.name })
         val groups = mapped.stages.first()
@@ -74,17 +76,20 @@ class StandingsMappersTest {
         assertEquals(4, dk.ordinal)
         assertEquals(6, dk.wins)
         assertEquals(2, dk.losses)
-        assertEquals(20, legend.matches.size)
+        assertTrue(legend.columns.isEmpty())
+        assertTrue(legend.matches.isEmpty())
     }
 
     @Test
-    fun `lck bracket stages keep their matches with results`() {
-        val playIns = standings(Fixtures.read("getStandings_lck.json")).stages[1]
+    fun `lck bracket stages map the official columns and cells with their results`() {
+        val mapped = standings(Fixtures.read("getStandingsV3_lck.json"))
+        val playIns = mapped.stages[1]
 
         assertTrue(playIns.isElimination)
-        val matches = playIns.sections.single().matches
-        assertEquals(3, matches.size)
-        val first = matches.first()
+        val section = playIns.sections.single()
+        assertEquals(listOf(listOf("Round 1"), listOf("Round 2")), section.cellNames())
+        assertEquals(3, section.matches.size)
+        val first = section.matches.first()
         assertEquals("117030752644841571", first.match.id)
         assertEquals(MatchState.COMPLETED, first.state)
         assertEquals(listOf("BRO", "KT"), first.match.teams.map { it.code })
@@ -92,22 +97,165 @@ class StandingsMappersTest {
         val result = formatMatchResult(first.state, first.match.teams, first.match.format)
         assertEquals("2 - 3", result.score)
         assertEquals(1, result.winnerIndex)
+
+        val regional = mapped.stages[2].sections.single()
+        assertEquals(
+            listOf(
+                listOf("Round 1"),
+                listOf("Upper Bracket - Round 2", "Lower Bracket - Round 1"),
+                listOf("Lower Bracket - Round 2"),
+                listOf("Loser's Bracket - Round 3"),
+                listOf("Upper Bracket - Finals"),
+                listOf("Lower Bracket - Finals"),
+                listOf("Finals"),
+            ),
+            regional.cellNames(),
+        )
+        assertEquals(10, regional.matches.size)
+        assertEquals(regional.columns.flatMap { c -> c.cells.flatMap { it.matches } }, regional.matches)
     }
 
     @Test
-    fun `worlds 2026 stages have no rankings and fall back to elimination`() {
-        val mapped = standings(Fixtures.read("getStandings_worlds2026.json"))
+    fun `lec playoffs map a six-team double elimination with its regular season table`() {
+        val mapped = standings(Fixtures.read("getStandingsV3_lec.json"))
+
+        assertEquals(listOf("Regular Season", "Playoffs"), mapped.stages.map { it.name })
+        assertEquals(10, mapped.stages.first().sections.single().rankings.size)
+        val playoffs = mapped.stages[1].sections.single()
+        assertEquals(
+            listOf(
+                listOf("Upper Bracket - Round 1"),
+                listOf("Upper Bracket - Round 2", "Lower Bracket - Round 1"),
+                listOf("Lower Bracket - Round 2"),
+                listOf("Lower Bracket - Round 3"),
+                listOf("Finals"),
+            ),
+            playoffs.cellNames(),
+        )
+        assertEquals(listOf(listOf(2), listOf(1, 2), listOf(1), listOf(1), listOf(1)), playoffs.cellSizes())
+    }
+
+    @Test
+    fun `msi maps both double-elimination sections with their official titles`() {
+        val mapped = standings(Fixtures.read("getStandingsV3_msi2026.json"))
+
+        assertEquals(listOf("Play-Ins", "Knockouts"), mapped.stages.map { it.name })
+        val playIns = mapped.stages[0].sections.single()
+        assertEquals("Play In Knockouts", playIns.name)
+        assertEquals(
+            listOf(listOf("Round 1"), listOf("Upper Bracket - Finals", "Lower Bracket - Semifinals"), listOf("Lower Bracket - Finals"), listOf("Finals")),
+            playIns.cellNames(),
+        )
+        val knockouts = mapped.stages[1].sections.single()
+        assertEquals(
+            listOf(
+                listOf("Upper Bracket - Round 1"),
+                listOf("Upper Bracket - Round 2", "Lower Bracket - Round 1"),
+                listOf("Upper Bracket - Round 3", "Lower Bracket - Round 2"),
+                listOf("Lower Bracket - Round 3"),
+                listOf("Lower Bracket - Round 4"),
+                listOf("Finals"),
+            ),
+            knockouts.cellNames(),
+        )
+        assertEquals(listOf(listOf(4), listOf(2, 2), listOf(1, 2), listOf(1), listOf(1), listOf(1)), knockouts.cellSizes())
+        assertEquals(14, knockouts.matches.size)
+    }
+
+    @Test
+    fun `worlds 2026 maps play-ins, swiss rounds and knockouts with no rankings`() {
+        val mapped = standings(Fixtures.read("getStandingsV3_worlds2026.json"))
 
         assertEquals(listOf("Play-Ins", "Swiss", "Knockouts"), mapped.stages.map { it.name })
         assertTrue(mapped.stages.all { it.isElimination })
         assertTrue(mapped.stages.all { stage -> stage.sections.all { it.rankings.isEmpty() } })
         assertEquals(listOf(6, 33, 7), mapped.stages.map { stage -> stage.sections.sumOf { it.matches.size } })
 
+        val swiss = mapped.stages[1].sections.single()
+        assertEquals((1..5).map { listOf("Round $it") }, swiss.cellNames())
+        assertEquals(listOf(listOf(8), listOf(8), listOf(8), listOf(6), listOf(3)), swiss.cellSizes())
+        assertTrue(swiss.winnerLinks.isEmpty())
+        val knockouts = mapped.stages[2].sections.single()
+        assertEquals(listOf(listOf("Quarterfinals"), listOf("Semifinals"), listOf("Finals")), knockouts.cellNames())
+
         val opener = mapped.stages.first().sections.single().matches.first()
         assertEquals("3 - 0", formatMatchResult(opener.state, opener.match.teams, opener.match.format).score)
-        val swiss = mapped.stages[1].sections.single().matches.first()
-        assertEquals(MatchState.UNSTARTED, swiss.state)
-        assertEquals(listOf("TBD", "TBD"), swiss.match.teams.map { it.code })
+    }
+
+    @Test
+    fun `winner links follow slot 1 of a match origin and drops to the lower bracket are not links`() {
+        val playIns = standings(Fixtures.read("getStandingsV3_msi2026.json")).stages[0].sections.single()
+
+        assertEquals(
+            listOf(
+                // Round 1 winners meet in the upper final; the losers' lower semifinal is no link.
+                WinnerLink("115570934355614497", "115570934355614509"),
+                WinnerLink("115570934355614503", "115570934355614509"),
+                // The lower semifinal winner plays the lower final, against the upper final loser (no link).
+                WinnerLink("115846993721104369", "115570934355614521"),
+                WinnerLink("115570934355614509", "115570969745329263"),
+                WinnerLink("115570934355614521", "115570969745329263"),
+            ),
+            playIns.winnerLinks,
+        )
+    }
+
+    @Test
+    fun `winner links of a custom gauntlet skip slots that come from a decision point`() {
+        val regional = standings(Fixtures.read("getStandingsV3_lck.json")).stages[2].sections.single()
+
+        assertEquals(
+            listOf(
+                WinnerLink("117030752644841613", "117030752644841625"),
+                WinnerLink("117030752644841625", "117030752644841631"),
+                WinnerLink("117030752644841607", "117030752644841619"),
+                WinnerLink("117030752644841601", "117030752644841619"),
+                WinnerLink("117030752644841631", "117030752644841637"),
+                WinnerLink("117030752644841619", "117030752644841643"),
+                WinnerLink("117030752644841637", "117030752644841643"),
+            ),
+            regional.winnerLinks,
+        )
+    }
+
+    @Test
+    fun `matches whose teams are not known yet keep their cell and their links`() {
+        val section = standings(
+            """{"data":{"standings":[{"stages":[{"name":"Knockouts","sections":[{"name":"Knockouts","type":"bracket","columns":[
+                {"cells":[{"name":"Semifinals","matches":[
+                    {"id":"s1","structuralId":"match_s1","state":"unstarted","teams":[
+                        {"id":"0","code":"TBD","name":"TBD","origin":{"structuralId":"dp","type":"decisionPoint","slot":1}},
+                        {"id":"0","code":"TBD","name":"TBD","origin":{"structuralId":"dp","type":"decisionPoint","slot":2}}]},
+                    {"id":"s2","structuralId":"match_s2","state":"unstarted","teams":[]}
+                ]}]},
+                {"cells":[{"name":"Finals","matches":[
+                    {"id":"f","structuralId":"match_f","state":"unstarted","teams":[
+                        {"id":"0","code":"TBD","name":"TBD","origin":{"structuralId":"match_s1","type":"match","slot":1}},
+                        {"id":"0","code":"TBD","name":"TBD","origin":{"structuralId":"match_s2","type":"match","slot":1}}]}
+                ]}]}
+            ]}]}]}]}}"""
+        ).stages.single().sections.single()
+
+        assertEquals(listOf(listOf("Semifinals"), listOf("Finals")), section.cellNames())
+        assertEquals(listOf("s1", "s2", "f"), section.matches.map { it.match.id })
+        assertTrue(section.matches.all { it.state == MatchState.UNSTARTED })
+        assertEquals(listOf("TBD", "TBD"), section.matches.first().match.teams.map { it.code })
+        assertEquals(listOf(WinnerLink("s1", "f"), WinnerLink("s2", "f")), section.winnerLinks)
+    }
+
+    @Test
+    fun `a bracket section without columns keeps a flat match list and no layout`() {
+        val sections = standings(
+            """{"data":{"standings":[{"stages":[{"name":"Playoffs","sections":[
+                {"name":"Empty","type":"bracket","columns":[]},
+                {"name":"Flat","type":"bracket","matches":[{"id":"m1","state":"completed"}]}
+            ]}]}]}}"""
+        ).stages.single().sections
+
+        assertTrue(sections[0].matches.isEmpty())
+        assertTrue(sections[0].columns.isEmpty())
+        assertEquals(listOf("m1"), sections[1].matches.map { it.match.id })
+        assertTrue(sections[1].columns.isEmpty())
     }
 
     @Test
@@ -156,6 +304,21 @@ class StandingsMappersTest {
     }
 
     @Test
+    fun `layout matches without id are dropped along with the links that point to them`() {
+        val section = standings(
+            """{"data":{"standings":[{"stages":[{"name":"S","sections":[{"name":"S","type":"bracket","columns":[
+                {"cells":[{"name":"Round 1","matches":[{"structuralId":"match_a","state":"completed"},{"id":"b","structuralId":"match_b"}]}]},
+                {"cells":[{"name":"Final","matches":[{"id":"f","structuralId":"match_f","teams":[
+                    {"code":"TBD","origin":{"structuralId":"match_a","type":"match","slot":1}},
+                    {"code":"TBD","origin":{"structuralId":"match_b","type":"match","slot":1}}]}]}]}
+            ]}]}]}]}}"""
+        ).stages.single().sections.single()
+
+        assertEquals(listOf("b", "f"), section.matches.map { it.match.id })
+        assertEquals(listOf(WinnerLink("b", "f")), section.winnerLinks)
+    }
+
+    @Test
     fun `stages from every standings entry are flattened and matches without id are dropped`() {
         val mapped = standings(
             """{"data":{"standings":[
@@ -168,4 +331,8 @@ class StandingsMappersTest {
         assertEquals("m1", match.match.id)
         assertEquals(MatchState.UNKNOWN, match.state)
     }
+
+    private fun StandingsSection.cellNames() = columns.map { column -> column.cells.map { it.name } }
+
+    private fun StandingsSection.cellSizes() = columns.map { column -> column.cells.map { it.matches.size } }
 }

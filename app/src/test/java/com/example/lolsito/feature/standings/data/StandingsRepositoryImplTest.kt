@@ -48,12 +48,12 @@ class StandingsRepositoryImplTest {
 
     @Test
     fun `getStandings queries by tournament id and maps stages`() = runTest {
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("getStandings_lck.json")).build())
+        server.enqueue(MockResponse.Builder().body(Fixtures.read("getStandingsV3_lck.json")).build())
 
         val standings = repository.getStandings("115548147896555737")
 
         val request = server.takeRequest()
-        assertEquals("/persisted/gw/getStandings", request.url.encodedPath)
+        assertEquals("/persisted/gw/getStandingsV3", request.url.encodedPath)
         assertEquals(ApiConfig.API_KEY, request.headers["x-api-key"])
         assertEquals("en-US", request.url.queryParameter("hl"))
         assertEquals("115548147896555737", request.url.queryParameter("tournamentId"))

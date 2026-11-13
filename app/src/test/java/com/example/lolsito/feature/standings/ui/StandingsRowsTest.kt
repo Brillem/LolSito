@@ -29,7 +29,7 @@ class StandingsRowsTest {
 
     @Test
     fun `lck rows have unique keys and a table per ranked section`() {
-        val rows = buildStandingsRows(fixture("getStandings_lck.json"))
+        val rows = buildStandingsRows(fixture("getStandingsV3_lck.json"))
 
         rows.assertUniqueKeys()
         assertEquals(2, rows.count { it is StandingsRow.TableHeader })
@@ -43,19 +43,17 @@ class StandingsRowsTest {
     }
 
     @Test
-    fun `worlds 2026 rows fall back to elimination notices with match lists`() {
-        val rows = buildStandingsRows(fixture("getStandings_worlds2026.json"))
+    fun `worlds 2026 rows show elimination notices with brackets and swiss rounds instead of lists`() {
+        val rows = buildStandingsRows(fixture("getStandingsV3_worlds2026.json"))
 
         rows.assertUniqueKeys()
         assertTrue(rows.none { it is StandingsRow.TableHeader || it is StandingsRow.RankingRow })
         assertEquals(3, rows.count { it is StandingsRow.EliminationNotice })
-        assertTrue(rows.none { it is StandingsRow.EmptySection })
-        val matches = rows.filterIsInstance<StandingsRow.MatchRow>()
-        // The unpaired Swiss (33) stays a list; Play-Ins is a double elimination and the 7 Knockouts matches a bracket.
-        assertEquals(33, matches.size)
-        assertEquals(1, rows.count { it is StandingsRow.BracketRow })
-        val playIns = rows.filterIsInstance<StandingsRow.DoubleEliminationRow>().single()
-        assertEquals("3 - 0", playIns.upper.first().matches.first().result.score)
+        assertTrue(rows.none { it is StandingsRow.EmptySection || it is StandingsRow.MatchRow })
+        assertEquals(2, rows.count { it is StandingsRow.BracketRow })
+        assertEquals(1, rows.count { it is StandingsRow.SwissRow })
+        val playIns = rows.filterIsInstance<StandingsRow.BracketRow>().first()
+        assertEquals("3 - 0", playIns.columns.first().cells.first().matches.first().result.score)
     }
 
     @Test

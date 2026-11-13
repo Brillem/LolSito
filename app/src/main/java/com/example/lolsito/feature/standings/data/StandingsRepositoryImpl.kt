@@ -10,5 +10,5 @@ class StandingsRepositoryImpl(private val api: LolEsportsApi) : StandingsReposit
         api.getTournamentsForLeague(leagueId).toDomainTournaments()
 
     override suspend fun getStandings(tournamentId: String): Standings =
-        api.getStandings(tournamentId).toDomainStandings()
+        api.getStandingsV3(tournamentId).toDomainStandings()
 }

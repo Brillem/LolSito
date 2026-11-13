@@ -84,17 +84,25 @@ class LolEsportsApiTest {
     }
 
     @Test
-    fun `getStandings sends api key, locale and tournament id`() = runTest {
-        server.enqueue(MockResponse.Builder().body(Fixtures.read("getStandings_worlds2026.json")).build())
+    fun `getStandingsV3 sends api key, locale and tournament id`() = runTest {
+        server.enqueue(MockResponse.Builder().body(Fixtures.read("getStandingsV3_worlds2026.json")).build())
 
-        val response = api.getStandings(tournamentId = "115660540725177488")
+        val response = api.getStandingsV3(tournamentId = "115660540725177488")
 
         val request = server.takeRequest()
         assertEquals(ApiConfig.API_KEY, request.headers["x-api-key"])
-        assertEquals("/persisted/gw/getStandings", request.url.encodedPath)
+        assertEquals("/persisted/gw/getStandingsV3", request.url.encodedPath)
         assertEquals("en-US", request.url.queryParameter("hl"))
         assertEquals("115660540725177488", request.url.queryParameter("tournamentId"))
-        assertEquals(3, response.data.standings.single().stages.size)
+        val stages = response.data.standings.single().stages
+        assertEquals(3, stages.size)
+        val knockouts = stages.last().sections.single()
+        assertEquals("bracket", knockouts.type)
+        assertEquals(listOf("Quarterfinals", "Semifinals", "Finals"), knockouts.columns.map { it.cells.single().name })
+        val origin = knockouts.columns[1].cells.single().matches.first().teams.first().origin
+        assertEquals("match", origin?.type)
+        assertEquals("match_d6ae207aa0", origin?.structuralId)
+        assertEquals(1, origin?.slot)
     }
 
     @Test

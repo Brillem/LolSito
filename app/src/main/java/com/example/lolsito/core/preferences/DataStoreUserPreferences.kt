@@ -54,6 +54,12 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
         dataStore.edit { it[FAVORITE_TEAMS] = encodeFavoriteTeams(teams) }
     }
 
+    override suspend fun getMatchRemindersEnabled(): Boolean? = dataStore.data.first()[MATCH_REMINDERS]
+
+    override suspend fun saveMatchRemindersEnabled(enabled: Boolean) {
+        dataStore.edit { it[MATCH_REMINDERS] = enabled }
+    }
+
     companion object {
         /** A corrupt file is replaced by empty preferences, so persistence recovers instead of failing forever. */
         internal val corruptionHandler = ReplaceFileCorruptionHandler<Preferences> { emptyPreferences() }
@@ -63,6 +69,7 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
         internal val STANDINGS_TOURNAMENT_ID = stringPreferencesKey("standings.tournamentId")
         internal val NO_SPOILERS = booleanPreferencesKey("noSpoilers")
         internal val FAVORITE_TEAMS = stringPreferencesKey("favoriteTeams")
+        internal val MATCH_REMINDERS = booleanPreferencesKey("matchReminders")
 
         fun create(context: Context): UserPreferences =
             DataStoreUserPreferences(context.applicationContext.userPreferencesDataStore)

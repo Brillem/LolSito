@@ -12,6 +12,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -128,10 +129,21 @@ internal fun canNavigateFrom(state: Lifecycle.State): Boolean = state == Lifecyc
 
 internal fun showsBottomBar(route: String): Boolean = TopLevelDestination.entries.any { it.route == route }
 
+/**
+ * [matchToOpen] is a match a reminder asked to open: once the navigation graph is ready, its Match
+ * detail is pushed on the current tab and [onMatchOpened] is called.
+ */
 @Composable
-fun LolSitoApp(container: AppContainer) {
+fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpened: () -> Unit = {}) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
+    val graphReady = backStackEntry != null
+    LaunchedEffect(matchToOpen, graphReady) {
+        val matchId = matchToOpen ?: return@LaunchedEffect
+        if (!graphReady) return@LaunchedEffect
+        navController.openMatchFromReminder(matchId)
+        onMatchOpened()
+    }
     val currentDestination = backStackEntry?.destination
     val barRoute = bottomBarRoute(currentDestination?.route)
     val showBottomBar = showsBottomBar(barRoute)
@@ -211,6 +223,8 @@ fun LolSitoApp(container: AppContainer) {
                                 leaguesRepository = container.leaguesRepository,
                                 preferences = container.userPreferences,
                                 clock = container.clock(),
+                                reminderScheduler = container.reminderScheduler,
+                                reminderSync = container.reminderSyncTrigger,
                             )
                         }
                     }
@@ -242,6 +256,7 @@ fun LolSitoApp(container: AppContainer) {
                                 preferences = container.userPreferences,
                                 lineupRepository = container.teamLineupRepository,
                                 zoneId = container.zoneId(),
+                                reminderSync = container.reminderSyncTrigger,
                             )
                         }
                     }
@@ -306,6 +321,16 @@ fun LolSitoApp(container: AppContainer) {
 private fun NavHostController.navigateFrom(from: NavBackStackEntry, route: String) {
     if (!canNavigateFrom(from.lifecycle.currentState)) return
     navigate(route) { launchSingleTop = true }
+}
+
+/**
+ * Pushes Match detail of [matchId] for a tapped reminder, unless that same match is already on top.
+ * Not single top: that would reuse an open Match detail of another match, which keeps showing its own.
+ */
+private fun NavHostController.openMatchFromReminder(matchId: String) {
+    val current = currentBackStackEntry
+    if (current?.destination?.route == Routes.MATCH && current.arguments?.getString(Routes.MATCH_ID_ARG) == matchId) return
+    navigate(Routes.match(matchId))
 }
 
 /** Switches tabs keeping one back stack per tab: state is saved on leave and restored on return. */

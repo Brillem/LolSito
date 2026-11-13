@@ -12,6 +12,8 @@ import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.feature.teams.domain.TeamSummary
+import com.example.lolsito.testutil.FakeReminderScheduler
+import com.example.lolsito.testutil.FakeReminderSyncTrigger
 import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -22,6 +24,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -56,7 +60,11 @@ class TeamsViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun viewModel() = TeamsViewModel(repository, leaguesRepository, preferences, clock, defaultLeagueId = LCK)
+    private val reminderScheduler = FakeReminderScheduler()
+    private val reminderSync = FakeReminderSyncTrigger()
+
+    private fun viewModel() =
+        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, defaultLeagueId = LCK)
 
     @Test
     fun `loads the leagues and the default league's current teams`() = runTest(dispatcher) {
@@ -229,6 +237,140 @@ class TeamsViewModelTest {
 
         assertEquals(LoadStatus.Content, vm.uiState.value.leaguesStatus)
         assertEquals(listOf(LCK, LEC), vm.uiState.value.leagues.map { it.id })
+    }
+
+    @Test
+    fun `the bell starts off when the user never chose`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.remindersEnabled)
+        assertNull(vm.uiState.value.remindersNotice)
+        assertEquals(0, reminderSync.requests)
+    }
+
+    @Test
+    fun `the bell shows the stored choice`() = runTest(dispatcher) {
+        preferences.matchRemindersEnabled = true
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.remindersEnabled)
+    }
+
+    @Test
+    fun `an unreadable bell counts as off`() = runTest(dispatcher) {
+        preferences.matchRemindersEnabled = true
+        preferences.readFails = true
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.remindersEnabled)
+    }
+
+    @Test
+    fun `turning the bell on remembers it and asks for a sync`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.enableReminders()
+        assertTrue("flips at once", vm.uiState.value.remindersEnabled)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.remindersEnabled)
+        assertEquals(listOf(true), preferences.savedMatchRemindersEnabled)
+        assertEquals(1, reminderSync.requests)
+    }
+
+    @Test
+    fun `a granted permission turns the bell on`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onNotificationPermissionResult(granted = true)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.remindersEnabled)
+        assertEquals(listOf(true), preferences.savedMatchRemindersEnabled)
+        assertEquals(1, reminderSync.requests)
+    }
+
+    @Test
+    fun `a denied permission leaves the bell off and says why`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onNotificationPermissionResult(granted = false)
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.remindersEnabled)
+        assertEquals(
+            "Reminders need permission to send notifications. Allow notifications for LolSito in the system settings.",
+            vm.uiState.value.remindersNotice,
+        )
+        assertTrue(preferences.savedMatchRemindersEnabled.isEmpty())
+        assertEquals(0, reminderSync.requests)
+    }
+
+    @Test
+    fun `turning the bell on after a denial clears the notice`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.onNotificationPermissionResult(granted = false)
+
+        vm.enableReminders()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.remindersEnabled)
+        assertNull(vm.uiState.value.remindersNotice)
+    }
+
+    @Test
+    fun `turning the bell off cancels every reminder at once and remembers it`() = runTest(dispatcher) {
+        preferences.matchRemindersEnabled = true
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.disableReminders()
+        assertFalse("flips at once", vm.uiState.value.remindersEnabled)
+        assertEquals("cancelled without waiting for a sync", 1, reminderScheduler.cancelAllCalls)
+        advanceUntilIdle()
+
+        assertEquals(listOf(false), preferences.savedMatchRemindersEnabled)
+        assertEquals(0, reminderSync.requests)
+    }
+
+    @Test
+    fun `a failed save is ignored and the bell still flips`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        preferences.writeFails = true
+
+        vm.enableReminders()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.remindersEnabled)
+
+        vm.disableReminders()
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.remindersEnabled)
+        assertEquals(1, reminderScheduler.cancelAllCalls)
+    }
+
+    @Test
+    fun `the bell does not touch the favorites or the teams`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(t1)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.enableReminders()
+        vm.disableReminders()
+        advanceUntilIdle()
+
+        assertEquals(listOf(t1), vm.uiState.value.favorites)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertTrue(preferences.savedFavoriteTeams.isEmpty())
     }
 
     private fun team(name: String, code: String, id: String) = Team(name, code, null, null, null, id = id)

@@ -138,6 +138,32 @@ class DataStoreUserPreferencesTest {
     }
 
     @Test
+    fun `match reminders are never chosen at first, so they read as null (off)`() = runTest(UnconfinedTestDispatcher()) {
+        assertNull(preferences().getMatchRemindersEnabled())
+    }
+
+    @Test
+    fun `match reminders round trip in both directions`() = runTest(UnconfinedTestDispatcher()) {
+        val preferences = preferences()
+        preferences.saveMatchRemindersEnabled(true)
+        assertEquals(true, preferences.getMatchRemindersEnabled())
+
+        preferences.saveMatchRemindersEnabled(false)
+        assertEquals(false, preferences.getMatchRemindersEnabled())
+    }
+
+    @Test
+    fun `saving match reminders leaves the favorites and the other preferences alone`() = runTest(UnconfinedTestDispatcher()) {
+        val preferences = preferences()
+        preferences.saveFavoriteTeams(listOf(t1))
+        preferences.saveNoSpoilers(true)
+        preferences.saveMatchRemindersEnabled(true)
+
+        assertEquals(listOf(t1), preferences.getFavoriteTeams())
+        assertEquals(true, preferences.getNoSpoilers())
+    }
+
+    @Test
     fun `a team stored twice reads once`() {
         val raw = encodeFavoriteTeams(listOf(t1, t1.copy(name = "Renamed"), odd))
         assertEquals(listOf(t1, odd), decodeFavoriteTeams(raw))

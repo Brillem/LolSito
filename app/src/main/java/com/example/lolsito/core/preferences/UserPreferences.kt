@@ -29,4 +29,9 @@ interface UserPreferences {
 
     /** Replaces the whole list; callers read, change and save it. */
     suspend fun saveFavoriteTeams(teams: List<FavoriteTeam>)
+
+    /** Whether the Teams bell (start-of-match reminders) is on; null when the user never chose, which means off. */
+    suspend fun getMatchRemindersEnabled(): Boolean?
+
+    suspend fun saveMatchRemindersEnabled(enabled: Boolean)
 }

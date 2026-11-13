@@ -115,4 +115,28 @@ class MatchDetailDisplayTest {
         assertEquals("vs", content(hidden = false, state = MatchState.UNSTARTED).headerLabel)
         assertEquals("vs", content(hidden = true, state = MatchState.UNSTARTED).headerLabel)
     }
+
+    @Test
+    fun `a series that has not started lists no games`() {
+        assertEquals(false, MatchDetailUiState.Content(detail(MatchState.UNSTARTED)).showsGames)
+        assertEquals(false, MatchDetailUiState.Content(detail(MatchState.UNSTARTED), resultsHidden = true).showsGames)
+    }
+
+    @Test
+    fun `a series in progress or finished lists its games`() {
+        assertEquals(true, MatchDetailUiState.Content(detail(MatchState.IN_PROGRESS)).showsGames)
+        assertEquals(true, MatchDetailUiState.Content(detail(MatchState.COMPLETED)).showsGames)
+        assertEquals(true, MatchDetailUiState.Content(detail(MatchState.COMPLETED), resultsHidden = true).showsGames)
+    }
+
+    @Test
+    fun `a finished series shows no head to head`() {
+        assertEquals(false, MatchDetailUiState.Content(detail(MatchState.COMPLETED)).showsHeadToHead)
+    }
+
+    @Test
+    fun `a series not played yet or in progress shows the head to head`() {
+        assertEquals(true, MatchDetailUiState.Content(detail(MatchState.UNSTARTED)).showsHeadToHead)
+        assertEquals(true, MatchDetailUiState.Content(detail(MatchState.IN_PROGRESS)).showsHeadToHead)
+    }
 }

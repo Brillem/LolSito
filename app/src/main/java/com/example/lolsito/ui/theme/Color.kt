@@ -27,3 +27,6 @@ val OnRedContainer = Color(0xFFFFE1E5)
 /** Lighter red for accent text and icons on dark surfaces (links, text buttons, active tab). */
 val RedText = Color(0xFFFF4D67)
 val ErrorRed = Color(0xFFFF6B7A)
+
+/** A won series in a team's recent form; losses use the error color. */
+val WinGreen = Color(0xFF3DDC84)

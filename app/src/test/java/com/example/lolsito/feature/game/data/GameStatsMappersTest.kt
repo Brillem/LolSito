@@ -2,6 +2,8 @@ package com.example.lolsito.feature.game.data
 
 import com.example.lolsito.core.network.LolEsportsJson
 import com.example.lolsito.core.network.dto.LiveStatsWindowResponse
+import com.example.lolsito.feature.game.domain.DragonType
+import com.example.lolsito.feature.game.domain.PlayerHealth
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
 import com.example.lolsito.testutil.Fixtures
@@ -20,11 +22,11 @@ class GameStatsMappersTest {
     @Test
     fun `maps team totals of the last frame`() {
         assertEquals(
-            TeamStats(totalGold = 31850, kills = 2, towers = 0, dragons = 1, barons = 0, players = stats.blueTeam.players),
+            TeamStats(totalGold = 31850, kills = 2, towers = 0, dragons = 1, barons = 0, players = stats.blueTeam.players, dragonTypes = listOf(DragonType.CLOUD)),
             stats.blueTeam,
         )
         assertEquals(
-            TeamStats(totalGold = 33191, kills = 3, towers = 2, dragons = 1, barons = 0, players = stats.redTeam.players),
+            TeamStats(totalGold = 33191, kills = 3, towers = 2, dragons = 1, barons = 0, players = stats.redTeam.players, dragonTypes = listOf(DragonType.HEXTECH)),
             stats.redTeam,
         )
         assertFalse(stats.isFinished)
@@ -33,7 +35,7 @@ class GameStatsMappersTest {
     @Test
     fun `joins each team's players with their metadata by participant id`() {
         assertEquals(
-            PlayerStats(1, "MVK Kratos", "Olaf", kills = 0, deaths = 2, assists = 0, creepScore = 142, level = 12, role = "top"),
+            PlayerStats(1, "MVK Kratos", "Olaf", kills = 0, deaths = 2, assists = 0, creepScore = 142, level = 12, role = "top", health = PlayerHealth(2651, 2651)),
             stats.blueTeam.players.first(),
         )
         assertEquals(
@@ -45,7 +47,7 @@ class GameStatsMappersTest {
             stats.redTeam.players.map { it.championId },
         )
         assertEquals(
-            PlayerStats(9, "FUR Ayu", "Yunara", kills = 1, deaths = 2, assists = 0, creepScore = 155, level = 10, role = "bottom"),
+            PlayerStats(9, "FUR Ayu", "Yunara", kills = 1, deaths = 2, assists = 0, creepScore = 155, level = 10, role = "bottom", health = PlayerHealth(1506, 1506)),
             stats.redTeam.players[3],
         )
     }
@@ -131,5 +133,82 @@ class GameStatsMappersTest {
 
         assertEquals("Player 1", player.summonerName)
         assertEquals("Unknown", player.championId)
+    }
+
+    @Test
+    fun `maps each team's dragon types in the order taken`() {
+        assertEquals(listOf(DragonType.CLOUD), stats.blueTeam.dragonTypes)
+        assertEquals(listOf(DragonType.HEXTECH), stats.redTeam.dragonTypes)
+
+        val json = """
+            {"frames":[{"blueTeam":{"dragons":["mountain","infernal","ocean","chemtech","cloud","hextech","elder"]}}]}
+        """
+        assertEquals(
+            listOf(
+                DragonType.MOUNTAIN, DragonType.INFERNAL, DragonType.OCEAN, DragonType.CHEMTECH,
+                DragonType.CLOUD, DragonType.HEXTECH, DragonType.ELDER,
+            ),
+            decode(json).toGameStats()!!.blueTeam.dragonTypes,
+        )
+    }
+
+    @Test
+    fun `an unknown dragon type is kept in its place as a generic dragon`() {
+        val team = decode("""{"frames":[{"blueTeam":{"dragons":["ocean","voidborn","infernal"]}}]}""").toGameStats()!!.blueTeam
+
+        assertEquals(listOf(DragonType.OCEAN, DragonType.UNKNOWN, DragonType.INFERNAL), team.dragonTypes)
+    }
+
+    @Test
+    fun `the dragon count is still the number of dragons taken, whatever their type`() {
+        assertEquals(1, stats.blueTeam.dragons)
+        assertEquals(1, stats.redTeam.dragons)
+
+        val json = """{"frames":[{"blueTeam":{"dragons":["ocean","voidborn","infernal"]},"redTeam":{}}]}"""
+        val counted = decode(json).toGameStats()!!
+        assertEquals(3, counted.blueTeam.dragons)
+        assertEquals(0, counted.redTeam.dragons)
+        assertEquals(emptyList<DragonType>(), counted.redTeam.dragonTypes)
+    }
+
+    @Test
+    fun `maps each player's current and maximum health`() {
+        assertEquals(
+            listOf(PlayerHealth(2651, 2651), PlayerHealth(2174, 2174), PlayerHealth(2149, 2149), PlayerHealth(1456, 1456), PlayerHealth(1788, 1825)),
+            stats.blueTeam.players.map { it.health },
+        )
+        assertEquals(PlayerHealth(2415, 2534), stats.redTeam.players[2].health)
+    }
+
+    @Test
+    fun `a zero or missing maximum health does not divide by zero`() {
+        val json = """
+            {"frames":[{"gameState":"in_game","blueTeam":{"participants":[
+               {"participantId":1,"currentHealth":120,"maxHealth":0},
+               {"participantId":2,"currentHealth":120},
+               {"participantId":3,"maxHealth":800}]}}]}
+        """
+        val players = decode(json).toGameStats()!!.blueTeam.players
+
+        assertEquals(PlayerHealth(120, 0), players[0].health)
+        assertEquals(0f, players[0].health!!.fraction, 0f)
+        assertNull(players[1].health)
+        assertEquals(PlayerHealth(0, 800), players[2].health)
+        assertEquals(0f, players[2].health!!.fraction, 0f)
+    }
+
+    @Test
+    fun `a finished game exposes no health but keeps its dragons`() {
+        val json = """
+            {"frames":[{"gameState":"finished","blueTeam":{"dragons":["ocean","elder"],"participants":[
+               {"participantId":1,"currentHealth":500,"maxHealth":1000}]}}]}
+        """
+        val finished = decode(json).toGameStats()!!
+
+        assertTrue(finished.isFinished)
+        assertNull(finished.blueTeam.players.single().health)
+        assertFalse(finished.showsHealth())
+        assertEquals(listOf(DragonType.OCEAN, DragonType.ELDER), finished.blueTeam.dragonTypes)
+        assertTrue(stats.showsHealth())
     }
 }

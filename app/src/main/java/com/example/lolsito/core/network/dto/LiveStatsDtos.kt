@@ -49,6 +49,7 @@ data class LiveStatsTeamFrameDto(
     val totalKills: Int? = null,
     val towers: Int? = null,
     val barons: Int? = null,
+    /** One entry per dragon taken, in the order taken: its type, such as "cloud" or "hextech". */
     val dragons: List<String>? = null,
     val participants: List<LiveStatsParticipantFrameDto>? = null,
 )
@@ -61,6 +62,8 @@ data class LiveStatsParticipantFrameDto(
     val deaths: Int? = null,
     val assists: Int? = null,
     val creepScore: Int? = null,
+    val currentHealth: Int? = null,
+    val maxHealth: Int? = null,
 )
 
 @Serializable

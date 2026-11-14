@@ -30,3 +30,15 @@ val ErrorRed = Color(0xFFFF6B7A)
 
 /** A won series in a team's recent form; losses use the error color. */
 val WinGreen = Color(0xFF3DDC84)
+
+/** The filled part of a player's health bar in a live game. */
+val HealthGreen = Color(0xFF3DDC84)
+
+/** Label colors of the dragons a team took, one per type; an unknown type uses the secondary text color. */
+val DragonInfernal = Color(0xFFFF7043)
+val DragonOcean = Color(0xFF4FC3F7)
+val DragonCloud = Color(0xFFCFD8DC)
+val DragonMountain = Color(0xFFBC9A82)
+val DragonHextech = Color(0xFF9FA8FF)
+val DragonChemtech = Color(0xFF9CCC65)
+val DragonElder = Color(0xFFFFD54F)

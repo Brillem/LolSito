@@ -9,10 +9,12 @@ import com.example.lolsito.core.network.dto.LiveStatsParticipantMetadataDto
 import com.example.lolsito.core.network.dto.LiveStatsTeamFrameDto
 import com.example.lolsito.core.network.dto.LiveStatsTeamMetadataDto
 import com.example.lolsito.core.network.dto.LiveStatsWindowResponse
+import com.example.lolsito.feature.game.domain.DragonType
 import com.example.lolsito.feature.game.domain.GameDetails
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.GoldSample
 import com.example.lolsito.feature.game.domain.PlayerDetails
+import com.example.lolsito.feature.game.domain.PlayerHealth
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
 import java.time.Instant
@@ -20,14 +22,15 @@ import java.time.Instant
 /**
  * Stats of the last frame, each team's players joined with that team's metadata by participant id.
  * Returns null when there are no frames. Participants without an id cannot be identified and are
- * skipped; missing numbers are 0.
+ * skipped; missing numbers are 0. Players of a finished game have no health.
  */
 fun LiveStatsWindowResponse.toGameStats(): GameStats? {
     val frame = frames.orEmpty().lastOrNull() ?: return null
+    val isFinished = frame.gameState == "finished"
     return GameStats(
-        isFinished = frame.gameState == "finished",
-        blueTeam = frame.blueTeam.toTeamStats(gameMetadata?.blueTeamMetadata),
-        redTeam = frame.redTeam.toTeamStats(gameMetadata?.redTeamMetadata),
+        isFinished = isFinished,
+        blueTeam = frame.blueTeam.toTeamStats(gameMetadata?.blueTeamMetadata, withHealth = !isFinished),
+        redTeam = frame.redTeam.toTeamStats(gameMetadata?.redTeamMetadata, withHealth = !isFinished),
         dataDragonVersion = dataDragonVersion(gameMetadata?.patchVersion),
         blueTeamId = gameMetadata?.blueTeamMetadata?.esportsTeamId?.takeIf { it.isNotBlank() },
         redTeamId = gameMetadata?.redTeamMetadata?.esportsTeamId?.takeIf { it.isNotBlank() },
@@ -35,7 +38,8 @@ fun LiveStatsWindowResponse.toGameStats(): GameStats? {
     )
 }
 
-private fun LiveStatsTeamFrameDto?.toTeamStats(metadata: LiveStatsTeamMetadataDto?): TeamStats {
+private fun LiveStatsTeamFrameDto?.toTeamStats(metadata: LiveStatsTeamMetadataDto?, withHealth: Boolean): TeamStats {
+    val dragonTypes = this?.dragons.orEmpty().map { it.toDragonType() }
     val metadataById = metadata?.participantMetadata.orEmpty()
         .filter { it.participantId != null }
         .associateBy { it.participantId }
@@ -43,18 +47,39 @@ private fun LiveStatsTeamFrameDto?.toTeamStats(metadata: LiveStatsTeamMetadataDt
         totalGold = this?.totalGold ?: 0,
         kills = this?.totalKills ?: 0,
         towers = this?.towers ?: 0,
-        dragons = this?.dragons.orEmpty().size,
+        dragons = dragonTypes.size,
         barons = this?.barons ?: 0,
         players = this?.participants.orEmpty()
             .mapNotNull { participant ->
                 val id = participant.participantId ?: return@mapNotNull null
-                participant.toPlayerStats(id, metadataById[id])
+                participant.toPlayerStats(id, metadataById[id], withHealth)
             }
             .sortedBy { it.participantId },
+        dragonTypes = dragonTypes,
     )
 }
 
-private fun LiveStatsParticipantFrameDto.toPlayerStats(id: Int, metadata: LiveStatsParticipantMetadataDto?) =
+/** The dragon type the feed names (for example "cloud"); a name the app does not know is [DragonType.UNKNOWN]. */
+private fun String.toDragonType(): DragonType = when (trim().lowercase()) {
+    "infernal" -> DragonType.INFERNAL
+    "ocean" -> DragonType.OCEAN
+    "cloud" -> DragonType.CLOUD
+    "mountain" -> DragonType.MOUNTAIN
+    "hextech" -> DragonType.HEXTECH
+    "chemtech" -> DragonType.CHEMTECH
+    "elder" -> DragonType.ELDER
+    else -> DragonType.UNKNOWN
+}
+
+/** Health needs a maximum to mean anything: without one there is none; a missing current health is 0. */
+private fun LiveStatsParticipantFrameDto.toPlayerHealth(): PlayerHealth? =
+    maxHealth?.let { PlayerHealth(current = currentHealth ?: 0, max = it) }
+
+private fun LiveStatsParticipantFrameDto.toPlayerStats(
+    id: Int,
+    metadata: LiveStatsParticipantMetadataDto?,
+    withHealth: Boolean,
+) =
     PlayerStats(
         participantId = id,
         summonerName = metadata?.summonerName?.takeIf { it.isNotBlank() } ?: "Player $id",
@@ -65,6 +90,7 @@ private fun LiveStatsParticipantFrameDto.toPlayerStats(id: Int, metadata: LiveSt
         creepScore = creepScore ?: 0,
         level = level ?: 0,
         role = metadata?.role?.takeIf { it.isNotBlank() },
+        health = if (withHealth) toPlayerHealth() else null,
     )
 
 /**

@@ -1,6 +1,7 @@
 package com.example.lolsito.testutil
 
 import com.example.lolsito.feature.reminders.domain.MatchReminder
+import com.example.lolsito.feature.reminders.domain.NotificationAvailability
 import com.example.lolsito.feature.reminders.domain.ReminderScheduler
 import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
 import com.example.lolsito.feature.reminders.domain.ScheduledReminder
@@ -38,4 +39,9 @@ class FakeReminderSyncTrigger : ReminderSyncTrigger {
     override fun requestSync() {
         requests++
     }
+}
+
+/** Answers [allowed], which a test flips to act as the system setting. */
+class FakeNotificationAvailability(var allowed: Boolean = true) : NotificationAvailability {
+    override fun canNotify(): Boolean = allowed
 }

@@ -12,6 +12,7 @@ import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.feature.teams.domain.TeamSummary
+import com.example.lolsito.testutil.FakeNotificationAvailability
 import com.example.lolsito.testutil.FakeReminderScheduler
 import com.example.lolsito.testutil.FakeReminderSyncTrigger
 import com.example.lolsito.testutil.FakeUserPreferences
@@ -62,9 +63,10 @@ class TeamsViewModelTest {
 
     private val reminderScheduler = FakeReminderScheduler()
     private val reminderSync = FakeReminderSyncTrigger()
+    private val notifications = FakeNotificationAvailability()
 
     private fun viewModel() =
-        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, defaultLeagueId = LCK)
+        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, notifications, defaultLeagueId = LCK)
 
     @Test
     fun `loads the leagues and the default league's current teams`() = runTest(dispatcher) {
@@ -257,6 +259,74 @@ class TeamsViewModelTest {
         advanceUntilIdle()
 
         assertTrue(vm.uiState.value.remindersEnabled)
+    }
+
+    @Test
+    fun `the bell on with system notifications off says so and stays on`() = runTest(dispatcher) {
+        preferences.matchRemindersEnabled = true
+        notifications.allowed = false
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.remindersEnabled)
+        assertEquals(TeamsViewModel.NOTIFICATIONS_OFF_NOTICE, vm.uiState.value.remindersNotice)
+        assertTrue("the bell is not turned off for the user", preferences.savedMatchRemindersEnabled.isEmpty())
+        assertEquals(0, reminderScheduler.cancelAllCalls)
+    }
+
+    @Test
+    fun `the bell on with system notifications on shows no notice`() = runTest(dispatcher) {
+        preferences.matchRemindersEnabled = true
+
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.refreshNotificationsNotice()
+
+        assertTrue(vm.uiState.value.remindersEnabled)
+        assertNull(vm.uiState.value.remindersNotice)
+    }
+
+    @Test
+    fun `the bell off shows no notice with system notifications off`() = runTest(dispatcher) {
+        notifications.allowed = false
+
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.refreshNotificationsNotice()
+
+        assertFalse(vm.uiState.value.remindersEnabled)
+        assertNull(vm.uiState.value.remindersNotice)
+    }
+
+    @Test
+    fun `the notice follows the system setting each time the screen is shown again`() = runTest(dispatcher) {
+        preferences.matchRemindersEnabled = true
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        notifications.allowed = false
+        vm.refreshNotificationsNotice()
+        assertEquals(TeamsViewModel.NOTIFICATIONS_OFF_NOTICE, vm.uiState.value.remindersNotice)
+
+        notifications.allowed = true
+        vm.refreshNotificationsNotice()
+        assertNull(vm.uiState.value.remindersNotice)
+        assertTrue(vm.uiState.value.remindersEnabled)
+    }
+
+    @Test
+    fun `turning the bell on with system notifications off says so`() = runTest(dispatcher) {
+        notifications.allowed = false
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.enableReminders()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.remindersEnabled)
+        assertEquals(TeamsViewModel.NOTIFICATIONS_OFF_NOTICE, vm.uiState.value.remindersNotice)
+        assertEquals(1, reminderSync.requests)
     }
 
     @Test

@@ -70,7 +70,11 @@ fun TeamsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     // Favorites are starred in a team's profile: read them again whenever this tab comes back.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshFavorites() }
+    // System notifications are turned on and off outside the app: check them again as well.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshFavorites()
+        viewModel.refreshNotificationsNotice()
+    }
     val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         viewModel.onNotificationPermissionResult(granted)
@@ -140,7 +144,7 @@ fun TeamsContent(
 /**
  * The favorites above the league picker, one compact card each; tapping one opens its profile. The
  * bell next to the title turns the start-of-match reminders for all of them on and off; [remindersNotice]
- * (why it could not be turned on) shows under the title.
+ * (why it could not be turned on, or that the system does not allow notifications) shows under the title.
  */
 @Composable
 private fun FavoritesRow(

@@ -28,7 +28,6 @@ class MainActivity : ComponentActivity() {
         // A recreated activity (rotation, restored process) already handled its launch.
         if (savedInstanceState == null) {
             matchToOpen = intent.matchIdToOpen()
-            container.onAppOpened()
         }
         // The app is always dark, so the bars always get light icons whatever the system setting.
         enableEdgeToEdge(
@@ -44,6 +43,12 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /** Every time the app comes to the foreground, a fresh launch included, the reminders are synced. */
+    override fun onStart() {
+        super.onStart()
+        (application as LolSitoApplication).container.onAppForegrounded()
     }
 
     override fun onNewIntent(intent: Intent) {

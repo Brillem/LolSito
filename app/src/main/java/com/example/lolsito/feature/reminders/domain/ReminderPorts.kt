@@ -20,6 +20,14 @@ interface ReminderScheduler {
     fun cancelAll()
 }
 
+/**
+ * Whether the system lets the app show notifications right now: false when the notification permission
+ * is not granted (Android 13+) or notifications are turned off for the app in the system settings.
+ */
+fun interface NotificationAvailability {
+    fun canNotify(): Boolean
+}
+
 /** Asks for a reminder sync to run in the background as soon as there is a network. */
 fun interface ReminderSyncTrigger {
     fun requestSync()

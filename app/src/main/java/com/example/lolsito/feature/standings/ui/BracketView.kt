@@ -47,8 +47,10 @@ fun BracketView(
     onMatchClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     noSpoilers: Boolean = false,
+    /** Names of the starred teams: a card draws a star next to a team with one of them. */
+    favoriteNames: List<String> = emptyList(),
 ) {
-    BracketColumns(row.columns, row.lines, onMatchClick, noSpoilers, modifier)
+    BracketColumns(row.columns, row.lines, onMatchClick, noSpoilers, favoriteNames, modifier)
 }
 
 /**
@@ -61,6 +63,7 @@ fun SwissView(
     onMatchClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     noSpoilers: Boolean = false,
+    favoriteNames: List<String> = emptyList(),
 ) {
     Row(
         modifier
@@ -81,7 +84,13 @@ fun SwissView(
                         )
                     }
                     group.matches.forEach { match ->
-                        BracketMatchCard(match, onClick = { onMatchClick(match.sectionMatch.match.id) }, noSpoilers = noSpoilers, modifier = Modifier)
+                        BracketMatchCard(
+                            match,
+                            onClick = { onMatchClick(match.sectionMatch.match.id) },
+                            noSpoilers = noSpoilers,
+                            favoriteNames = favoriteNames,
+                            modifier = Modifier,
+                        )
                     }
                 }
             }
@@ -112,6 +121,7 @@ private fun BracketColumns(
     lines: List<BracketLine>,
     onMatchClick: (String) -> Unit,
     noSpoilers: Boolean,
+    favoriteNames: List<String>,
     modifier: Modifier = Modifier,
 ) {
     val slot = CARD_HEIGHT + CARD_GAP
@@ -151,6 +161,7 @@ private fun BracketColumns(
                             match,
                             onClick = { onMatchClick(match.sectionMatch.match.id) },
                             noSpoilers = noSpoilers,
+                            favoriteNames = favoriteNames,
                             modifier = Modifier.offset(x = step * card.column, y = slot * card.top),
                         )
                     }
@@ -166,6 +177,7 @@ private fun BracketMatchCard(
     row: StandingsRow.MatchRow,
     onClick: () -> Unit,
     noSpoilers: Boolean,
+    favoriteNames: List<String>,
     modifier: Modifier,
 ) {
     val teams = row.sectionMatch.match.teams
@@ -181,8 +193,8 @@ private fun BracketMatchCard(
     ) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceEvenly) {
             if (row.hasBothTeams) {
-                BracketTeamLine(teams[0], result.emphasisFor(0), row.displayedGameWins(0, noSpoilers))
-                BracketTeamLine(teams[1], result.emphasisFor(1), row.displayedGameWins(1, noSpoilers))
+                BracketTeamLine(teams[0], result.emphasisFor(0), row.displayedGameWins(0, noSpoilers), row.isFavorite(0, favoriteNames))
+                BracketTeamLine(teams[1], result.emphasisFor(1), row.displayedGameWins(1, noSpoilers), row.isFavorite(1, favoriteNames))
             } else {
                 Text("TBD", style = MaterialTheme.typography.bodyMedium)
             }
@@ -195,7 +207,7 @@ private fun BracketMatchCard(
 }
 
 @Composable
-private fun BracketTeamLine(team: Team, emphasis: TeamEmphasis, gameWins: String?) {
+private fun BracketTeamLine(team: Team, emphasis: TeamEmphasis, gameWins: String?, favorite: Boolean) {
     val weight = if (emphasis == TeamEmphasis.WINNER) FontWeight.ExtraBold else FontWeight.SemiBold
     Row(
         Modifier.fillMaxWidth().alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
@@ -203,14 +215,20 @@ private fun BracketTeamLine(team: Team, emphasis: TeamEmphasis, gameWins: String
     ) {
         TeamLogo(team.imageUrl, contentDescription = team.name, size = 20.dp)
         Spacer(Modifier.width(6.dp))
-        Text(
-            team.code,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = weight,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                team.code,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = weight,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (favorite) {
+                Spacer(Modifier.width(4.dp))
+                FavoriteStar()
+            }
+        }
         if (gameWins != null) {
             Text(gameWins, style = MaterialTheme.typography.bodyMedium, fontWeight = weight)
         }

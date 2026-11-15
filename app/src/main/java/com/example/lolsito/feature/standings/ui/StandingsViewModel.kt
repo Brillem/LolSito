@@ -8,6 +8,7 @@ import com.example.lolsito.core.model.League
 import com.example.lolsito.core.preferences.StandingsSelection
 import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.feature.schedule.domain.favoriteNamesOf
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.feature.standings.domain.pickDefaultTournament
@@ -36,6 +37,10 @@ data class StandingsUiState(
     val rows: List<StandingsRow> = emptyList(),
     /** No-spoilers mode, set in Schedule: finished matches show no score or winner. The ranking tables are not affected. */
     val noSpoilers: Boolean = false,
+    /** Names of the starred teams (see [favoriteNamesOf]): their table rows and match cards show a star. Display only. */
+    val favoriteNames: List<String> = emptyList(),
+    /** A pull to refresh is reloading the standings; [rows] stay as they are meanwhile. */
+    val isRefreshing: Boolean = false,
 ) {
     /**
      * Name of the selected league, or a neutral label until the leagues load. A leagues retry keeps
@@ -68,6 +73,9 @@ data class StandingsUiState(
  * that a league that no longer exists is then requested once and shows its error until the user picks
  * another one. A pick made while the stored selection is being restored wins over it, and every
  * load started by init or by such a pick runs once.
+ *
+ * [refresh] (pull to refresh) asks again for the standings of the selected tournament and keeps the rows on
+ * screen meanwhile; a failure leaves them as they were. Any other load of the standings supersedes it.
  */
 class StandingsViewModel(
     private val repository: StandingsRepository,
@@ -95,6 +103,7 @@ class StandingsViewModel(
 
     init {
         refreshNoSpoilers()
+        refreshFavorites()
         viewModelScope.launch {
             val stored = readStoredSelection()
             val leagues = CompletableDeferred<List<League>?>()
@@ -117,6 +126,25 @@ class StandingsViewModel(
                 throw e
             } catch (e: Exception) {
                 // Keep showing with the current mode.
+            }
+        }
+    }
+
+    /**
+     * Reads the favorite teams, which are starred in a team's profile; the screen calls it every time it comes
+     * back. An unreadable preference keeps the current ones (none at first).
+     */
+    fun refreshFavorites() {
+        viewModelScope.launch {
+            try {
+                preferences.getFavoriteTeams()?.let { stored ->
+                    val names = favoriteNamesOf(stored)
+                    _uiState.update { if (it.favoriteNames == names) it else it.copy(favoriteNames = names) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Keep showing the current favorites.
             }
         }
     }
@@ -147,6 +175,34 @@ class StandingsViewModel(
     fun retryTournaments() = loadTournaments()
 
     fun retryStandings() = loadStandings()
+
+    /**
+     * Pull to refresh: loads the shown standings again without clearing them. Only while standings (or their
+     * empty state) are shown and no refresh is already running; a failure changes nothing.
+     */
+    fun refresh() {
+        val state = _uiState.value
+        val tournamentId = state.selectedTournamentId ?: return
+        if (state.isRefreshing || state.tournamentsStatus != LoadStatus.Content) return
+        if (state.standingsStatus != LoadStatus.Content && state.standingsStatus != LoadStatus.Empty) return
+        _uiState.update { it.copy(isRefreshing = true) }
+        // Shares the standings job, so a retry or a selection change cancels it like any other standings load.
+        standingsJob = viewModelScope.launch {
+            try {
+                val rows = buildStandingsRows(repository.getStandings(tournamentId))
+                _uiState.update {
+                    if (it.selectedTournamentId != tournamentId) it
+                    else it.copy(standingsStatus = if (rows.isEmpty()) LoadStatus.Empty else LoadStatus.Content, rows = rows)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The standings stay as they were.
+            } finally {
+                _uiState.update { it.copy(isRefreshing = false) }
+            }
+        }
+    }
 
     /** The stored selection, or null when the handle already holds one, nothing is stored or the read fails. */
     private suspend fun readStoredSelection(): StandingsSelection? {
@@ -220,6 +276,7 @@ class StandingsViewModel(
                 selectedTournamentId = null,
                 standingsStatus = LoadStatus.Loading,
                 rows = emptyList(),
+                isRefreshing = false,
             )
         }
         val leagueId = _uiState.value.selectedLeagueId
@@ -250,7 +307,7 @@ class StandingsViewModel(
     private fun loadStandings() {
         standingsJob?.cancel()
         val tournamentId = _uiState.value.selectedTournamentId ?: return
-        _uiState.update { it.copy(standingsStatus = LoadStatus.Loading, rows = emptyList()) }
+        _uiState.update { it.copy(standingsStatus = LoadStatus.Loading, rows = emptyList(), isRefreshing = false) }
         standingsJob = viewModelScope.launch {
             try {
                 val rows = buildStandingsRows(repository.getStandings(tournamentId))

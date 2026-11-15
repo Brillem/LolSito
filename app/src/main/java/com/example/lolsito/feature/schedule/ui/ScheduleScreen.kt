@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -32,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -96,9 +98,11 @@ fun ScheduleScreen(
         onLoadNewer = viewModel::loadNewer,
         onMatchClick = onMatchClick,
         modifier = modifier,
+        onRefresh = viewModel::refresh,
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleContent(
     state: ScheduleUiState,
@@ -111,6 +115,8 @@ fun ScheduleContent(
     onLoadNewer: () -> Unit,
     onMatchClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** Pull to refresh on the lists; the loading, error and empty states do not scroll, so they do not offer it. */
+    onRefresh: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -126,17 +132,19 @@ fun ScheduleContent(
             )
             NoSpoilersToggle(state.noSpoilers, onToggleNoSpoilers)
         }
-        if (state.liveOnly) {
-            // The toggle replaces the page, so the schedule's own loading, error and empty states do not apply.
-            LiveOnlyList(state, onMatchClick)
-        } else {
-            LoadStatusView(
-                status = state.status,
-                emptyMessage = if (state.selectedLeagueIds.isEmpty()) "Select a league to see its matches"
-                else "No matches scheduled",
-                onRetry = onRetry,
-            ) {
-                ScheduleList(state, onLoadOlder, onLoadNewer, onMatchClick)
+        PullToRefreshBox(isRefreshing = state.isRefreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+            if (state.liveOnly) {
+                // The toggle replaces the page, so the schedule's own loading, error and empty states do not apply.
+                LiveOnlyList(state, onMatchClick)
+            } else {
+                LoadStatusView(
+                    status = state.status,
+                    emptyMessage = if (state.selectedLeagueIds.isEmpty()) "Select a league to see its matches"
+                    else "No matches scheduled",
+                    onRetry = onRetry,
+                ) {
+                    ScheduleList(state, onLoadOlder, onLoadNewer, onMatchClick)
+                }
             }
         }
     }

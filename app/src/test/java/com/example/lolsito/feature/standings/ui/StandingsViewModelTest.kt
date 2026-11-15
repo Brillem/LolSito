@@ -7,6 +7,7 @@ import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.preferences.StandingsSelection
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.standings.domain.Ranking
@@ -671,6 +672,134 @@ class StandingsViewModelTest {
         assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2025"), repository.requests)
         assertEquals(1, leaguesRequests)
     }
+
+    @Test
+    fun `stored favorites are read as names and leave the rows and the no spoilers mode alone`() = runTest(dispatcher) {
+        val plain = viewModel()
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), plain.uiState.value.favoriteNames)
+
+        preferences.noSpoilers = true
+        preferences.favoriteTeams = listOf(favorite(" T1 "), favorite("Gen.G"), favorite("t1"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf("T1", "Gen.G"), vm.uiState.value.favoriteNames)
+        assertTrue(vm.uiState.value.noSpoilers)
+        assertEquals(plain.uiState.value.rows, vm.uiState.value.rows)
+    }
+
+    @Test
+    fun `favorites are read again when the screen comes back`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        vm.refreshFavorites()
+        advanceUntilIdle()
+
+        assertEquals(listOf("T1"), vm.uiState.value.favoriteNames)
+    }
+
+    @Test
+    fun `unreadable favorites keep the ones already shown`() = runTest(dispatcher) {
+        preferences.favoriteTeams = listOf(favorite("T1"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        preferences.readFails = true
+        vm.refreshFavorites()
+        advanceUntilIdle()
+
+        assertEquals(listOf("T1"), vm.uiState.value.favoriteNames)
+    }
+
+    @Test
+    fun `refresh reloads the standings of the selected tournament`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(listOf(LCK_SUMMER), vm.uiState.value.stageNames)
+
+        repository.standings[LCK_SUMMER] = standings("updated")
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf("updated"), vm.uiState.value.stageNames)
+        assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
+        assertFalse(vm.uiState.value.isRefreshing)
+        assertEquals(listOf("t:$LCK", "s:$LCK_SUMMER", "s:$LCK_SUMMER"), repository.requests)
+    }
+
+    @Test
+    fun `refresh keeps the rows on screen while it loads`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        val shown = vm.uiState.value.rows
+
+        repository.standings[LCK_SUMMER] = standings("updated")
+        repository.standingsGates[LCK_SUMMER] = CompletableDeferred()
+        vm.refresh()
+        runCurrent()
+
+        assertTrue(vm.uiState.value.isRefreshing)
+        assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
+        assertEquals(shown, vm.uiState.value.rows)
+
+        repository.standingsGates.getValue(LCK_SUMMER).complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isRefreshing)
+        assertEquals(listOf("updated"), vm.uiState.value.stageNames)
+    }
+
+    @Test
+    fun `a failed refresh leaves the standings as they were`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        val shown = vm.uiState.value.rows
+
+        repository.standingsError = IOException("offline")
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isRefreshing)
+        assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
+        assertEquals(shown, vm.uiState.value.rows)
+    }
+
+    @Test
+    fun `picking another tournament during a refresh shows that tournament only`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        repository.standingsGates[LCK_SUMMER] = CompletableDeferred()
+        vm.refresh()
+        runCurrent()
+
+        vm.selectTournament(LCK_SPRING)
+        repository.standingsGates.getValue(LCK_SUMMER).complete(Unit)
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isRefreshing)
+        assertEquals(listOf(LCK_SPRING), vm.uiState.value.stageNames)
+    }
+
+    @Test
+    fun `retrying the standings still shows them loading without the old rows`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        repository.standingsGates[LCK_SUMMER] = CompletableDeferred()
+        vm.retryStandings()
+        runCurrent()
+
+        assertEquals(LoadStatus.Loading, vm.uiState.value.standingsStatus)
+        assertTrue(vm.uiState.value.rows.isEmpty())
+        assertFalse(vm.uiState.value.isRefreshing)
+        repository.standingsGates.getValue(LCK_SUMMER).complete(Unit)
+        advanceUntilIdle()
+        assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
+    }
+
+    private fun favorite(name: String) = FavoriteTeam("id-$name", name.trim().lowercase(), name, name.trim().take(3), null)
 
     private fun tournament(id: String, start: String, end: String) =
         Tournament(id, id, LocalDate.parse(start), LocalDate.parse(end))

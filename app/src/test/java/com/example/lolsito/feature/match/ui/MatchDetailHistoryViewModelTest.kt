@@ -34,10 +34,13 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import java.time.Instant
 import java.time.ZoneOffset
 
 /** Recent form and head to head of Match detail: how [MatchDetailViewModel] loads and exposes them. */
@@ -322,6 +325,119 @@ class MatchDetailHistoryViewModelTest {
         assertEquals(MatchHistoryUiState.None, vm.historyState.value)
         assertTrue(teams.requests.isEmpty())
         assertTrue(schedule.requests.isEmpty())
+    }
+
+    @Test
+    fun `the start time is that of the open match among the history events`() = runTest(dispatcher) {
+        repository.detail = detail(MatchState.UNSTARTED)
+        schedule.pages[null] = page(fullHistory() + series(MATCH_ID, 9, "Alpha", "Beta", state = MatchState.UNSTARTED))
+        val vm = viewModel()
+        assertNull(vm.startTime.value)
+        advanceUntilIdle()
+
+        assertEquals(Instant.parse("2026-01-09T12:00:00Z"), vm.startTime.value)
+    }
+
+    @Test
+    fun `there is no start time when the open match is not among the history events`() = runTest(dispatcher) {
+        repository.detail = detail(MatchState.UNSTARTED)
+        schedule.pages[null] = page(fullHistory())
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(vm.historyState.value is MatchHistoryUiState.Content)
+        assertNull(vm.startTime.value)
+    }
+
+    @Test
+    fun `there is no start time when the history cannot be loaded`() = runTest(dispatcher) {
+        repository.detail = detail(MatchState.UNSTARTED)
+        schedule.error = IOException("offline")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertNull(vm.startTime.value)
+    }
+
+    @Test
+    fun `the start time is known while results are hidden, and so is the calendar event`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        repository.detail = detail(MatchState.UNSTARTED)
+        schedule.pages[null] = page(fullHistory() + series(MATCH_ID, 9, "Alpha", "Beta", state = MatchState.UNSTARTED))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val content = vm.uiState.value as MatchDetailUiState.Content
+        assertTrue(content.resultsHidden)
+        assertEquals(MatchHistoryUiState.None, vm.historyState.value)
+        assertEquals(Instant.parse("2026-01-09T12:00:00Z"), vm.startTime.value)
+        assertEquals(Instant.parse("2026-01-09T12:00:00Z"), content.calendarEvent(vm.startTime.value)?.start)
+    }
+
+    @Test
+    fun `refresh reloads the history and the start time, keeping the history on screen meanwhile`() = runTest(dispatcher) {
+        repository.detail = detail(MatchState.UNSTARTED)
+        schedule.pages[null] = page(fullHistory() + series(MATCH_ID, 9, "Alpha", "Beta", state = MatchState.UNSTARTED))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val states = mutableListOf<MatchHistoryUiState>()
+        backgroundScope.launch { vm.historyState.toList(states) }
+        runCurrent()
+        val shown = vm.historyState.value
+
+        schedule.pages[null] = page(
+            fullHistory() + series("a6", 6, "Alpha", "Gamma", firstWon = true) +
+                series(MATCH_ID, 10, "Alpha", "Beta", state = MatchState.UNSTARTED),
+        )
+        schedule.gate = CompletableDeferred()
+        vm.refresh()
+        runCurrent()
+        assertTrue(vm.isRefreshing.value)
+        assertEquals(shown, vm.historyState.value)
+
+        schedule.gate?.complete(Unit)
+        advanceUntilIdle()
+
+        assertFalse(vm.isRefreshing.value)
+        val history = (vm.historyState.value as MatchHistoryUiState.Content).history
+        assertEquals("a6", history.form[0].entries.first().matchId)
+        assertEquals(Instant.parse("2026-01-10T12:00:00Z"), vm.startTime.value)
+        assertTrue("the history never goes back to loading", states.all { it is MatchHistoryUiState.Content })
+        assertEquals(listOf(MATCH_ID, MATCH_ID), repository.requests)
+    }
+
+    @Test
+    fun `a refresh whose history fails keeps the history and the start time`() = runTest(dispatcher) {
+        repository.detail = detail(MatchState.UNSTARTED)
+        schedule.pages[null] = page(fullHistory() + series(MATCH_ID, 9, "Alpha", "Beta", state = MatchState.UNSTARTED))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val shown = vm.historyState.value
+
+        schedule.error = IOException("offline")
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertFalse(vm.isRefreshing.value)
+        assertEquals(shown, vm.historyState.value)
+        assertEquals(Instant.parse("2026-01-09T12:00:00Z"), vm.startTime.value)
+        assertEquals(MatchDetailUiState.Content(detail(MatchState.UNSTARTED)), vm.uiState.value)
+    }
+
+    @Test
+    fun `a refresh loads again a history that had failed`() = runTest(dispatcher) {
+        schedule.error = IOException("offline")
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(MatchHistoryUiState.Error, vm.historyState.value)
+
+        schedule.error = null
+        schedule.pages[null] = page(fullHistory())
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertTrue(vm.historyState.value is MatchHistoryUiState.Content)
+        assertFalse(vm.isRefreshing.value)
     }
 
     private fun viewModel() = MatchDetailViewModel(

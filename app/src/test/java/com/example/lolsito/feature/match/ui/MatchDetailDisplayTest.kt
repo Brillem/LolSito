@@ -139,4 +139,16 @@ class MatchDetailDisplayTest {
         assertEquals(true, MatchDetailUiState.Content(detail(MatchState.UNSTARTED)).showsHeadToHead)
         assertEquals(true, MatchDetailUiState.Content(detail(MatchState.IN_PROGRESS)).showsHeadToHead)
     }
+
+    @Test
+    fun `the calendar event exists only before the series starts, hidden results or not`() {
+        val start = java.time.Instant.parse("2026-11-20T17:00:00Z")
+
+        val unstarted = MatchDetailUiState.Content(detail(MatchState.UNSTARTED))
+        assertEquals(start, unstarted.calendarEvent(start)?.start)
+        assertEquals(unstarted.calendarEvent(start), unstarted.copy(resultsHidden = true).calendarEvent(start))
+        assertNull(unstarted.calendarEvent(null))
+        assertNull(MatchDetailUiState.Content(detail(MatchState.IN_PROGRESS)).calendarEvent(start))
+        assertNull(MatchDetailUiState.Content(detail(MatchState.COMPLETED)).calendarEvent(start))
+    }
 }

@@ -21,13 +21,14 @@ import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import com.example.lolsito.feature.schedule.domain.mergeEvents
 import com.example.lolsito.feature.teams.domain.TeamsRepository
 import com.example.lolsito.feature.teams.domain.homeLeagueId
+import java.time.Instant
 import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -66,6 +67,12 @@ sealed interface MatchHistoryUiState {
  * profile does, by the league name [teamsRepository] gives) plus the international leagues, see
  * [matchHistoryLeagueIds]. Only while a team has fewer than [RECENT_FORM_SIZE] finished series are older pages
  * read, at most [MAX_OLDER_HISTORY_PAGES]. A failure only shows in [historyState]; the series stays as it is.
+ *
+ * Event details carry no start time, so [startTime] comes from those same schedule events: the one of this match,
+ * when it is among them. It is not a result, so it is exposed whether or not results are hidden.
+ *
+ * [refresh] (pull to refresh) loads the series and then the history again while both stay on screen; whatever
+ * fails stays as it was. The polling is paused for as long as it runs, so the two never overlap.
  */
 class MatchDetailViewModel(
     private val matchId: String,
@@ -83,11 +90,22 @@ class MatchDetailViewModel(
     private val _historyState = MutableStateFlow<MatchHistoryUiState>(MatchHistoryUiState.None)
     val historyState: StateFlow<MatchHistoryUiState> = _historyState.asStateFlow()
 
+    private val _startTime = MutableStateFlow<Instant?>(null)
+
+    /** When this match starts, once the history events were read and only if it is among them. */
+    val startTime: StateFlow<Instant?> = _startTime.asStateFlow()
+
+    private val _isRefreshing = MutableStateFlow(false)
+
+    /** A pull to refresh is running; the content stays as it is meanwhile. */
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     /** What was loaded, whether or not it may be shown; [historyState] is what the screen gets. */
     private var history: MatchHistoryUiState = MatchHistoryUiState.None
 
     private var loadJob: Job? = null
     private var historyJob: Job? = null
+    private var refreshJob: Job? = null
     private var noSpoilers: Boolean? = null
     private var revealed = false
 
@@ -117,17 +135,58 @@ class MatchDetailViewModel(
      * Keeps the content fresh for as long as it is in progress. The screen runs it only while visible,
      * so leaving the screen cancels it. A refresh that fails leaves the content as it was; an initial
      * load that is still running, failed or completed is never polled, and [retry] pauses polling
-     * until its own load ends.
+     * until its own load ends. So does [refresh]: it stops a tick in flight, and the next one comes a
+     * full interval after it ends.
      */
     suspend fun pollWhileVisible() {
-        val inProgress = uiState.map { (it as? MatchDetailUiState.Content)?.detail?.state == MatchState.IN_PROGRESS }
-        pollWhile(MATCH_DETAIL_POLL_INTERVAL, inProgress) { refresh() }
+        val polled = combine(uiState, isRefreshing) { state, refreshing ->
+            !refreshing && (state as? MatchDetailUiState.Content)?.detail?.state == MatchState.IN_PROGRESS
+        }
+        pollWhile(MATCH_DETAIL_POLL_INTERVAL, polled) { publishFreshDetail() }
     }
 
-    private suspend fun refresh() {
+    /**
+     * Pull to refresh: loads the series again, then its history, without clearing either. Only while the series
+     * is shown and no refresh is already running. A failure leaves what failed as it was.
+     */
+    fun refresh() {
+        if (_uiState.value !is MatchDetailUiState.Content || refreshJob?.isActive == true) return
+        _isRefreshing.value = true
+        refreshJob = viewModelScope.launch {
+            try {
+                val detail = publishFreshDetail()
+                refreshHistory(detail.teams)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The content stays as it was.
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
+
+    private suspend fun publishFreshDetail(): MatchDetail {
         val detail = repository.getMatchDetail(matchId)
         // Only replace content: a reload started meanwhile owns the state.
         _uiState.update { if (it is MatchDetailUiState.Content) MatchDetailUiState.Content(detail, resultsHidden()) else it }
+        return detail
+    }
+
+    /**
+     * A loaded history is replaced in place, and kept when the reload fails; one that failed is loaded again as
+     * [retryHistory] does. One still loading is left to finish.
+     */
+    private suspend fun refreshHistory(teams: List<Team>) {
+        when (history) {
+            MatchHistoryUiState.Error -> loadHistory(teams)
+            is MatchHistoryUiState.Content -> {
+                if (teams.size != 2) return
+                history = MatchHistoryUiState.Content(readHistory(teams))
+                publishHistory()
+            }
+            else -> Unit
+        }
     }
 
     /** Read before the first request, so results never show for a moment; the answer is kept for this screen. */
@@ -146,6 +205,7 @@ class MatchDetailViewModel(
 
     private fun load() {
         loadJob?.cancel()
+        refreshJob?.cancel()
         _uiState.value = MatchDetailUiState.Loading
         loadJob = viewModelScope.launch {
             _uiState.value = try {
@@ -169,7 +229,7 @@ class MatchDetailViewModel(
         publishHistory()
         historyJob = viewModelScope.launch {
             history = try {
-                MatchHistoryUiState.Content(buildMatchHistory(fetchHistoryEvents(teams), teams, matchId, zoneId))
+                MatchHistoryUiState.Content(readHistory(teams))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -177,6 +237,13 @@ class MatchDetailViewModel(
             }
             publishHistory()
         }
+    }
+
+    /** Fetches the history events and, from the same events, this match's start time. */
+    private suspend fun readHistory(teams: List<Team>): MatchHistory {
+        val events = fetchHistoryEvents(teams)
+        _startTime.value = events.firstOrNull { it.matchId == matchId }?.startTime
+        return buildMatchHistory(events, teams, matchId, zoneId)
     }
 
     private fun publishHistory() {

@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +39,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.CalendarContract
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.SeriesFormat
@@ -49,6 +51,7 @@ import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadingView
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.WhileStarted
+import com.example.lolsito.feature.match.domain.CalendarEvent
 import com.example.lolsito.feature.match.domain.GameSide
 import com.example.lolsito.feature.match.domain.GameState
 import com.example.lolsito.feature.match.domain.GameStatsLink
@@ -58,6 +61,7 @@ import com.example.lolsito.feature.match.domain.MatchDetail
 import com.example.lolsito.feature.match.domain.MatchHistory
 import com.example.lolsito.feature.match.domain.Meeting
 import com.example.lolsito.feature.match.domain.TeamForm
+import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -77,6 +81,8 @@ fun MatchDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.historyState.collectAsStateWithLifecycle()
+    val startTime by viewModel.startTime.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     WhileStarted(viewModel) { viewModel.pollWhileVisible() }
     MatchDetailContent(
         state = state,
@@ -89,6 +95,9 @@ fun MatchDetailScreen(
         onRetryHistory = viewModel::retryHistory,
         onMatchClick = onMatchClick,
         modifier = modifier,
+        startTime = startTime,
+        isRefreshing = isRefreshing,
+        onRefresh = viewModel::refresh,
     )
 }
 
@@ -105,6 +114,10 @@ fun MatchDetailContent(
     history: MatchHistoryUiState = MatchHistoryUiState.None,
     onRetryHistory: () -> Unit = {},
     onMatchClick: (String) -> Unit = {},
+    /** When the match starts, if known: with it a series still to be played offers "Add to calendar". */
+    startTime: Instant? = null,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         TopAppBar(
@@ -120,16 +133,23 @@ fun MatchDetailContent(
         when (state) {
             MatchDetailUiState.Loading -> LoadingView()
             is MatchDetailUiState.Error -> ErrorView(state.message, onRetry)
-            is MatchDetailUiState.Content -> MatchDetailBody(
-                state,
-                // Hidden results hide the history too, whatever state it is in.
-                if (state.resultsHidden) MatchHistoryUiState.None else history,
-                onShowResult,
-                onGameClick,
-                onTeamClick,
-                onRetryHistory,
-                onMatchClick,
-            )
+            is MatchDetailUiState.Content -> PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                MatchDetailBody(
+                    state,
+                    // Hidden results hide the history too, whatever state it is in.
+                    if (state.resultsHidden) MatchHistoryUiState.None else history,
+                    state.calendarEvent(startTime),
+                    onShowResult,
+                    onGameClick,
+                    onTeamClick,
+                    onRetryHistory,
+                    onMatchClick,
+                )
+            }
         }
     }
 }
@@ -138,6 +158,7 @@ fun MatchDetailContent(
 private fun MatchDetailBody(
     content: MatchDetailUiState.Content,
     history: MatchHistoryUiState,
+    calendarEvent: CalendarEvent?,
     onShowResult: () -> Unit,
     onGameClick: (GameStatsLink) -> Unit,
     onTeamClick: (String) -> Unit,
@@ -156,6 +177,14 @@ private fun MatchDetailBody(
             }
         }
         item(key = "header") { MatchHeader(content, onTeamClick) }
+        if (calendarEvent != null) {
+            item(key = "add-to-calendar") {
+                OutlinedButton(
+                    onClick = { context.addToCalendar(calendarEvent) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                ) { Text("Add to calendar") }
+            }
+        }
         if (content.resultsHidden) {
             item(key = "show-result") {
                 OutlinedButton(
@@ -500,6 +529,24 @@ private fun Context.openWatchLink(link: WatchLink) {
         startActivity(intent)
     } catch (_: ActivityNotFoundException) {
         // Nothing can open it: ignore.
+    }
+}
+
+/**
+ * Opens the calendar app's "new event" screen prefilled with [event]; the user saves it there, so no calendar
+ * permission is needed. Does nothing when no app can handle it.
+ */
+private fun Context.addToCalendar(event: CalendarEvent) {
+    val intent = Intent(Intent.ACTION_INSERT)
+        .setData(CalendarContract.Events.CONTENT_URI)
+        .putExtra(CalendarContract.Events.TITLE, event.title)
+        .putExtra(CalendarContract.Events.DESCRIPTION, event.description)
+        .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, event.start.toEpochMilli())
+        .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, event.end.toEpochMilli())
+    try {
+        startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        // No calendar app: ignore.
     }
 }
 

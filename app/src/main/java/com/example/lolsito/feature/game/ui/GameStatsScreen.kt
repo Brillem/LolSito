@@ -54,15 +54,25 @@ import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.WhileStarted
+import com.example.lolsito.feature.game.domain.DragonType
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.GameTeam
 import com.example.lolsito.feature.game.domain.GoldHistory
 import com.example.lolsito.feature.game.domain.GoldPoint
 import com.example.lolsito.feature.game.domain.Matchup
 import com.example.lolsito.feature.game.domain.PlayerDetails
+import com.example.lolsito.feature.game.domain.PlayerHealth
 import com.example.lolsito.feature.game.domain.PlayerStats
 import com.example.lolsito.feature.game.domain.TeamStats
 import com.example.lolsito.feature.game.domain.matchups
+import com.example.lolsito.ui.theme.DragonChemtech
+import com.example.lolsito.ui.theme.DragonCloud
+import com.example.lolsito.ui.theme.DragonElder
+import com.example.lolsito.ui.theme.DragonHextech
+import com.example.lolsito.ui.theme.DragonInfernal
+import com.example.lolsito.ui.theme.DragonMountain
+import com.example.lolsito.ui.theme.DragonOcean
+import com.example.lolsito.ui.theme.HealthGreen
 import com.example.lolsito.ui.theme.LolSitoTheme
 import java.time.Duration
 import java.time.Instant
@@ -142,11 +152,14 @@ private enum class Side(val label: String, val color: Color) {
     RED("Red side", Color(0xFFE5484D)),
 }
 
-private val teamRows: List<Pair<String, (TeamStats) -> String>> = listOf(
+/** The team totals shown as plain numbers; the dragons have their own row, [DragonsRow], after the towers. */
+private val teamRowsBeforeDragons: List<Pair<String, (TeamStats) -> String>> = listOf(
     "Gold" to { team -> formatGold(team.totalGold) },
     "Kills" to { team -> team.kills.toString() },
     "Towers" to { team -> team.towers.toString() },
-    "Dragons" to { team -> team.dragons.toString() },
+)
+
+private val teamRowsAfterDragons: List<Pair<String, (TeamStats) -> String>> = listOf(
     "Barons" to { team -> team.barons.toString() },
 )
 
@@ -163,6 +176,7 @@ private fun GameStatsBody(
     val red = teamFor(stats.redTeamId, teams)
     val matchups = remember(stats.blueTeam.players, stats.redTeam.players) { stats.matchups() }
     val staleDetailsSince = stats.staleDetailsTime()
+    val showHealth = stats.showsHealth()
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "teams") {
             TeamComparison(stats, blue = blue, red = red)
@@ -181,7 +195,7 @@ private fun GameStatsBody(
             }
         }
         items(matchups, key = { it.key }) { matchup ->
-            MatchupRow(matchup, stats.dataDragonVersion, view)
+            MatchupRow(matchup, stats.dataDragonVersion, view, showHealth)
         }
         item(key = "view-toggle") {
             Column {
@@ -271,10 +285,93 @@ private fun TeamComparison(stats: GameStats, blue: GameTeam?, red: GameTeam?, mo
                 style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
             )
         }
-        teamRows.forEach { (label, value) ->
+        teamRowsBeforeDragons.forEach { (label, value) ->
+            ComparisonRow(blue = value(stats.blueTeam), label = label, red = value(stats.redTeam))
+        }
+        DragonsRow(blue = stats.blueTeam, red = stats.redTeam)
+        teamRowsAfterDragons.forEach { (label, value) ->
             ComparisonRow(blue = value(stats.blueTeam), label = label, red = value(stats.redTeam))
         }
     }
+}
+
+/**
+ * The dragons each team took, one icon per dragon in the order taken. The middle label takes
+ * only the room it needs, so each side has more of it than in a [ComparisonRow].
+ */
+@Composable
+private fun DragonsRow(blue: TeamStats, red: TeamStats) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        DragonLabels(blue, mirrored = false, Modifier.weight(1f))
+        Text(
+            "Dragons",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        DragonLabels(red, mirrored = true, Modifier.weight(1f))
+    }
+}
+
+/** A team's dragons as icons; the count instead when the feed gave no types for them (none taken shows 0). */
+@Composable
+private fun DragonLabels(team: TeamStats, mirrored: Boolean, modifier: Modifier = Modifier) {
+    val textAlign = if (mirrored) TextAlign.End else TextAlign.Start
+    if (team.dragonTypes.isEmpty()) {
+        Text(
+            team.dragons.toString(),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = textAlign,
+            modifier = modifier,
+        )
+        return
+    }
+    val unknownColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        modifier.semantics(mergeDescendants = true) { contentDescription = dragonsDescription(team.dragonTypes) },
+        horizontalArrangement = Arrangement.spacedBy(4.dp, if (mirrored) Alignment.End else Alignment.Start),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        team.dragonTypes.forEach { type -> DragonIcon(type, dragonColor(type) ?: unknownColor) }
+    }
+}
+
+/** The game's icon of a dragon type; its short colored label when the icon cannot be loaded. */
+@Composable
+private fun DragonIcon(type: DragonType, labelColor: Color) {
+    SubcomposeAsyncImage(
+        model = dragonIconUrl(type),
+        contentDescription = null,
+        modifier = Modifier.size(DRAGON_ICON_SIZE),
+        loading = {},
+        error = {
+            Text(
+                dragonLabel(type),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = labelColor,
+                maxLines = 1,
+                softWrap = false,
+            )
+        },
+    )
+}
+
+private val DRAGON_ICON_SIZE = 22.dp
+
+/** The label color of a dragon type; null for an unknown one, which uses a muted color. */
+private fun dragonColor(type: DragonType): Color? = when (type) {
+    DragonType.INFERNAL -> DragonInfernal
+    DragonType.OCEAN -> DragonOcean
+    DragonType.CLOUD -> DragonCloud
+    DragonType.MOUNTAIN -> DragonMountain
+    DragonType.HEXTECH -> DragonHextech
+    DragonType.CHEMTECH -> DragonChemtech
+    DragonType.ELDER -> DragonElder
+    DragonType.UNKNOWN -> null
 }
 
 @Composable
@@ -323,14 +420,16 @@ private fun MatchupHeader(blue: GameTeam?, red: GameTeam?) {
     }
 }
 
-// The first line of a half is as tall as the champion portrait; the second line depends on the view. Every
-// row of a view has the same height whatever it shows, so the two halves and all rows line up.
+// The first line of a half is as tall as the champion portrait; the second line depends on the view. In a live
+// game a thin health bar sits between the two. Every row of a view has the same height whatever it shows, so
+// the two halves and all rows line up.
 private val PORTRAIT_SIZE = 36.dp
 private val LINE_GAP = 2.dp
 private val STATS_LINE_HEIGHT = 14.dp
 private val KDA_WIDTH = 50.dp
 private val KEYSTONE_SIZE = 18.dp
 private val HALF_PADDING = 2.dp
+private val HEALTH_BAR_HEIGHT = 3.dp
 
 private fun secondLineHeight(view: ScoreboardView) = when (view) {
     ScoreboardView.ITEMS -> ITEM_SLOT_DP.dp
@@ -342,35 +441,69 @@ private fun secondLineHeight(view: ScoreboardView) = when (view) {
  * outer edges, creep score and K/D/A toward the center, and the same second line on both sides.
  */
 @Composable
-private fun MatchupRow(matchup: Matchup, version: String?, view: ScoreboardView) {
+private fun MatchupRow(matchup: Matchup, version: String?, view: ScoreboardView, showHealth: Boolean) {
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = SCREEN_PADDING_DP.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PlayerHalf(matchup.blue, Side.BLUE, version, view, Modifier.weight(1f))
+            PlayerHalf(matchup.blue, Side.BLUE, version, view, showHealth, Modifier.weight(1f))
             Spacer(Modifier.width(HALF_GAP_DP.dp))
-            PlayerHalf(matchup.red, Side.RED, version, view, Modifier.weight(1f))
+            PlayerHalf(matchup.red, Side.RED, version, view, showHealth, Modifier.weight(1f))
         }
         HorizontalDivider()
     }
 }
 
-/** One side of a matchup: a strip in the side color on the outer edge, then the headline and the second line. */
+/**
+ * One side of a matchup: a strip in the side color on the outer edge, then the headline, the health bar when
+ * [showHealth] and the second line.
+ */
 @Composable
-private fun PlayerHalf(player: PlayerStats?, side: Side, version: String?, view: ScoreboardView, modifier: Modifier = Modifier) {
+private fun PlayerHalf(
+    player: PlayerStats?,
+    side: Side,
+    version: String?,
+    view: ScoreboardView,
+    showHealth: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val mirrored = side == Side.RED
-    val height = PORTRAIT_SIZE + LINE_GAP + secondLineHeight(view)
+    val healthHeight = if (showHealth) HEALTH_BAR_HEIGHT + LINE_GAP else 0.dp
+    val height = PORTRAIT_SIZE + healthHeight + LINE_GAP + secondLineHeight(view)
     Row(modifier.height(height)) {
         if (!mirrored) Box(Modifier.width(SIDE_BAR_DP.dp).height(height).background(side.color))
         Column(Modifier.weight(1f).padding(horizontal = HALF_PADDING)) {
             if (player != null) {
                 PlayerHeadline(player, player.details, version, mirrored)
+                if (showHealth) {
+                    Spacer(Modifier.height(LINE_GAP))
+                    HealthBar(player.health, mirrored)
+                }
                 Spacer(Modifier.height(LINE_GAP))
                 SecondLine(player, version, view, mirrored)
             }
         }
         if (mirrored) Box(Modifier.width(SIDE_BAR_DP.dp).height(height).background(side.color))
+    }
+}
+
+/**
+ * A thin bar filled by the share of health the player has left, from the outer edge, without numbers. A player
+ * the feed sent no health for keeps the bar's place empty, so every row stays as tall as the others.
+ */
+@Composable
+private fun HealthBar(health: PlayerHealth?, mirrored: Boolean) {
+    val shape = RoundedCornerShape(HEALTH_BAR_HEIGHT / 2)
+    if (health == null) {
+        Spacer(Modifier.fillMaxWidth().height(HEALTH_BAR_HEIGHT))
+        return
+    }
+    Box(
+        Modifier.fillMaxWidth().height(HEALTH_BAR_HEIGHT).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = if (mirrored) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(Modifier.fillMaxWidth(health.fraction).height(HEALTH_BAR_HEIGHT).background(HealthGreen))
     }
 }
 
@@ -609,7 +742,15 @@ private fun ItemSlot(itemId: Int, version: String?) {
 private val previewRoles = listOf("top", "jungle", "mid", "bottom", "support")
 private val previewChampions = listOf("KSante", "Viego", "Azir", "Jinx", "Nautilus")
 
-private fun previewTeam(firstId: Int, prefix: String, details: PlayerDetails? = null, nameSuffix: String = "") = TeamStats(
+private val previewDragons = listOf(DragonType.CLOUD, DragonType.HEXTECH, DragonType.UNKNOWN)
+
+private fun previewTeam(
+    firstId: Int,
+    prefix: String,
+    details: PlayerDetails? = null,
+    nameSuffix: String = "",
+    health: PlayerHealth? = null,
+) = TeamStats(
     totalGold = 31850,
     kills = 12,
     towers = 7,
@@ -619,8 +760,10 @@ private fun previewTeam(firstId: Int, prefix: String, details: PlayerDetails? = 
         PlayerStats(
             id, "$prefix Player$id$nameSuffix", previewChampions[(id - 1) % 5], kills = 10, deaths = 12, assists = 11,
             creepScore = 342, level = 18, details = details, role = previewRoles[(id - 1) % 5],
+            health = health?.let { it.copy(current = it.max * (id % 5) / 4) },
         )
     },
+    dragonTypes = previewDragons,
 )
 
 private val previewDetails = PlayerDetails(
@@ -666,6 +809,20 @@ private const val PREVIEW_BACKGROUND = 0xFF000000
 @Composable
 private fun ItemsViewPreview() =
     ScoreboardPreview(previewStats(previewDetails, previewDetails.copy(itemIds = previewDetails.itemIds.take(4))), ScoreboardView.ITEMS)
+
+@Preview(showBackground = true, backgroundColor = PREVIEW_BACKGROUND, widthDp = 360, heightDp = 780)
+@Composable
+private fun LiveHealthPreview() {
+    val health = PlayerHealth(current = 2000, max = 2000)
+    val live = GameStats(
+        isFinished = false,
+        blueTeam = previewTeam(1, "BLG", previewDetails, health = health),
+        redTeam = previewTeam(6, "T1", previewDetails, health = health),
+        blueTeamId = "blg",
+        redTeamId = "t1",
+    )
+    ScoreboardPreview(live, ScoreboardView.ITEMS)
+}
 
 @Preview(showBackground = true, backgroundColor = PREVIEW_BACKGROUND, widthDp = 360, heightDp = 780)
 @Composable

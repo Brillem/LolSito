@@ -63,6 +63,9 @@ data class GameStats(
         return detailsTime.takeIf { Duration.between(it, statsTime) > DETAILS_FRESH_TOLERANCE }
     }
 
+    /** True while the game is live and the feed sent some player's health; a finished game shows none. */
+    fun showsHealth(): Boolean = !isFinished && (blueTeam.players + redTeam.players).any { it.health != null }
+
     private fun hasDetails() = (blueTeam.players + redTeam.players).any { it.details != null }
 
     private fun detailsExpiredAt(next: GameStats): Boolean {
@@ -82,12 +85,17 @@ data class TeamStats(
     val totalGold: Int,
     val kills: Int,
     val towers: Int,
-    /** Dragons taken, of any element. */
+    /** Dragons taken, of any type. */
     val dragons: Int,
     val barons: Int,
     /** Ordered by participant id, which follows the role order (top to support). */
     val players: List<PlayerStats>,
+    /** The type of each dragon taken, in the order taken; [dragons] is their count. */
+    val dragonTypes: List<DragonType> = emptyList(),
 )
+
+/** The kind of a dragon a team took; [UNKNOWN] is a type the feed sent that the app does not know. */
+enum class DragonType { INFERNAL, OCEAN, CLOUD, MOUNTAIN, HEXTECH, CHEMTECH, ELDER, UNKNOWN }
 
 data class PlayerStats(
     val participantId: Int,
@@ -103,7 +111,16 @@ data class PlayerStats(
     val details: PlayerDetails? = null,
     /** Lane as the feed sends it (for example "top"); null when it does not say. */
     val role: String? = null,
+    /** Null when the feed sends no health for this player, and always once the game is finished. */
+    val health: PlayerHealth? = null,
 )
+
+/** A player's health at the stats' frame. */
+data class PlayerHealth(val current: Int, val max: Int) {
+    /** How full the health bar is, 0 to 1; 0 when the maximum is not positive. */
+    val fraction: Float
+        get() = if (max <= 0) 0f else (current.toFloat() / max).coerceIn(0f, 1f)
+}
 
 data class PlayerDetails(
     /** Items in slot order, without empty slots. */

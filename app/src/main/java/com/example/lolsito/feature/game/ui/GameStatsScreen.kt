@@ -296,7 +296,7 @@ private fun TeamComparison(stats: GameStats, blue: GameTeam?, red: GameTeam?, mo
 }
 
 /**
- * The dragons each team took, one short colored label per dragon in the order taken. The middle label takes
+ * The dragons each team took, one icon per dragon in the order taken. The middle label takes
  * only the room it needs, so each side has more of it than in a [ComparisonRow].
  */
 @Composable
@@ -314,7 +314,7 @@ private fun DragonsRow(blue: TeamStats, red: TeamStats) {
     }
 }
 
-/** A team's dragons as labels; the count instead when the feed gave no types for them (none taken shows 0). */
+/** A team's dragons as icons; the count instead when the feed gave no types for them (none taken shows 0). */
 @Composable
 private fun DragonLabels(team: TeamStats, mirrored: Boolean, modifier: Modifier = Modifier) {
     val textAlign = if (mirrored) TextAlign.End else TextAlign.Start
@@ -330,20 +330,37 @@ private fun DragonLabels(team: TeamStats, mirrored: Boolean, modifier: Modifier 
         return
     }
     val unknownColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val labels = buildAnnotatedString {
-        team.dragonTypes.forEachIndexed { index, type ->
-            if (index > 0) append(' ')
-            withStyle(SpanStyle(color = dragonColor(type) ?: unknownColor)) { append(dragonLabel(type)) }
-        }
+    Row(
+        modifier.semantics(mergeDescendants = true) { contentDescription = dragonsDescription(team.dragonTypes) },
+        horizontalArrangement = Arrangement.spacedBy(4.dp, if (mirrored) Alignment.End else Alignment.Start),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        team.dragonTypes.forEach { type -> DragonIcon(type, dragonColor(type) ?: unknownColor) }
     }
-    Text(
-        labels,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Bold,
-        textAlign = textAlign,
-        modifier = modifier.semantics { contentDescription = dragonsDescription(team.dragonTypes) },
+}
+
+/** The game's icon of a dragon type; its short colored label when the icon cannot be loaded. */
+@Composable
+private fun DragonIcon(type: DragonType, labelColor: Color) {
+    SubcomposeAsyncImage(
+        model = dragonIconUrl(type),
+        contentDescription = null,
+        modifier = Modifier.size(DRAGON_ICON_SIZE),
+        loading = {},
+        error = {
+            Text(
+                dragonLabel(type),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = labelColor,
+                maxLines = 1,
+                softWrap = false,
+            )
+        },
     )
 }
+
+private val DRAGON_ICON_SIZE = 22.dp
 
 /** The label color of a dragon type; null for an unknown one, which uses a muted color. */
 private fun dragonColor(type: DragonType): Color? = when (type) {

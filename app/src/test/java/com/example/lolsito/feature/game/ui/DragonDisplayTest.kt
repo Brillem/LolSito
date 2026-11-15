@@ -32,4 +32,24 @@ class DragonDisplayTest {
             dragonsDescription(listOf(DragonType.OCEAN, DragonType.UNKNOWN, DragonType.INFERNAL)),
         )
     }
+
+    @Test
+    fun `every known dragon type has the game's own icon, named as the feed names the type`() {
+        val base = "https://raw.communitydragon.org/latest/game/assets/ux/minimap/icons"
+        assertEquals(
+            listOf("infernal", "ocean", "cloud", "mountain", "hextech", "chemtech", "elder").map { "$base/dragon_$it.png" },
+            listOf(
+                DragonType.INFERNAL, DragonType.OCEAN, DragonType.CLOUD, DragonType.MOUNTAIN,
+                DragonType.HEXTECH, DragonType.CHEMTECH, DragonType.ELDER,
+            ).map(::dragonIconUrl),
+        )
+    }
+
+    @Test
+    fun `an unknown dragon type uses the generic dragon icon`() {
+        assertEquals(
+            "https://raw.communitydragon.org/latest/game/assets/ux/minimap/icons/dragon.png",
+            dragonIconUrl(DragonType.UNKNOWN),
+        )
+    }
 }

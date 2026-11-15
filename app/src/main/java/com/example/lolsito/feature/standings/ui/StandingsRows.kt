@@ -4,6 +4,7 @@ import com.example.lolsito.core.model.MatchResultDisplay
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.UniqueKeys
 import com.example.lolsito.core.model.formatMatchResult
+import com.example.lolsito.feature.schedule.domain.isFavoriteIn
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
@@ -30,6 +31,9 @@ sealed interface StandingsRow {
 
         /** Id of the team profile this row opens; null (not tappable) without an id or for a "TBD" placeholder. */
         val teamId: String? get() = ranking.team.id?.takeUnless { ranking.team.isPlaceholder }
+
+        /** The row gets the favorite star: its team has one of [favoriteNames], compared as Schedule does. */
+        fun isFavorite(favoriteNames: Collection<String>): Boolean = ranking.team.isFavoriteIn(favoriteNames)
     }
 
     /** Section (or section-less stage) with neither rankings nor matches yet. */
@@ -58,6 +62,10 @@ sealed interface StandingsRow {
         /** Game wins of the team at [index] as text, only when [displayedResult] shows a score. */
         fun displayedGameWins(index: Int, noSpoilers: Boolean): String? =
             displayedResult(noSpoilers).score?.let { sectionMatch.match.teams.getOrNull(index)?.gameWins?.toString() }
+
+        /** The team at [index] gets the favorite star, in list rows and bracket cards; false when there is no such team. */
+        fun isFavorite(index: Int, favoriteNames: Collection<String>): Boolean =
+            sectionMatch.match.teams.getOrNull(index)?.isFavoriteIn(favoriteNames) == true
     }
 
     /**

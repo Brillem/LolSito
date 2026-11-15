@@ -992,6 +992,172 @@ class ScheduleViewModelTest {
         polling.cancel()
     }
 
+    @Test
+    fun `refresh reloads the schedule and the live matches`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)), older = "o1")
+        val vm = viewModel()
+        advanceUntilIdle()
+        val liveBefore = liveRepository.calls
+
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1), event("2", 2)), older = "o2")
+        liveRepository.events = listOf(live("w1", WORLDS, 3))
+        vm.refresh()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(LoadStatus.Content, state.status)
+        assertFalse(state.isRefreshing)
+        assertEquals(listOf("1", "2"), state.upcomingIds())
+        assertEquals(listOf("w1"), state.liveEvents.map { it.matchId })
+        assertEquals(liveBefore + 1, liveRepository.calls)
+        assertEquals(listOf(key(setOf(WORLDS), null), key(setOf(WORLDS), null)), repository.requests)
+    }
+
+    @Test
+    fun `refresh keeps the loaded days on screen while it loads`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)), older = "o1")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        repository.gate = CompletableDeferred()
+        vm.refresh()
+        runCurrent()
+
+        val loading = vm.uiState.value
+        assertTrue(loading.isRefreshing)
+        assertEquals(LoadStatus.Content, loading.status)
+        assertEquals(listOf("1"), loading.upcomingIds())
+        assertTrue(loading.canLoadOlder)
+
+        repository.gate?.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isRefreshing)
+    }
+
+    @Test
+    fun `a failed refresh leaves the schedule as it was`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)), older = "o1")
+        repository.pages[key(setOf(WORLDS), "o1")] = page(listOf(event("0", -30, MatchState.COMPLETED)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.loadOlder()
+        advanceUntilIdle()
+        val shown = vm.uiState.value
+
+        repository.scheduleError = IOException("offline")
+        liveRepository.error = IOException("offline")
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals(shown, vm.uiState.value)
+        assertEquals(listOf("0"), vm.uiState.value.resultIds())
+    }
+
+    @Test
+    fun `refresh does not start a live request while a poll is in flight`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+        liveRepository.gate = CompletableDeferred()
+        advance(LIVE_SECTION_POLL_INTERVAL)
+        val inFlight = liveRepository.calls
+
+        vm.refresh()
+        runCurrent()
+        assertEquals(inFlight, liveRepository.calls)
+
+        liveRepository.events = listOf(live("w1", WORLDS, 3))
+        liveRepository.gate?.complete(Unit)
+        liveRepository.gate = null
+        advance(LIVE_SECTION_POLL_INTERVAL)
+
+        assertEquals(inFlight + 1, liveRepository.calls)
+        assertEquals(listOf("w1"), vm.uiState.value.liveEvents.map { it.matchId })
+        assertFalse(vm.uiState.value.isRefreshing)
+        polling.cancel()
+    }
+
+    @Test
+    fun `a second refresh while one is in flight does not request again`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val callsBefore = repository.scheduleCalls
+
+        repository.gate = CompletableDeferred()
+        vm.refresh()
+        runCurrent()
+        vm.refresh()
+        runCurrent()
+        assertEquals(callsBefore + 1, repository.scheduleCalls)
+
+        repository.gate?.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isRefreshing)
+    }
+
+    @Test
+    fun `no page is loaded while a refresh is in flight and paging works after it`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)), older = "o1")
+        repository.pages[key(setOf(WORLDS), "o1")] = page(listOf(event("0", -30, MatchState.COMPLETED)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val callsBefore = repository.scheduleCalls
+
+        repository.gate = CompletableDeferred()
+        vm.refresh()
+        runCurrent()
+        vm.loadOlder()
+        runCurrent()
+        assertEquals(callsBefore + 1, repository.scheduleCalls)
+
+        repository.gate?.complete(Unit)
+        repository.gate = null
+        advanceUntilIdle()
+        vm.loadOlder()
+        advanceUntilIdle()
+
+        assertEquals(listOf("0"), vm.uiState.value.resultIds())
+        assertEquals(listOf("1"), vm.uiState.value.upcomingIds())
+    }
+
+    @Test
+    fun `changing the leagues during a refresh shows the new selection only`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        repository.pages[key(setOf(WORLDS, LCK), null)] = page(listOf(event("1", 1), event("k", 2)))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val gate = CompletableDeferred<Unit>()
+        repository.gate = gate
+        vm.refresh()
+        runCurrent()
+        repository.gate = null
+        vm.toggleLeague(LCK)
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isRefreshing)
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+        assertEquals(listOf("1", "k"), vm.uiState.value.upcomingIds())
+    }
+
+    @Test
+    fun `refresh does nothing while the first load has not shown anything`() = runTest(dispatcher) {
+        repository.scheduleError = IOException("boom")
+        val vm = viewModel()
+        advanceUntilIdle()
+        val callsBefore = repository.scheduleCalls
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.status is LoadStatus.Error)
+        assertFalse(vm.uiState.value.isRefreshing)
+        assertEquals(callsBefore, repository.scheduleCalls)
+    }
+
     private fun ScheduleUiState.upcomingIds() = upcomingDays.flatMap { d -> d.events.map { it.matchId } }
 
     private fun ScheduleUiState.resultIds() = resultDays.flatMap { d -> d.events.map { it.matchId } }

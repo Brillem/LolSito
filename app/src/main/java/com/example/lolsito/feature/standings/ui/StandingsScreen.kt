@@ -10,15 +10,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +49,7 @@ import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.TeamLogo
+import com.example.lolsito.feature.schedule.ui.StarIcon
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
@@ -62,8 +67,11 @@ fun StandingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    // The mode is toggled in Schedule: read it again whenever this tab comes back.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshNoSpoilers() }
+    // The mode is toggled in Schedule and favorites are starred in a team's profile: read both again whenever this tab comes back.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshNoSpoilers()
+        viewModel.refreshFavorites()
+    }
     StandingsContent(
         state = state,
         onSelectLeague = viewModel::selectLeague,
@@ -74,9 +82,11 @@ fun StandingsScreen(
         onMatchClick = onMatchClick,
         onTeamClick = onTeamClick,
         modifier = modifier,
+        onRefresh = viewModel::refresh,
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StandingsContent(
     state: StandingsUiState,
@@ -88,6 +98,8 @@ fun StandingsContent(
     onMatchClick: (String) -> Unit,
     onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** Pull to refresh on the standings list. */
+    onRefresh: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         Row(
@@ -117,7 +129,15 @@ fun StandingsContent(
         }
         LoadStatusView(state.tournamentsStatus, "No tournaments for this league", onRetryTournaments) {
             LoadStatusView(state.standingsStatus, "No standings for this tournament yet", onRetryStandings) {
-                StandingsList(state.rows, onMatchClick, onTeamClick, noSpoilers = state.noSpoilers)
+                PullToRefreshBox(isRefreshing = state.isRefreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+                    StandingsList(
+                        state.rows,
+                        onMatchClick,
+                        onTeamClick,
+                        noSpoilers = state.noSpoilers,
+                        favoriteNames = state.favoriteNames,
+                    )
+                }
             }
         }
     }
@@ -182,6 +202,8 @@ fun StandingsList(
     onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     noSpoilers: Boolean = false,
+    /** Names of the starred teams: their table rows and match cards show a star. */
+    favoriteNames: List<String> = emptyList(),
 ) {
     LazyColumn(modifier.fillMaxSize()) {
         items(rows, key = { it.key }) { row ->
@@ -189,12 +211,17 @@ fun StandingsList(
                 is StandingsRow.StageHeader -> StageHeader(row.name)
                 is StandingsRow.SectionHeader -> SectionHeader(row.name)
                 is StandingsRow.TableHeader -> TableHeader()
-                is StandingsRow.RankingRow -> RankingRow(row, onTeamClick)
+                is StandingsRow.RankingRow -> RankingRow(row, onTeamClick, favorite = row.isFavorite(favoriteNames))
                 is StandingsRow.EmptySection -> InfoText("No standings for this section yet")
                 is StandingsRow.EliminationNotice -> EliminationNotice()
-                is StandingsRow.MatchRow -> SectionMatchRow(row, onClick = { onMatchClick(row.sectionMatch.match.id) }, noSpoilers = noSpoilers)
-                is StandingsRow.BracketRow -> BracketView(row, onMatchClick, noSpoilers = noSpoilers)
-                is StandingsRow.SwissRow -> SwissView(row, onMatchClick, noSpoilers = noSpoilers)
+                is StandingsRow.MatchRow -> SectionMatchRow(
+                    row,
+                    onClick = { onMatchClick(row.sectionMatch.match.id) },
+                    noSpoilers = noSpoilers,
+                    favoriteNames = favoriteNames,
+                )
+                is StandingsRow.BracketRow -> BracketView(row, onMatchClick, noSpoilers = noSpoilers, favoriteNames = favoriteNames)
+                is StandingsRow.SwissRow -> SwissView(row, onMatchClick, noSpoilers = noSpoilers, favoriteNames = favoriteNames)
             }
         }
     }
@@ -234,9 +261,17 @@ private fun TableHeader() {
     }
 }
 
-/** Opens the team profile on tap, unless the team has nothing to open: see [StandingsRow.RankingRow.teamId]. */
+/**
+ * Opens the team profile on tap, unless the team has nothing to open: see [StandingsRow.RankingRow.teamId].
+ * [favorite] draws the star next to the team's code.
+ */
 @Composable
-fun RankingRow(row: StandingsRow.RankingRow, onTeamClick: (String) -> Unit, modifier: Modifier = Modifier) {
+fun RankingRow(
+    row: StandingsRow.RankingRow,
+    onTeamClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    favorite: Boolean = false,
+) {
     val team = row.ranking.team
     val teamId = row.teamId
     Row(
@@ -250,7 +285,13 @@ fun RankingRow(row: StandingsRow.RankingRow, onTeamClick: (String) -> Unit, modi
         TeamLogo(team.imageUrl, contentDescription = team.name)
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
-            Text(team.code, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(team.code, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                if (favorite) {
+                    Spacer(Modifier.width(4.dp))
+                    FavoriteStar()
+                }
+            }
             Text(
                 team.name,
                 style = MaterialTheme.typography.bodySmall,
@@ -261,6 +302,17 @@ fun RankingRow(row: StandingsRow.RankingRow, onTeamClick: (String) -> Unit, modi
         }
         Text(row.record, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.End, modifier = Modifier.width(RECORD_WIDTH))
     }
+}
+
+/** The star Schedule draws next to a favorite team, at the same size and color. */
+@Composable
+internal fun FavoriteStar(modifier: Modifier = Modifier) {
+    Icon(
+        imageVector = StarIcon,
+        contentDescription = "Favorite",
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = modifier.size(12.dp),
+    )
 }
 
 @Composable
@@ -292,6 +344,7 @@ fun SectionMatchRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     noSpoilers: Boolean = false,
+    favoriteNames: List<String> = emptyList(),
 ) {
     val teams = row.sectionMatch.match.teams
     val result = row.displayedResult(noSpoilers)
@@ -303,7 +356,7 @@ fun SectionMatchRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (row.hasBothTeams) {
-            MatchTeam(teams[0], result.emphasisFor(0), Modifier.weight(1f), alignEnd = true)
+            MatchTeam(teams[0], result.emphasisFor(0), Modifier.weight(1f), alignEnd = true, favorite = row.isFavorite(0, favoriteNames))
             Text(
                 text = result.score ?: "vs",
                 style = MaterialTheme.typography.bodyMedium,
@@ -311,7 +364,7 @@ fun SectionMatchRow(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.width(56.dp),
             )
-            MatchTeam(teams[1], result.emphasisFor(1), Modifier.weight(1f), alignEnd = false)
+            MatchTeam(teams[1], result.emphasisFor(1), Modifier.weight(1f), alignEnd = false, favorite = row.isFavorite(1, favoriteNames))
         } else {
             Text("TBD", style = MaterialTheme.typography.bodyMedium)
         }
@@ -322,7 +375,7 @@ fun SectionMatchRow(
 }
 
 @Composable
-private fun MatchTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier, alignEnd: Boolean) {
+private fun MatchTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier, alignEnd: Boolean, favorite: Boolean) {
     Row(
         modifier.alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
         verticalAlignment = Alignment.CenterVertically,
@@ -336,9 +389,18 @@ private fun MatchTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier, al
             )
         }
         val logo = @Composable { TeamLogo(team.imageUrl, contentDescription = team.name, size = 24.dp) }
+        // The star sits on the outer side of the code, away from the score.
+        if (alignEnd && favorite) {
+            FavoriteStar()
+            Spacer(Modifier.width(4.dp))
+        }
         if (alignEnd) code() else logo()
         Spacer(Modifier.width(6.dp))
         if (alignEnd) logo() else code()
+        if (!alignEnd && favorite) {
+            Spacer(Modifier.width(4.dp))
+            FavoriteStar()
+        }
     }
 }
 

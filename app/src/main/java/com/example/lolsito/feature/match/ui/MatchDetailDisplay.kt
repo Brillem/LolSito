@@ -3,9 +3,12 @@ package com.example.lolsito.feature.match.ui
 import com.example.lolsito.core.model.MatchResultDisplay
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.feature.match.domain.CalendarEvent
 import com.example.lolsito.feature.match.domain.GameStatsLink
 import com.example.lolsito.feature.match.domain.MatchGame
 import com.example.lolsito.feature.match.domain.WatchLink
+import com.example.lolsito.feature.match.domain.calendarEventOf
+import java.time.Instant
 
 /**
  * What Match detail shows of the result. With [MatchDetailUiState.Content.resultsHidden] the score, the winner and
@@ -47,3 +50,9 @@ val MatchDetailUiState.Content.showsGames: Boolean get() = detail.state != Match
 
 /** The head to head is context for a series still to be decided, so a finished series leaves it out. */
 val MatchDetailUiState.Content.showsHeadToHead: Boolean get() = detail.state != MatchState.COMPLETED
+
+/**
+ * What "Add to calendar" opens the calendar with, or null when the button is not shown: only a series that has
+ * not started and whose [startTime] is known has one. A start time is not a result, so hidden results change nothing.
+ */
+fun MatchDetailUiState.Content.calendarEvent(startTime: Instant?): CalendarEvent? = calendarEventOf(detail, startTime)

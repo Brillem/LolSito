@@ -26,6 +26,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -253,6 +254,122 @@ class MatchDetailViewModelTest {
         advance(MATCH_DETAIL_POLL_INTERVAL)
         assertEquals(3, repository.requests.size) // the retry plus one refresh
         polling.cancel()
+    }
+
+    @Test
+    fun `refresh reloads the series and keeps the content on screen meanwhile`() = runTest(dispatcher) {
+        repository.detail = detail("m1", blockName = "Round 1")
+        val vm = viewModel("m1")
+        val states = mutableListOf<MatchDetailUiState>()
+        backgroundScope.launch { vm.uiState.toList(states) }
+        runCurrent()
+
+        repository.detail = detail("m1", blockName = "Round 2")
+        repository.gate = CompletableDeferred()
+        vm.refresh()
+        runCurrent()
+        assertTrue(vm.isRefreshing.value)
+        assertEquals(MatchDetailUiState.Content(detail("m1", blockName = "Round 1")), vm.uiState.value)
+
+        repository.gate?.complete(Unit)
+        advanceUntilIdle()
+        runCurrent() // lets the background collector see the last state
+
+        assertFalse(vm.isRefreshing.value)
+        assertEquals(
+            listOf(
+                MatchDetailUiState.Content(detail("m1", blockName = "Round 1")),
+                MatchDetailUiState.Content(detail("m1", blockName = "Round 2")),
+            ),
+            states,
+        )
+        assertEquals(listOf("m1", "m1"), repository.requests)
+    }
+
+    @Test
+    fun `a failed refresh leaves the content as it was`() = runTest(dispatcher) {
+        repository.detail = detail("m1")
+        val vm = viewModel("m1")
+        advanceUntilIdle()
+
+        repository.error = IOException("offline")
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertFalse(vm.isRefreshing.value)
+        assertEquals(MatchDetailUiState.Content(detail("m1")), vm.uiState.value)
+    }
+
+    @Test
+    fun `a refresh keeps hidden results hidden`() = runTest(dispatcher) {
+        preferences.noSpoilers = true
+        repository.detail = detail("m1")
+        val vm = viewModel("m1")
+        advanceUntilIdle()
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals(MatchDetailUiState.Content(detail("m1"), resultsHidden = true), vm.uiState.value)
+    }
+
+    @Test
+    fun `a refresh stops the poll in flight and no tick runs until a full interval after it`() = runTest(dispatcher) {
+        repository.detail = detail("m1", MatchState.IN_PROGRESS, "Round 1")
+        val vm = viewModel("m1")
+        advanceUntilIdle()
+        val polling = launch { vm.pollWhileVisible() }
+        val pollGate = CompletableDeferred<Unit>()
+        repository.gate = pollGate
+        advance(MATCH_DETAIL_POLL_INTERVAL)
+        assertEquals(2, repository.requests.size) // the tick is in flight
+
+        val refreshGate = CompletableDeferred<Unit>()
+        repository.gate = refreshGate
+        repository.detail = detail("m1", MatchState.IN_PROGRESS, "Round 2")
+        vm.refresh()
+        runCurrent()
+        assertEquals(3, repository.requests.size)
+
+        // The stopped tick never publishes, and nothing is polled while the refresh is in flight.
+        repository.detail = detail("m1", MatchState.IN_PROGRESS, "Stale")
+        pollGate.complete(Unit)
+        advance(MATCH_DETAIL_POLL_INTERVAL * 3)
+        assertEquals(3, repository.requests.size)
+        assertEquals(MatchDetailUiState.Content(detail("m1", MatchState.IN_PROGRESS, "Round 1")), vm.uiState.value)
+
+        repository.detail = detail("m1", MatchState.IN_PROGRESS, "Round 2")
+        refreshGate.complete(Unit)
+        repository.gate = null
+        runCurrent()
+        assertEquals(MatchDetailUiState.Content(detail("m1", MatchState.IN_PROGRESS, "Round 2")), vm.uiState.value)
+        assertFalse(vm.isRefreshing.value)
+
+        advance(MATCH_DETAIL_POLL_INTERVAL - 1.milliseconds)
+        assertEquals(3, repository.requests.size)
+        advance(1.milliseconds)
+        assertEquals(4, repository.requests.size)
+        polling.cancel()
+    }
+
+    @Test
+    fun `refresh does nothing before the series is shown, and retry still reloads with a spinner`() = runTest(dispatcher) {
+        repository.error = IOException("boom")
+        val vm = viewModel("m1")
+        advanceUntilIdle()
+
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(MatchDetailUiState.Error("boom"), vm.uiState.value)
+        assertFalse(vm.isRefreshing.value)
+        assertEquals(1, repository.requests.size)
+
+        repository.error = null
+        repository.detail = detail("m1")
+        vm.retry()
+        assertEquals(MatchDetailUiState.Loading, vm.uiState.value)
+        advanceUntilIdle()
+        assertEquals(MatchDetailUiState.Content(detail("m1")), vm.uiState.value)
     }
 
     private suspend fun TestScope.advance(duration: kotlin.time.Duration) {

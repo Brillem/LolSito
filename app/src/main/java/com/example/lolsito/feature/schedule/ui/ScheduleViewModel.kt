@@ -59,6 +59,8 @@ data class ScheduleUiState(
     val favoriteNames: List<String> = emptyList(),
     /** The Favorites toggle: only matches of a favorite show. Not remembered, like [liveOnly]. */
     val favoritesOnly: Boolean = false,
+    /** A pull to refresh is reloading the schedule; everything shown stays as it is meanwhile. */
+    val isRefreshing: Boolean = false,
 ) {
     /**
      * What to say when the Favorites toggle leaves nothing to show; null when it is off or something
@@ -103,6 +105,10 @@ data class ScheduleUiState(
  * toggle ([toggleFavoritesOnly]) keeps only matches of favorites within what is loaded, composes with
  * the LIVE toggle and is not remembered. Unreadable favorites count as none.
  *
+ * [refresh] (pull to refresh) asks again for the first page and the live matches while everything stays on
+ * screen, and replaces the loaded schedule only once the page arrives; a failure leaves it as it was. The live
+ * request is the same one the polling makes, so the two never overlap, and no page loads beside a refresh.
+ *
  * The selection is saved in [preferences] on every
  * toggle and restored once, before the first schedule request, so a stored selection never costs a
  * request for the default one. Preferences failures are ignored: the screen works with the defaults.
@@ -124,6 +130,7 @@ class ScheduleViewModel(
     private var newerToken: String? = null
     private var loadJob: Job? = null
     private var pagingJob: Job? = null
+    private var refreshJob: Job? = null
 
     /** Last live matches the feed returned, of every league. */
     private var lastLiveMatches: List<ScheduleEvent> = emptyList()
@@ -148,6 +155,41 @@ class ScheduleViewModel(
     fun retry() {
         loadLive()
         reload()
+    }
+
+    /**
+     * Pull to refresh: reloads the schedule from its first page and the live matches without clearing what is
+     * shown. Like any reload it starts pagination from scratch, so pages loaded before are dropped once the fresh
+     * page arrives. Only while the schedule (or its empty state) is shown and no refresh is already running; a
+     * page still loading is waited for first. A failure changes nothing.
+     */
+    fun refresh() {
+        val status = _uiState.value.status
+        if (status != LoadStatus.Content && status != LoadStatus.Empty) return
+        if (refreshJob?.isActive == true || loadJob?.isActive == true) return
+        _uiState.update { it.copy(isRefreshing = true) }
+        // Skipped by itself while a poll tick's request is in flight; that request brings the same data.
+        loadLive()
+        refreshJob = viewModelScope.launch {
+            try {
+                pagingJob?.join()
+                val selected = _uiState.value.selectedLeagueIds
+                if (selected.isNotEmpty()) {
+                    val page = repository.getSchedule(selected.sorted(), pageToken = null)
+                    events = mergeEvents(emptyList(), page.events)
+                    olderToken = page.olderToken
+                    newerToken = page.newerToken
+                    _uiState.update { it.copy(olderError = null, newerError = null) }
+                    publish()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The schedule stays as it was.
+            } finally {
+                _uiState.update { it.copy(isRefreshing = false) }
+            }
+        }
     }
 
     /**
@@ -254,6 +296,7 @@ class ScheduleViewModel(
     private fun reload() {
         loadJob?.cancel()
         pagingJob?.cancel()
+        refreshJob?.cancel()
         events = emptyList()
         olderToken = null
         newerToken = null
@@ -266,6 +309,7 @@ class ScheduleViewModel(
                 isLoadingNewer = false,
                 olderError = null,
                 newerError = null,
+                isRefreshing = false,
             ).withSections()
         }
         loadJob = viewModelScope.launch {
@@ -320,7 +364,7 @@ class ScheduleViewModel(
 
     private fun loadPage(older: Boolean) {
         val token = (if (older) olderToken else newerToken) ?: return
-        if (pagingJob?.isActive == true || loadJob?.isActive == true) return
+        if (pagingJob?.isActive == true || loadJob?.isActive == true || refreshJob?.isActive == true) return
         val selected = _uiState.value.selectedLeagueIds.sorted()
         _uiState.update {
             if (older) it.copy(isLoadingOlder = true, olderError = null)

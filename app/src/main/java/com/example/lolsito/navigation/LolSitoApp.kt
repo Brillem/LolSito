@@ -225,6 +225,7 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                                 clock = container.clock(),
                                 reminderScheduler = container.reminderScheduler,
                                 reminderSync = container.reminderSyncTrigger,
+                                notifications = container.notificationAvailability,
                             )
                         }
                     }

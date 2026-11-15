@@ -7,6 +7,7 @@ import com.example.lolsito.core.model.League
 import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.feature.reminders.domain.NotificationAvailability
 import com.example.lolsito.feature.reminders.domain.ReminderScheduler
 import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
 import com.example.lolsito.feature.standings.domain.StandingsRepository
@@ -33,7 +34,10 @@ data class TeamsUiState(
     val favorites: List<FavoriteTeam> = emptyList(),
     /** The bell next to the favorites: start-of-match reminders for them. Off until the user turns it on. */
     val remindersEnabled: Boolean = false,
-    /** Why the bell could not be turned on, shown next to it until it is tried again; null when there is nothing to say. */
+    /**
+     * Shown next to the bell: why it could not be turned on (until it is tried again), or that it is on
+     * but the system does not allow notifications; null when there is nothing to say.
+     */
     val remindersNotice: String? = null,
 ) {
     /** The picker's label; "League" until the leagues are known. */
@@ -51,7 +55,9 @@ data class TeamsUiState(
  * The bell next to the favorites turns the start-of-match reminders on and off for all of them. It is
  * off until the user turns it on and is remembered. Turning it on asks [reminderSync] for a sync;
  * turning it off cancels every reminder through [reminderScheduler] at once. The screen asks for the
- * notification permission first when the system needs it ([onNotificationPermissionResult]).
+ * notification permission first when the system needs it ([onNotificationPermissionResult]). While the
+ * bell is on and [notifications] says the system would not show them, a notice says so
+ * ([refreshNotificationsNotice]); the bell is never turned off for the user.
  */
 class TeamsViewModel(
     private val standingsRepository: StandingsRepository,
@@ -60,6 +66,7 @@ class TeamsViewModel(
     private val clock: Clock,
     private val reminderScheduler: ReminderScheduler,
     private val reminderSync: ReminderSyncTrigger,
+    private val notifications: NotificationAvailability,
     defaultLeagueId: String = DEFAULT_LEAGUE_ID,
 ) : ViewModel() {
 
@@ -103,6 +110,7 @@ class TeamsViewModel(
     fun enableReminders() {
         remindersLoadJob?.cancel() // The user's choice wins over the stored one still loading.
         _uiState.update { it.copy(remindersEnabled = true, remindersNotice = null) }
+        refreshNotificationsNotice()
         viewModelScope.launch {
             saveRemindersEnabled(true)
             reminderSync.requestSync()
@@ -123,6 +131,22 @@ class TeamsViewModel(
             enableReminders()
         } else {
             _uiState.update { it.copy(remindersEnabled = false, remindersNotice = PERMISSION_DENIED_NOTICE) }
+        }
+    }
+
+    /**
+     * Says next to the bell that the system does not allow notifications while the bell is on, and stops
+     * saying it once it does or the bell is off. The bell itself is left as the user set it. The screen
+     * calls this whenever it is shown again, since the setting changes outside the app.
+     */
+    fun refreshNotificationsNotice() {
+        val blocked = !notifications.canNotify()
+        _uiState.update { state ->
+            when {
+                state.remindersEnabled && blocked -> state.copy(remindersNotice = NOTIFICATIONS_OFF_NOTICE)
+                state.remindersNotice == NOTIFICATIONS_OFF_NOTICE -> state.copy(remindersNotice = null)
+                else -> state
+            }
         }
     }
 
@@ -177,6 +201,7 @@ class TeamsViewModel(
                 false
             }
             _uiState.update { it.copy(remindersEnabled = enabled) }
+            refreshNotificationsNotice()
         }
     }
 
@@ -198,5 +223,8 @@ class TeamsViewModel(
 
         const val PERMISSION_DENIED_NOTICE =
             "Reminders need permission to send notifications. Allow notifications for LolSito in the system settings."
+
+        const val NOTIFICATIONS_OFF_NOTICE =
+            "Notifications for LolSito are turned off in the system settings, so reminders will not be shown."
     }
 }

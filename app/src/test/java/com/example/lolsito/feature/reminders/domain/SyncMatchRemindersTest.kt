@@ -18,6 +18,7 @@ import com.example.lolsito.testutil.FakeReminderScheduler
 import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -182,6 +183,80 @@ class SyncMatchRemindersTest {
         }
     }
 
+    @Test
+    fun `a first page short of 48 hours asks for the newer page and reminds its matches too`() = runTest {
+        schedule.newerToken = "n1"
+        schedule.newerPages["n1"] = SchedulePage(
+            listOf(event("m3", "T1", "DRX", start = hoursAhead(30)), event("m4", "Gen.G", "DRX", start = hoursAhead(50))),
+            olderToken = null,
+            newerToken = "n2",
+        )
+
+        sync()
+
+        assertEquals(listOf(null, "n1"), schedule.requests.map { it.second })
+        assertEquals("every page asks for the same leagues", 1, schedule.requests.map { it.first }.distinct().size)
+        assertEquals(listOf("m1", "m3"), scheduler.scheduledCalls.map { it.matchId })
+    }
+
+    @Test
+    fun `asks for at most 2 newer pages`() = runTest {
+        schedule.newerToken = "n1"
+        schedule.newerPages["n1"] = SchedulePage(listOf(event("m3", "T1", "DRX", start = hoursAhead(2))), null, "n2")
+        schedule.newerPages["n2"] = SchedulePage(listOf(event("m4", "Gen.G", "DRX", start = hoursAhead(3))), null, "n3")
+        schedule.newerPages["n3"] = SchedulePage(listOf(event("m5", "T1", "KT Rolster", start = hoursAhead(4))), null, "n4")
+
+        sync()
+
+        assertEquals(listOf(null, "n1", "n2"), schedule.requests.map { it.second })
+        assertEquals(listOf("m1", "m3", "m4"), scheduler.scheduledCalls.map { it.matchId })
+    }
+
+    @Test
+    fun `a first page reaching 48 hours asks for no newer page`() = runTest {
+        schedule.events = listOf(event("m1", "Gen.G", "Hanwha Life"), event("m2", "DRX", "KT Rolster", start = hoursAhead(48)))
+        schedule.newerToken = "n1"
+
+        sync()
+
+        assertEquals(listOf<String?>(null), schedule.requests.map { it.second })
+        assertEquals(listOf("m1"), scheduler.scheduledCalls.map { it.matchId })
+    }
+
+    @Test
+    fun `a failed newer page fails the sync and leaves the reminders as they were`() = runTest {
+        sync()
+        schedule.events = listOf(event("m9", "T1", "DRX"))
+        schedule.newerToken = "n1"
+        schedule.failingToken = "n1"
+
+        try {
+            sync()
+            fail("expected the sync to fail")
+        } catch (e: IOException) {
+            // Expected: the worker retries later.
+        }
+
+        assertEquals(listOf("m1"), scheduler.reminders.keys.toList())
+        assertEquals(listOf("m1"), scheduler.scheduledCalls.map { it.matchId })
+        assertTrue(scheduler.cancelledCalls.isEmpty())
+    }
+
+    @Test
+    fun `a page reaches the window when it has no newer page or an event 48 hours ahead or later`() {
+        val soon = event("m1", "Gen.G", "DRX")
+        val atHorizon = event("m2", "Gen.G", "DRX", start = hoursAhead(48))
+        val justShort = event("m3", "Gen.G", "DRX", start = hoursAhead(48).minusMillis(1))
+
+        assertTrue(reachesReminderWindow(SchedulePage(listOf(soon), null, newerToken = null), now))
+        assertTrue(reachesReminderWindow(SchedulePage(emptyList(), null, newerToken = null), now))
+        assertTrue(reachesReminderWindow(SchedulePage(listOf(soon, atHorizon), null, newerToken = "n1"), now))
+        assertFalse(reachesReminderWindow(SchedulePage(listOf(soon, justShort), null, newerToken = "n1"), now))
+        assertFalse(reachesReminderWindow(SchedulePage(emptyList(), null, newerToken = "n1"), now))
+    }
+
+    private fun hoursAhead(hours: Long): Instant = now.plus(Duration.ofHours(hours))
+
     private fun profile(team: FavoriteTeam, homeLeague: String?) =
         TeamProfile(team.id, team.slug, team.name, team.code, null, homeLeague, null, emptyList())
 
@@ -197,15 +272,23 @@ class SyncMatchRemindersTest {
         }
     }
 
+    /** The first page holds [events] and points to [newerToken]; [newerPages] answer by their token. */
     private class FakeScheduleRepository : ScheduleRepository {
         var events: List<ScheduleEvent> = emptyList()
+        var newerToken: String? = null
+        val newerPages = mutableMapOf<String, SchedulePage>()
         val requests = mutableListOf<Pair<List<String>, String?>>()
         var error: Throwable? = null
+
+        /** Fails only the request of this page token. */
+        var failingToken: String? = null
 
         override suspend fun getSchedule(leagueIds: List<String>, pageToken: String?): SchedulePage {
             requests += leagueIds to pageToken
             error?.let { throw it }
-            return SchedulePage(events, olderToken = null, newerToken = null)
+            if (pageToken == null) return SchedulePage(events, olderToken = null, newerToken = newerToken)
+            if (pageToken == failingToken) throw IOException("page $pageToken")
+            return newerPages.getValue(pageToken)
         }
     }
 

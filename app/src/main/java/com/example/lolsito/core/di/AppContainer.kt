@@ -11,9 +11,11 @@ import com.example.lolsito.feature.game.data.GameStatsRepositoryImpl
 import com.example.lolsito.feature.game.domain.GameStatsRepository
 import com.example.lolsito.feature.match.data.MatchDetailRepositoryImpl
 import com.example.lolsito.feature.match.domain.MatchDetailRepository
+import com.example.lolsito.feature.reminders.domain.NotificationAvailability
 import com.example.lolsito.feature.reminders.domain.ReminderScheduler
 import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
 import com.example.lolsito.feature.reminders.domain.SyncMatchReminders
+import com.example.lolsito.feature.reminders.work.SystemNotificationAvailability
 import com.example.lolsito.feature.reminders.work.WorkManagerReminders
 import com.example.lolsito.feature.schedule.data.LiveMatchesRepositoryImpl
 import com.example.lolsito.feature.schedule.data.ScheduleRepositoryImpl
@@ -53,13 +55,18 @@ class AppContainer(private val context: Context) {
     val reminderScheduler: ReminderScheduler get() = workManagerReminders
     val reminderSyncTrigger: ReminderSyncTrigger get() = workManagerReminders
 
+    val notificationAvailability: NotificationAvailability by lazy { SystemNotificationAvailability(context) }
+
     /** Run by the background sync worker. */
     val syncMatchReminders: SyncMatchReminders by lazy {
         SyncMatchReminders(userPreferences, teamsRepository, leaguesRepository, scheduleRepository, reminderScheduler, clock())
     }
 
-    /** The app opened: keeps the 6-hour reminder sync scheduled and syncs now (both wait for a network). */
-    fun onAppOpened() {
+    /**
+     * The app came to the foreground: keeps the 6-hour reminder sync scheduled (idempotent) and syncs now
+     * (a newer request replaces a pending one); both wait for a network.
+     */
+    fun onAppForegrounded() {
         workManagerReminders.ensurePeriodicSync()
         workManagerReminders.requestSync()
     }

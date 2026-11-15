@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import com.example.lolsito.MainActivity
 import com.example.lolsito.R
 import com.example.lolsito.feature.reminders.domain.MatchReminder
+import com.example.lolsito.feature.reminders.domain.NotificationAvailability
 
 /** The match reminders channel and notifications; tapping one opens Match detail of its match. */
 object ReminderNotifications {
@@ -54,9 +55,17 @@ object ReminderNotifications {
         }
     }
 
-    private fun canNotify(context: Context): Boolean {
+    /** Whether the system would show a notification now: the permission (Android 13+) and the app setting. */
+    fun canNotify(context: Context): Boolean {
         val permitted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         return permitted && NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
+}
+
+/** [NotificationAvailability] read from the system each time it is asked, so a change in the settings is seen. */
+class SystemNotificationAvailability(context: Context) : NotificationAvailability {
+    private val appContext = context.applicationContext
+
+    override fun canNotify(): Boolean = ReminderNotifications.canNotify(appContext)
 }

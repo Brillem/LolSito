@@ -29,6 +29,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,6 +53,7 @@ import com.example.lolsito.core.ui.ErrorView
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadingView
 import com.example.lolsito.core.ui.TeamLogo
+import com.example.lolsito.core.ui.rememberTeamAccent
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.match.domain.CalendarEvent
 import com.example.lolsito.feature.match.domain.GameSide
@@ -404,8 +408,24 @@ fun MatchHeader(
 ) {
     val detail = content.detail
     val result = content.displayedResult
+    val firstAccent = rememberTeamAccent(detail.teams.getOrNull(0)?.imageUrl)
+    val secondAccent = rememberTeamAccent(detail.teams.getOrNull(1)?.imageUrl)
+    val background = MaterialTheme.colorScheme.background
     Column(
-        modifier.fillMaxWidth().padding(16.dp),
+        modifier
+            .fillMaxWidth()
+            // Each team's color glows from its side and fades out towards the middle and the bottom.
+            .drawBehind {
+                drawRect(
+                    Brush.horizontalGradient(
+                        0f to firstAccent.copy(alpha = firstAccent.alpha * ACCENT_GLOW_ALPHA),
+                        0.5f to Color.Transparent,
+                        1f to secondAccent.copy(alpha = secondAccent.alpha * ACCENT_GLOW_ALPHA),
+                    ),
+                )
+                drawRect(Brush.verticalGradient(0.35f to Color.Transparent, 1f to background))
+            }
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -439,6 +459,9 @@ fun MatchHeader(
         }
     }
 }
+
+/** How strong a team's color is at the edge of the match header. */
+private const val ACCENT_GLOW_ALPHA = 0.38f
 
 @Composable
 private fun HeaderTeam(

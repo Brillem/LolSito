@@ -67,6 +67,7 @@ import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
+import com.example.lolsito.core.ui.AppCard
 import com.example.lolsito.core.ui.ChevronDownIcon
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadStatus
@@ -96,6 +97,7 @@ import java.time.format.FormatStyle
 fun ScheduleScreen(
     viewModel: ScheduleViewModel,
     onMatchClick: (String) -> Unit,
+    onTournamentClick: (leagueId: String, tournamentId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -123,6 +125,7 @@ fun ScheduleScreen(
         onMatchClick = onMatchClick,
         modifier = modifier,
         onRefresh = viewModel::refresh,
+        onTournamentClick = onTournamentClick,
     )
     }
 }
@@ -145,6 +148,8 @@ fun ScheduleContent(
     modifier: Modifier = Modifier,
     /** Pull to refresh on the lists; the loading, error and empty states do not scroll, so they do not offer it. */
     onRefresh: () -> Unit = {},
+    /** Opens a tournament of the "Upcoming tournaments" section in the Tournaments tab. */
+    onTournamentClick: (leagueId: String, tournamentId: String) -> Unit = { _, _ -> },
 ) {
     Column(modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -165,13 +170,19 @@ fun ScheduleContent(
                 // The toggle replaces the page, so the schedule's own loading, error and empty states do not apply.
                 LiveOnlyList(state, onMatchClick)
             } else {
-                LoadStatusView(
-                    status = state.status,
-                    emptyMessage = if (state.selectedLeagueIds.isEmpty()) "Select a league to see its matches"
-                    else "No matches scheduled",
-                    onRetry = onRetry,
-                ) {
-                    ScheduleList(state, onLoadOlder, onLoadNewer, onMatchClick)
+                val emptyMessage = if (state.selectedLeagueIds.isEmpty()) "Select a league to see its matches"
+                else "No matches scheduled"
+                if (state.status == LoadStatus.Empty && state.upcomingTournaments.isNotEmpty()) {
+                    // Nothing scheduled, but tournaments are coming: show them above the empty message.
+                    EmptyWithUpcomingList(state, emptyMessage, onTournamentClick)
+                } else {
+                    LoadStatusView(
+                        status = state.status,
+                        emptyMessage = emptyMessage,
+                        onRetry = onRetry,
+                    ) {
+                        ScheduleList(state, onLoadOlder, onLoadNewer, onMatchClick, onTournamentClick)
+                    }
                 }
             }
         }
@@ -349,11 +360,13 @@ private fun ScheduleList(
     onLoadOlder: () -> Unit,
     onLoadNewer: () -> Unit,
     onMatchClick: (String) -> Unit,
+    onTournamentClick: (leagueId: String, tournamentId: String) -> Unit,
 ) {
     // A section is shown while it has days or a paging control, which needs its header to make sense.
     val showUpcoming = state.upcomingDays.isNotEmpty() || state.canLoadNewer
     val showResults = state.resultDays.isNotEmpty() || state.canLoadOlder
     LazyColumn(Modifier.fillMaxSize()) {
+        upcomingTournamentRows(state, onTournamentClick)
         state.favoritesEmptyMessage?.let { message ->
             item(key = "favorites-empty") {
                 Text(
@@ -404,6 +417,83 @@ private fun ScheduleList(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                 )
+            }
+        }
+    }
+}
+
+/** The empty state of a schedule with nothing in range, kept scrollable so the upcoming tournaments show above it. */
+@Composable
+private fun EmptyWithUpcomingList(
+    state: ScheduleUiState,
+    emptyMessage: String,
+    onTournamentClick: (leagueId: String, tournamentId: String) -> Unit,
+) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        upcomingTournamentRows(state, onTournamentClick)
+        item(key = "empty-message") {
+            Text(
+                emptyMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+            )
+        }
+    }
+}
+
+/** The "Upcoming tournaments" section: a header and one row per tournament; nothing when there are none. */
+private fun LazyListScope.upcomingTournamentRows(
+    state: ScheduleUiState,
+    onTournamentClick: (leagueId: String, tournamentId: String) -> Unit,
+) {
+    if (state.upcomingTournaments.isEmpty()) return
+    item(key = "upcoming-tournaments-header") { SectionHeader("Upcoming tournaments") }
+    items(state.upcomingTournaments, key = { "upcoming-tournament:${it.tournamentId}" }) { tournament ->
+        UpcomingTournamentRow(tournament, state.zoneId, onClick = { onTournamentClick(tournament.leagueId, tournament.tournamentId) })
+    }
+}
+
+/**
+ * A tournament that has not started: the league logo, its name and, on the right, when it starts
+ * ("starts Mar 10") with, in the accent color, how soon when that is within a month. Opens it in the Tournaments tab.
+ */
+@Composable
+private fun UpcomingTournamentRow(tournament: UpcomingTournament, zoneId: ZoneId, onClick: () -> Unit) {
+    val today = (LocalNow.current ?: Instant.now()).atZone(zoneId).toLocalDate()
+    val distance = startsInLabel(tournament.startDate, today)
+    AppCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2),
+        onClick = onClick,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (tournament.leagueImageUrl != null) {
+                TeamLogo(tournament.leagueImageUrl, contentDescription = null, size = 32.dp)
+                Spacer(Modifier.width(12.dp))
+            }
+            Text(
+                tournament.name,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    startsLabel(tournament.startDate, today),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                if (distance != null) {
+                    Text(
+                        distance,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }

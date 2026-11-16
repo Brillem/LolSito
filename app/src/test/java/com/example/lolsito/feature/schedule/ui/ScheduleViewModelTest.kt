@@ -35,8 +35,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import com.example.lolsito.feature.standings.domain.Standings
+import com.example.lolsito.feature.standings.domain.StandingsRepository
+import com.example.lolsito.feature.standings.domain.Tournament
+import com.example.lolsito.feature.teams.domain.InternationalLeagues
+import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ScheduleViewModelTest {
@@ -44,6 +51,7 @@ class ScheduleViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val repository = FakeScheduleRepository()
     private val liveRepository = FakeLiveMatchesRepository()
+    private val standingsRepository = FakeStandingsRepository()
     private var leaguesError: Throwable? = null
     private val leaguesRepository = LeaguesRepository {
         leaguesError?.let { throw it }
@@ -67,6 +75,8 @@ class ScheduleViewModelTest {
         leaguesRepository = leaguesRepository,
         preferences = preferences,
         zoneId = zoneId,
+        standingsRepository = standingsRepository,
+        clock = Clock.fixed(Instant.parse("2026-11-16T12:00:00Z"), ZoneOffset.UTC),
         defaultLeagueIds = setOf(WORLDS),
     )
 
@@ -1523,6 +1533,126 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         assertEquals(readsAfterLoad, preferences.reads)
+    }
+
+    private fun upcomingSetUp() {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        repository.pages[key(setOf(WORLDS, LCK), null)] = page(listOf(event("1", 1)))
+        standingsRepository.tournaments[WORLDS] = listOf(tournament("worlds_2027", "2027-10-01"))
+        standingsRepository.tournaments[InternationalLeagues.FIRST_STAND] = listOf(
+            tournament("first_stand_2027", "2027-03-10"),
+            tournament("first_stand_2026", "2026-03-10"),
+        )
+        standingsRepository.tournaments[InternationalLeagues.MSI] = listOf(tournament("msi_2027", "2027-05-01"))
+        standingsRepository.tournaments[LCK] = listOf(tournament("lck_split_1_2027", "2027-01-14"))
+    }
+
+    private fun tournament(slug: String, start: String) =
+        Tournament(id = "id-$slug", slug = slug, startDate = LocalDate.parse(start), endDate = null)
+
+    private fun ScheduleUiState.upcomingNames() = upcomingTournaments.map { it.name }
+
+    @Test
+    fun `upcoming tournaments come from the selected and the international leagues, each asked once`() = runTest(dispatcher) {
+        upcomingSetUp()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf("First Stand 2027", "MSI 2027", "Worlds 2027"),
+            vm.uiState.value.upcomingNames(),
+        )
+        assertEquals(
+            setOf(WORLDS, InternationalLeagues.MSI, InternationalLeagues.FIRST_STAND),
+            standingsRepository.requested.toSet(),
+        )
+        assertEquals(3, standingsRepository.requested.size)
+    }
+
+    @Test
+    fun `a selected league adds its tournaments to the section`() = runTest(dispatcher) {
+        upcomingSetUp()
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.toggleLeague(LCK)
+        advanceUntilIdle()
+
+        assertTrue(LCK in standingsRepository.requested)
+        assertEquals(
+            listOf("LCK Split 1 2027", "First Stand 2027", "MSI 2027", "Worlds 2027"),
+            vm.uiState.value.upcomingNames(),
+        )
+    }
+
+    @Test
+    fun `a league whose request fails is skipped and the rest still show`() = runTest(dispatcher) {
+        upcomingSetUp()
+        standingsRepository.failing += InternationalLeagues.FIRST_STAND
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf("MSI 2027", "Worlds 2027"), vm.uiState.value.upcomingNames())
+        assertEquals(LoadStatus.Content, vm.uiState.value.status)
+    }
+
+    @Test
+    fun `when every request fails the section is empty and nothing else changes`() = runTest(dispatcher) {
+        upcomingSetUp()
+        standingsRepository.failing += listOf(WORLDS, InternationalLeagues.FIRST_STAND, InternationalLeagues.MSI)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertTrue(state.upcomingTournaments.isEmpty())
+        assertEquals(LoadStatus.Content, state.status)
+        assertEquals(listOf("1"), state.upcomingIds())
+    }
+
+    @Test
+    fun `the schedule failing does not stop the section`() = runTest(dispatcher) {
+        upcomingSetUp()
+        repository.scheduleError = IOException("boom")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.status is LoadStatus.Error)
+        assertEquals(3, vm.uiState.value.upcomingTournaments.size)
+    }
+
+    @Test
+    fun `pull to refresh and a selection change reload the section but a poll tick does not`() = runTest(dispatcher) {
+        upcomingSetUp()
+        val vm = viewModel()
+        advanceUntilIdle()
+        val afterLoad = standingsRepository.requested.size
+
+        val polling = launch { vm.pollWhileVisible() }
+        advance(LIVE_SECTION_POLL_INTERVAL)
+        advance(LIVE_SECTION_POLL_INTERVAL)
+        assertEquals(afterLoad, standingsRepository.requested.size)
+        polling.cancel()
+
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(afterLoad * 2, standingsRepository.requested.size)
+
+        vm.toggleLeague(LCK)
+        advanceUntilIdle()
+        assertEquals(afterLoad * 2 + afterLoad + 1, standingsRepository.requested.size)
+    }
+
+    private class FakeStandingsRepository : StandingsRepository {
+        val tournaments = mutableMapOf<String, List<Tournament>>()
+        val failing = mutableSetOf<String>()
+        val requested = mutableListOf<String>()
+
+        override suspend fun getTournaments(leagueId: String): List<Tournament> {
+            requested += leagueId
+            if (leagueId in failing) throw IOException("down")
+            return tournaments[leagueId].orEmpty()
+        }
+
+        override suspend fun getStandings(tournamentId: String): Standings = error("not used")
     }
 
     private class FakeLiveMatchesRepository : LiveMatchesRepository {

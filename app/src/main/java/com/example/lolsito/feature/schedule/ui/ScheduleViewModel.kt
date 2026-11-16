@@ -17,6 +17,8 @@ import com.example.lolsito.feature.schedule.domain.buildScheduleSections
 import com.example.lolsito.feature.schedule.domain.favoriteNamesOf
 import com.example.lolsito.feature.schedule.domain.involvesFavorite
 import com.example.lolsito.feature.schedule.domain.mergeEvents
+import com.example.lolsito.feature.standings.domain.StandingsRepository
+import com.example.lolsito.feature.teams.domain.InternationalLeagues
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +26,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Clock
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
 
@@ -61,6 +65,8 @@ data class ScheduleUiState(
     val favoritesOnly: Boolean = false,
     /** A pull to refresh is reloading the schedule; everything shown stays as it is meanwhile. */
     val isRefreshing: Boolean = false,
+    /** The "Upcoming tournaments" section: tournaments that have not started, soonest first. Empty hides it. */
+    val upcomingTournaments: List<UpcomingTournament> = emptyList(),
 ) {
     /**
      * What to say when the Favorites toggle leaves nothing to show; null when it is off or something
@@ -109,6 +115,11 @@ data class ScheduleUiState(
  * screen, and replaces the loaded schedule only once the page arrives; a failure leaves it as it was. The live
  * request is the same one the polling makes, so the two never overlap, and no page loads beside a refresh.
  *
+ * The "Upcoming tournaments" section is loaded by its own job once the leagues and the selection are known,
+ * and again on every reload and pull to refresh, never by the poll: the tournaments of the selected leagues
+ * and of the international ones that start after today ([loadUpcomingTournaments]). It never changes the
+ * status or the lists, and a failure just leaves it empty.
+ *
  * The selection is saved in [preferences] on every
  * toggle and restored once, before the first schedule request, so a stored selection never costs a
  * request for the default one. Preferences failures are ignored: the screen works with the defaults.
@@ -119,6 +130,8 @@ class ScheduleViewModel(
     private val leaguesRepository: LeaguesRepository,
     private val preferences: UserPreferences,
     private val zoneId: ZoneId,
+    private val standingsRepository: StandingsRepository,
+    private val clock: Clock,
     defaultLeagueIds: Set<String> = setOf(DEFAULT_LEAGUE_ID),
 ) : ViewModel() {
 
@@ -131,6 +144,7 @@ class ScheduleViewModel(
     private var loadJob: Job? = null
     private var pagingJob: Job? = null
     private var refreshJob: Job? = null
+    private var upcomingJob: Job? = null
 
     /** Last live matches the feed returned, of every league. */
     private var lastLiveMatches: List<ScheduleEvent> = emptyList()
@@ -170,6 +184,7 @@ class ScheduleViewModel(
         _uiState.update { it.copy(isRefreshing = true) }
         // Skipped by itself while a poll tick's request is in flight; that request brings the same data.
         loadLive()
+        loadUpcoming()
         refreshJob = viewModelScope.launch {
             try {
                 pagingJob?.join()
@@ -325,6 +340,7 @@ class ScheduleViewModel(
                     }
                 }
                 val selected = _uiState.value.selectedLeagueIds
+                loadUpcoming()
                 if (selected.isEmpty()) {
                     publish()
                     return@launch
@@ -399,6 +415,28 @@ class ScheduleViewModel(
                 isLoadingOlder = false,
                 isLoadingNewer = false,
             ).withSections()
+        }
+    }
+
+    /**
+     * Reloads the "Upcoming tournaments" section for the current selection plus the international leagues,
+     * replacing a request still running. Independent of the schedule: nothing but the section changes, and a
+     * failure leaves it empty.
+     */
+    private fun loadUpcoming() {
+        upcomingJob?.cancel()
+        val state = _uiState.value
+        val leagueIds = (state.selectedLeagueIds.sorted() + InternationalLeagues.ids).distinct()
+        val today = LocalDate.now(clock.withZone(zoneId))
+        upcomingJob = viewModelScope.launch {
+            try {
+                val upcoming = standingsRepository.loadUpcomingTournaments(leagueIds, state.leagues, today)
+                _uiState.update { it.copy(upcomingTournaments = upcoming) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The section is secondary: it stays as it was.
+            }
         }
     }
 

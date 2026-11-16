@@ -239,13 +239,13 @@ class TeamTournamentsTest {
     }
 
     @Test
-    fun `a round that is only a number gives the stage name`() {
+    fun `a round that is only a number in an elimination last stage gives no label`() {
         val ladder = bracket(
             "Road to MSI",
             listOf(listOf(cell("Round 1", match("r1", "T1", "KC"))), listOf(cell("Round 2", match("r2", "T1", "BLG")))),
         )
 
-        assertEquals("Road to MSI", result(Standings(listOf(ladder))))
+        assertNull(result(Standings(listOf(ladder))))
     }
 
     @Test
@@ -263,13 +263,14 @@ class TeamTournamentsTest {
     }
 
     @Test
-    fun `a Swiss stage as the last stage has no final and gives its name`() {
+    fun `a Swiss stage as the last stage has no final and gives no label`() {
         val swiss = bracket(
             "Swiss",
             listOf(listOf(cell("Round 4", match("a", "T1", "KC"), match("b", "A", "B"))), listOf(cell("Round 5", match("c", "T1", "DK"), match("d", "E", "F")))),
         )
 
-        assertEquals("Swiss", result(Standings(listOf(swiss))))
+        // Its rounds are bare "Round N", so only the stage name is left, which is not a result.
+        assertNull(result(Standings(listOf(swiss))))
     }
 
     @Test

@@ -206,6 +206,8 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                                 leaguesRepository = container.leaguesRepository,
                                 preferences = container.userPreferences,
                                 zoneId = container.zoneId(),
+                                standingsRepository = container.standingsRepository,
+                                clock = container.clock(),
                             )
                         }
                     }
@@ -213,6 +215,12 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                 ScheduleScreen(
                     viewModel = vm,
                     onMatchClick = { matchId -> navController.navigateFrom(entry, Routes.match(matchId)) },
+                    onTournamentClick = { leagueId, tournamentId ->
+                        if (canNavigateFrom(entry.lifecycle.currentState)) {
+                            tournamentToOpen = StandingsSelection(leagueId, tournamentId)
+                            navController.openTournamentsTab()
+                        }
+                    },
                 )
             }
             composable(Routes.STANDINGS) { entry ->

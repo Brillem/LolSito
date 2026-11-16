@@ -474,6 +474,23 @@ class TeamsViewModelTest {
     }
 
     @Test
+    fun `a player on two teams is listed under the team whose league comes first in the loaded order`() = runTest(dispatcher) {
+        val faker = Player("p1", "Faker", "Sanghyeok", "Lee", null, PlayerRole.MID)
+        directory.teams = listOf(
+            DirectoryTeam("a", "T1 Academy", "T1A", null, "LEC", true, directory.roster(faker)),
+            DirectoryTeam("b", "T1", "T1", null, "LCK", true, directory.roster(faker)),
+        )
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onQueryChange("faker")
+        advanceUntilIdle()
+
+        // The loaded order is LCK, then LEC.
+        assertEquals(listOf("T1"), vm.uiState.value.searchResults.players.map { it.team.code })
+    }
+
+    @Test
     fun `typing twice before the list arrives still requests it once`() = runTest(dispatcher) {
         val vm = viewModel()
         advanceUntilIdle()
@@ -558,13 +575,14 @@ class TeamsViewModelTest {
     private class FakeDirectory : TeamDirectoryRepository {
         var requests = 0
         var error: Throwable? = null
-        val teams = listOf(
-            DirectoryTeam(
-                "1", "T1", "T1", null, "LCK", true,
-                listOf(Player("p1", "Faker", "Sanghyeok", "Lee", null, PlayerRole.MID)),
-            ),
-            DirectoryTeam("2", "Gen.G", "GEN", null, "LCK", true, emptyList()),
+        var teams = listOf(
+            DirectoryTeam("1", "T1", "T1", null, "LCK", true, roster(Player("p1", "Faker", "Sanghyeok", "Lee", null, PlayerRole.MID))),
+            DirectoryTeam("2", "Gen.G", "GEN", null, "LCK", true, roster()),
         )
+
+        /** [players] plus bench players up to a full roster, so the team counts as searchable. */
+        fun roster(vararg players: Player): List<Player> =
+            players.toList() + (players.size until 5).map { Player("b$it-${players.size}", "Bench$it", null, null, null, PlayerRole.OTHER) }
 
         override suspend fun getAllTeams(): List<DirectoryTeam> {
             requests++

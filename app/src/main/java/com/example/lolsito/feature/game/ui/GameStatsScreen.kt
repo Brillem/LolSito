@@ -4,9 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,17 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -50,8 +47,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.SubcomposeAsyncImage
+import com.example.lolsito.core.ui.AppCard
+import com.example.lolsito.core.ui.AppTopBar
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
+import com.example.lolsito.core.ui.Shapes
+import com.example.lolsito.core.ui.SkeletonBlock
+import com.example.lolsito.core.ui.SkeletonScreen
+import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.game.domain.DragonType
@@ -73,6 +76,7 @@ import com.example.lolsito.ui.theme.DragonInfernal
 import com.example.lolsito.ui.theme.DragonMountain
 import com.example.lolsito.ui.theme.DragonOcean
 import com.example.lolsito.ui.theme.HealthGreen
+import com.example.lolsito.ui.theme.LabelText
 import com.example.lolsito.ui.theme.LolSitoTheme
 import java.time.Duration
 import java.time.Instant
@@ -97,7 +101,6 @@ fun GameStatsScreen(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GameStatsContent(
     state: GameStatsUiState,
@@ -110,17 +113,13 @@ fun GameStatsContent(
     // Kept here, above the load status, so rotation and a retry keep the chosen view.
     var view by rememberSaveable { mutableStateOf(ScoreboardView.ITEMS) }
     Column(modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("Game stats") },
-            // The app Scaffold already applies the system bar insets.
-            windowInsets = WindowInsets(0),
-            navigationIcon = {
-                IconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
-                    Text("←", style = MaterialTheme.typography.titleLarge)
-                }
-            },
-        )
-        LoadStatusView(state.status, emptyMessage = "No stats available for this game", onRetry = onRetry) {
+        AppTopBar("Game stats", onBack)
+        LoadStatusView(
+            state.status,
+            emptyMessage = "No stats available for this game",
+            onRetry = onRetry,
+            loading = { GameStatsSkeleton() },
+        ) {
             state.stats?.let { GameStatsBody(it, state.goldHistory, teams, view, onViewChange = { view = it }) }
         }
     }
@@ -147,10 +146,38 @@ fun formatGold(gold: Int): String {
     return "${tenths / 10}.${tenths % 10}k"
 }
 
+// The two sides of the map, as broadcasts color them. They are not the app accent nor team colors.
+private val BlueSide = Color(0xFF2F80ED)
+private val RedSide = Color(0xFFE5484D)
+
 private enum class Side(val label: String, val color: Color) {
-    BLUE("Blue side", Color(0xFF2F80ED)),
-    RED("Red side", Color(0xFFE5484D)),
+    BLUE("Blue side", BlueSide),
+    RED("Red side", RedSide),
 }
+
+// The small styles of the scoreboard, in the label typeface: it is condensed, so a row of two players
+// fits a narrow phone at sizes that can still be read.
+
+/** A player name and the K/D/A beside it. */
+private val ScoreboardText = LabelText.Number.copy(fontSize = 14.sp, lineHeight = 16.sp)
+
+/** The creep score over the K/D/A, and the cells of the stats view. */
+private val ScoreboardCaption = LabelText.Number.copy(fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium)
+
+/** The level over a portrait. */
+private val LevelText = LabelText.Number.copy(fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold)
+
+/** The text standing for a keystone or a champion whose image is missing. */
+private val SlotText = LabelText.Number.copy(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium)
+
+/** The id standing for an item whose icon is missing; it has to fit a slot of [ITEM_SLOT_DP]. */
+private val ItemIdText = LabelText.Number.copy(fontSize = 9.sp, lineHeight = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.sp)
+
+// The scoreboard is one card made of blocks: the header, rounded on top, then a block per matchup, the
+// last one rounded at the bottom. A thin gap of background separates them.
+private val ScoreboardTop = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
+private val ScoreboardBottom = RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp)
+private val SCOREBOARD_ROW_GAP = 2.dp
 
 /** The team totals shown as plain numbers; the dragons have their own row, [DragonsRow], after the towers. */
 private val teamRowsBeforeDragons: List<Pair<String, (TeamStats) -> String>> = listOf(
@@ -177,7 +204,7 @@ private fun GameStatsBody(
     val matchups = remember(stats.blueTeam.players, stats.redTeam.players) { stats.matchups() }
     val staleDetailsSince = stats.staleDetailsTime()
     val showHealth = stats.showsHealth()
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = Spacing.CardGap / 2)) {
         item(key = "teams") {
             TeamComparison(stats, blue = blue, red = red)
         }
@@ -188,14 +215,10 @@ private fun GameStatsBody(
             }
         }
         item(key = "matchups-header") {
-            Column {
-                HorizontalDivider()
-                MatchupHeader(blue = blue, red = red)
-                HorizontalDivider()
-            }
+            MatchupHeader(blue = blue, red = red, alone = matchups.isEmpty())
         }
-        items(matchups, key = { it.key }) { matchup ->
-            MatchupRow(matchup, stats.dataDragonVersion, view, showHealth)
+        itemsIndexed(matchups, key = { _, matchup -> matchup.key }) { index, matchup ->
+            MatchupRow(matchup, stats.dataDragonVersion, view, showHealth, last = index == matchups.lastIndex)
         }
         item(key = "view-toggle") {
             Column {
@@ -206,7 +229,7 @@ private fun GameStatsBody(
                         detailsAsOfLabel(it, ZoneId.systemDefault()),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                        modifier = Modifier.padding(start = Spacing.Screen, end = Spacing.Screen, bottom = 8.dp),
                     )
                 }
             }
@@ -216,7 +239,7 @@ private fun GameStatsBody(
 
 @Composable
 private fun ViewToggle(view: ScoreboardView, onViewChange: (ScoreboardView) -> Unit) {
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
         ScoreboardView.entries.forEachIndexed { index, option ->
             SegmentedButton(
                 selected = option == view,
@@ -250,7 +273,6 @@ private fun TeamTag(
         Text(
             label,
             style = style,
-            fontWeight = FontWeight.Bold,
             color = color,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -265,32 +287,35 @@ private fun TeamTag(
 
 private val TEAM_LOGO_SIZE = 20.dp
 
+/** The card comparing the two teams: who they are and the state of the game, then their totals row by row. */
 @Composable
 private fun TeamComparison(stats: GameStats, blue: GameTeam?, red: GameTeam?, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TeamTag(
-                teamLabel(blue?.code, "Blue"), blue?.logoUrl, mirrored = false, color = Side.BLUE.color,
-                style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (stats.isFinished) "Final" else "LIVE",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f),
-            )
-            TeamTag(
-                teamLabel(red?.code, "Red"), red?.logoUrl, mirrored = true, color = Side.RED.color,
-                style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
-            )
-        }
-        teamRowsBeforeDragons.forEach { (label, value) ->
-            ComparisonRow(blue = value(stats.blueTeam), label = label, red = value(stats.redTeam))
-        }
-        DragonsRow(blue = stats.blueTeam, red = stats.redTeam)
-        teamRowsAfterDragons.forEach { (label, value) ->
-            ComparisonRow(blue = value(stats.blueTeam), label = label, red = value(stats.redTeam))
+    AppCard(modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TeamTag(
+                    teamLabel(blue?.code, "Blue"), blue?.logoUrl, mirrored = false, color = Side.BLUE.color,
+                    style = LabelText.TeamCode, modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (stats.isFinished) "Final" else "LIVE",
+                    style = LabelText.Overline,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+                TeamTag(
+                    teamLabel(red?.code, "Red"), red?.logoUrl, mirrored = true, color = Side.RED.color,
+                    style = LabelText.TeamCode, modifier = Modifier.weight(1f),
+                )
+            }
+            teamRowsBeforeDragons.forEach { (label, value) ->
+                ComparisonRow(blue = value(stats.blueTeam), label = label, red = value(stats.redTeam))
+            }
+            DragonsRow(blue = stats.blueTeam, red = stats.redTeam)
+            teamRowsAfterDragons.forEach { (label, value) ->
+                ComparisonRow(blue = value(stats.blueTeam), label = label, red = value(stats.redTeam))
+            }
         }
     }
 }
@@ -305,7 +330,7 @@ private fun DragonsRow(blue: TeamStats, red: TeamStats) {
         DragonLabels(blue, mirrored = false, Modifier.weight(1f))
         Text(
             "Dragons",
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 8.dp),
@@ -321,7 +346,7 @@ private fun DragonLabels(team: TeamStats, mirrored: Boolean, modifier: Modifier 
     if (team.dragonTypes.isEmpty()) {
         Text(
             team.dragons.toString(),
-            style = MaterialTheme.typography.bodyLarge,
+            style = LabelText.Number,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = textAlign,
@@ -379,21 +404,21 @@ private fun ComparisonRow(blue: String, label: String, red: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             blue,
-            style = MaterialTheme.typography.bodyLarge,
+            style = LabelText.Number,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
         Text(
             label,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.weight(1f),
         )
         Text(
             red,
-            style = MaterialTheme.typography.bodyLarge,
+            style = LabelText.Number,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.End,
@@ -402,20 +427,26 @@ private fun ComparisonRow(blue: String, label: String, red: String) {
     }
 }
 
+/** The top block of the scoreboard: each team over its column of players. [alone] when no matchup follows it. */
 @Composable
-private fun MatchupHeader(blue: GameTeam?, red: GameTeam?) {
+private fun MatchupHeader(blue: GameTeam?, red: GameTeam?, alone: Boolean) {
     Row(
-        Modifier.fillMaxWidth().padding(start = SCREEN_PADDING_DP.dp, end = SCREEN_PADDING_DP.dp, top = 8.dp, bottom = 4.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(start = SCREEN_PADDING_DP.dp, end = SCREEN_PADDING_DP.dp, top = Spacing.CardGap / 2)
+            .clip(if (alone) Shapes.Card else ScoreboardTop)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TeamTag(
             teamLabel(blue?.code, Side.BLUE.label), blue?.logoUrl, mirrored = false, color = Side.BLUE.color,
-            style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
+            style = LabelText.TeamCode, modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(HALF_GAP_DP.dp))
         TeamTag(
             teamLabel(red?.code, Side.RED.label), red?.logoUrl, mirrored = true, color = Side.RED.color,
-            style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
+            style = LabelText.TeamCode, modifier = Modifier.weight(1f),
         )
     }
 }
@@ -438,20 +469,23 @@ private fun secondLineHeight(view: ScoreboardView) = when (view) {
 
 /**
  * Two opposing players on one row, mirrored around the gap in the middle: portraits and names toward the
- * outer edges, creep score and K/D/A toward the center, and the same second line on both sides.
+ * outer edges, creep score and K/D/A toward the center, and the same second line on both sides. The row is
+ * a block of the scoreboard card; the [last] one closes the card with rounded corners.
  */
 @Composable
-private fun MatchupRow(matchup: Matchup, version: String?, view: ScoreboardView, showHealth: Boolean) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = SCREEN_PADDING_DP.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PlayerHalf(matchup.blue, Side.BLUE, version, view, showHealth, Modifier.weight(1f))
-            Spacer(Modifier.width(HALF_GAP_DP.dp))
-            PlayerHalf(matchup.red, Side.RED, version, view, showHealth, Modifier.weight(1f))
-        }
-        HorizontalDivider()
+private fun MatchupRow(matchup: Matchup, version: String?, view: ScoreboardView, showHealth: Boolean, last: Boolean) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = SCREEN_PADDING_DP.dp, end = SCREEN_PADDING_DP.dp, top = SCOREBOARD_ROW_GAP)
+            .clip(if (last) ScoreboardBottom else RectangleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PlayerHalf(matchup.blue, Side.BLUE, version, view, showHealth, Modifier.weight(1f))
+        Spacer(Modifier.width(HALF_GAP_DP.dp))
+        PlayerHalf(matchup.red, Side.RED, version, view, showHealth, Modifier.weight(1f))
     }
 }
 
@@ -521,8 +555,7 @@ private fun PlayerHeadline(player: PlayerStats, details: PlayerDetails?, version
         Column(identityModifier.padding(horizontal = 4.dp), horizontalAlignment = if (mirrored) Alignment.End else Alignment.Start) {
             Text(
                 player.summonerName,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
+                style = ScoreboardText,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = textAlign,
                 maxLines = 1,
@@ -537,7 +570,7 @@ private fun PlayerHeadline(player: PlayerStats, details: PlayerDetails?, version
         Column(Modifier.width(KDA_WIDTH), horizontalAlignment = if (mirrored) Alignment.Start else Alignment.End) {
             Text(
                 csLabel(player),
-                style = MaterialTheme.typography.labelSmall,
+                style = ScoreboardCaption,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = scoreAlign,
                 maxLines = 1,
@@ -545,8 +578,7 @@ private fun PlayerHeadline(player: PlayerStats, details: PlayerDetails?, version
             )
             Text(
                 "${player.kills}/${player.deaths}/${player.assists}",
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
+                style = ScoreboardText,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = scoreAlign,
                 maxLines = 1,
@@ -572,8 +604,7 @@ private fun PlayerHeadline(player: PlayerStats, details: PlayerDetails?, version
 private fun LevelBadge(level: Int, modifier: Modifier = Modifier) {
     Text(
         level.toString(),
-        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp),
-        fontWeight = FontWeight.Bold,
+        style = LevelText,
         color = Color.White,
         maxLines = 1,
         softWrap = false,
@@ -590,7 +621,7 @@ private fun KeystoneSlot(details: PlayerDetails?, mirrored: Boolean) {
     val text: @Composable (String) -> Unit = { text ->
         Text(
             text,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+            style = SlotText,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             softWrap = false,
@@ -627,7 +658,7 @@ private fun ChampionPortrait(championId: String, version: String?) {
             if (text.isNotEmpty()) {
                 Text(
                     text,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    style = SlotText,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
@@ -689,8 +720,6 @@ private fun StatsGrid(line: PlayerLine.Stats) {
     }
 }
 
-private val STATS_TEXT = TextStyle(fontSize = 10.sp, lineHeight = 14.sp)
-
 @Composable
 private fun StatCellText(cell: StatCell, modifier: Modifier = Modifier) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -701,7 +730,7 @@ private fun StatCellText(cell: StatCell, modifier: Modifier = Modifier) {
     }
     Text(
         text,
-        style = STATS_TEXT,
+        style = ScoreboardCaption,
         color = MaterialTheme.colorScheme.onSurface,
         maxLines = 1,
         softWrap = false,
@@ -719,7 +748,7 @@ private fun ItemSlot(itemId: Int, version: String?) {
         Box(Modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
             Text(
                 text,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp),
+                style = ItemIdText,
                 maxLines = 1,
                 softWrap = false,
             )
@@ -736,6 +765,39 @@ private fun ItemSlot(itemId: Int, version: String?) {
             loading = { Box(Modifier.size(size).background(MaterialTheme.colorScheme.surfaceVariant)) },
             error = { idText(content.idText) },
         )
+    }
+}
+
+/** Loading state shaped like the screen: the comparison card, then the scoreboard header and its five rows. */
+@Composable
+private fun GameStatsSkeleton() {
+    val rowHeight = PORTRAIT_SIZE + LINE_GAP + ITEM_SLOT_DP.dp + 10.dp
+    SkeletonScreen {
+        Column(Modifier.fillMaxWidth().padding(vertical = Spacing.CardGap / 2)) {
+            SkeletonBlock(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)
+                    .height(190.dp),
+                Shapes.Card,
+            )
+            SkeletonBlock(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = SCREEN_PADDING_DP.dp, end = SCREEN_PADDING_DP.dp, top = Spacing.CardGap / 2)
+                    .height(38.dp),
+                ScoreboardTop,
+            )
+            repeat(5) { index ->
+                SkeletonBlock(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = SCREEN_PADDING_DP.dp, end = SCREEN_PADDING_DP.dp, top = SCOREBOARD_ROW_GAP)
+                        .height(rowHeight),
+                    if (index == 4) ScoreboardBottom else RectangleShape,
+                )
+            }
+        }
     }
 }
 
@@ -842,5 +904,13 @@ private fun LongNamesPreview() =
 private fun GameStatsEmptyPreview() {
     LolSitoTheme {
         GameStatsContent(state = GameStatsUiState(LoadStatus.Empty), teams = emptyMap(), onBack = {}, onRetry = {})
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = PREVIEW_BACKGROUND, widthDp = 360, heightDp = 780)
+@Composable
+private fun GameStatsLoadingPreview() {
+    LolSitoTheme {
+        GameStatsContent(state = GameStatsUiState(LoadStatus.Loading), teams = emptyMap(), onBack = {}, onRetry = {})
     }
 }

@@ -6,35 +6,20 @@ import androidx.work.Data
 import androidx.work.WorkerParameters
 import com.example.lolsito.LolSitoApplication
 import com.example.lolsito.feature.reminders.domain.MatchReminder
-import com.example.lolsito.feature.reminders.domain.isStillWanted
-import com.example.lolsito.feature.reminders.domain.reminderTitle
-import com.example.lolsito.feature.schedule.domain.favoriteNamesOf
-import kotlinx.coroutines.CancellationException
+import com.example.lolsito.feature.reminders.domain.startedTitle
 import java.time.Instant
 
 /**
- * Shows one match's reminder when it is due. The bell and the favorites are checked again first, so
- * a change made without a network (the sync needs one) still stops the reminder. It always succeeds,
- * so the scheduler counts the reminder as handled and a later sync does not show it again.
+ * One check of whether a match has started, run by WorkManager; see [CheckMatchStart]. When it has, the
+ * notification is shown. It always succeeds, so the scheduler counts the reminder as handled, and the
+ * next check, if any, is the one [CheckMatchStart] asked the scheduler for.
  */
 class MatchReminderWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val reminder = reminderOf(inputData) ?: return Result.success()
         val container = (applicationContext as LolSitoApplication).container
-        val preferences = container.userPreferences
-        val wanted = try {
-            reminder.isStillWanted(
-                remindersEnabled = preferences.getMatchRemindersEnabled() ?: false,
-                favoriteNames = favoriteNamesOf(preferences.getFavoriteTeams().orEmpty()),
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            true // It was scheduled while wanted; an unreadable store is no reason to drop it.
-        }
-        if (wanted) {
-            val title = reminderTitle(reminder.teamsLabel, reminder.startTime, container.clock().instant())
-            ReminderNotifications.show(applicationContext, reminder, title)
+        if (container.checkMatchStart(reminder)) {
+            ReminderNotifications.show(applicationContext, reminder, startedTitle(reminder.teamsLabel))
         }
         return Result.success()
     }

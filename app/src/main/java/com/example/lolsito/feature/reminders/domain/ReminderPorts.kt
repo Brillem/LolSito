@@ -6,13 +6,22 @@ package com.example.lolsito.feature.reminders.domain
  */
 interface ReminderScheduler {
     /**
-     * The reminders scheduled and not cancelled, including those already shown (so a sync never
-     * shows one twice), each with the [MatchReminder.version] it was scheduled with.
+     * The reminders scheduled and not cancelled, including those already shown or given up (so a sync
+     * never shows one twice), each with the [MatchReminder.version] it was scheduled with.
      */
     suspend fun scheduled(): List<ScheduledReminder>
 
-    /** Schedules [reminder] for its [MatchReminder.triggerAt], replacing any reminder of the same match. */
+    /**
+     * Schedules the first check of [reminder] for its [MatchReminder.triggerAt], replacing any reminder
+     * of the same match.
+     */
     fun schedule(reminder: MatchReminder)
+
+    /**
+     * Schedules another check of [reminder] after [START_CHECK_INTERVAL], to run once the current check
+     * has finished. It belongs to the same reminder: [cancel] and a newer [schedule] drop it too.
+     */
+    fun checkAgain(reminder: MatchReminder)
 
     fun cancel(matchId: String)
 

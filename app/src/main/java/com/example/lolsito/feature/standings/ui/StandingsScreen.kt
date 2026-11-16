@@ -124,14 +124,18 @@ fun StandingsContent(
                 modifier = Modifier.weight(1f),
                 imageUrl = state.selectedLeague?.imageUrl,
                 itemImageUrl = { it.imageUrl },
+                title = "League",
+                isSelected = { it.id == state.selectedLeagueId },
             )
             if (state.tournaments.isNotEmpty()) {
                 DropdownPicker(
                     label = state.selectedTournament?.label ?: "Tournament",
                     items = state.tournaments,
-                    itemLabel = { t -> listOfNotNull(t.label, t.dateRange).joinToString("\n") },
+                    itemLabel = { it.label },
                     onSelect = { onSelectTournament(it.id) },
                     modifier = Modifier.weight(1f),
+                    title = "Tournament",
+                    isSelected = { it.id == state.selectedTournamentId },
                 )
             }
         }

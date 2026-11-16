@@ -11,8 +11,13 @@ import com.example.lolsito.feature.reminders.domain.NotificationAvailability
 import com.example.lolsito.feature.reminders.domain.ReminderScheduler
 import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
 import com.example.lolsito.feature.standings.domain.StandingsRepository
+import com.example.lolsito.feature.teams.domain.DirectoryTeam
+import com.example.lolsito.feature.teams.domain.MIN_SEARCH_LENGTH
+import com.example.lolsito.feature.teams.domain.TeamDirectoryRepository
+import com.example.lolsito.feature.teams.domain.TeamSearchResults
 import com.example.lolsito.feature.teams.domain.TeamSummary
 import com.example.lolsito.feature.teams.domain.currentTeams
+import com.example.lolsito.feature.teams.domain.searchTeamsAndPlayers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,7 +44,18 @@ data class TeamsUiState(
      * but the system does not allow notifications; null when there is nothing to say.
      */
     val remindersNotice: String? = null,
+    /** What the user typed in the search field; blank means the tab shows its usual content. */
+    val query: String = "",
+    /** The team list the search runs over: Loading while it is fetched, Error when that failed, Content otherwise. */
+    val searchStatus: LoadStatus = LoadStatus.Content,
+    val searchResults: TeamSearchResults = TeamSearchResults(),
 ) {
+    /** True while the results replace the favorites, the picker and the grid. */
+    val isSearching: Boolean get() = query.isNotBlank()
+
+    /** True when the query is too short to search anything yet. */
+    val queryTooShort: Boolean get() = query.trim().length < MIN_SEARCH_LENGTH
+
     /** The picker's label; "League" until the leagues are known. */
     val selectedLeagueName: String get() = leagues.firstOrNull { it.id == selectedLeagueId }?.name ?: "League"
 }
@@ -58,6 +74,10 @@ data class TeamsUiState(
  * notification permission first when the system needs it ([onNotificationPermissionResult]). While the
  * bell is on and [notifications] says the system would not show them, a notice says so
  * ([refreshNotificationsNotice]); the bell is never turned off for the user.
+ *
+ * The search field ([onQueryChange]) looks for teams and players among every team of [teamDirectory]. That
+ * list is requested the first time the user types, not before, and kept; a failed request shows an error
+ * that [retrySearch] requests again. A blank query leaves the tab as it was.
  */
 class TeamsViewModel(
     private val standingsRepository: StandingsRepository,
@@ -67,6 +87,7 @@ class TeamsViewModel(
     private val reminderScheduler: ReminderScheduler,
     private val reminderSync: ReminderSyncTrigger,
     private val notifications: NotificationAvailability,
+    private val teamDirectory: TeamDirectoryRepository,
     defaultLeagueId: String = DEFAULT_LEAGUE_ID,
 ) : ViewModel() {
 
@@ -76,6 +97,8 @@ class TeamsViewModel(
     private var leaguesJob: Job? = null
     private var remindersLoadJob: Job? = null
     private var teamsJob: Job? = null
+    private var directoryJob: Job? = null
+    private var directory: List<DirectoryTeam>? = null
 
     init {
         loadRemindersEnabled()
@@ -88,6 +111,48 @@ class TeamsViewModel(
         if (leagueId == _uiState.value.selectedLeagueId) return
         _uiState.update { it.copy(selectedLeagueId = leagueId) }
         loadTeams()
+    }
+
+    /** Sets the search text. The first non-blank one asks for the team list; later ones search what is kept. */
+    fun onQueryChange(query: String) {
+        _uiState.update { it.copy(query = query) }
+        if (query.isBlank()) {
+            // Leaving a failed search behind: the next one starts clean.
+            _uiState.update { if (it.searchStatus is LoadStatus.Error) it.copy(searchStatus = LoadStatus.Content) else it }
+        } else if (directory == null && directoryJob?.isActive != true && _uiState.value.searchStatus !is LoadStatus.Error) {
+            loadDirectory()
+        }
+        publishResults()
+    }
+
+    /** Clears the search text, which brings the usual tab back. */
+    fun clearQuery() = onQueryChange("")
+
+    /** Asks again for the team list after it failed. */
+    fun retrySearch() = loadDirectory()
+
+    private fun loadDirectory() {
+        if (directoryJob?.isActive == true) return
+        _uiState.update { it.copy(searchStatus = LoadStatus.Loading) }
+        directoryJob = viewModelScope.launch {
+            try {
+                directory = teamDirectory.getAllTeams()
+                _uiState.update { it.copy(searchStatus = LoadStatus.Content) }
+                publishResults()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(searchStatus = LoadStatus.Error(e.toMessage())) }
+            }
+        }
+    }
+
+    /** Searches the kept team list for the current query; nothing to show until the list is here. */
+    private fun publishResults() {
+        val teams = directory
+        _uiState.update { state ->
+            state.copy(searchResults = if (teams == null) TeamSearchResults() else searchTeamsAndPlayers(teams, state.query))
+        }
     }
 
     /** An unreadable preference keeps the favorites already shown (none at first). */

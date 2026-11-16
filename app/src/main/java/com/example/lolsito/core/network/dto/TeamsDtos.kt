@@ -16,6 +16,8 @@ data class TeamDetailDto(
     val name: String? = null,
     val code: String? = null,
     val image: String? = null,
+    /** "active" for a team still playing; any other value (or none) is a team that is not. */
+    val status: String? = null,
     val homeLeague: HomeLeagueDto? = null,
     val players: List<PlayerDto> = emptyList(),
 )

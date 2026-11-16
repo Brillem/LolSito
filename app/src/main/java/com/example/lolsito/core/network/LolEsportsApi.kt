@@ -51,4 +51,11 @@ interface LolEsportsApi {
      */
     @GET("getTeams")
     suspend fun getTeams(@Query("id") id: String): TeamsResponse
+
+    /**
+     * Every team ever listed, each with its players (about 1,600 teams, 300 KB gzipped). Only the team
+     * search asks for it, once, and keeps the answer; everything else uses [getTeams] with an id.
+     */
+    @GET("getTeams")
+    suspend fun getAllTeams(): TeamsResponse
 }

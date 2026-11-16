@@ -169,6 +169,25 @@ class StandingsViewModel(
         if (tournamentsRequested) loadStandings() else loadTournaments()
     }
 
+    /**
+     * Shows [tournamentId] of [leagueId], as when the user picks that league and then that tournament, but in
+     * one step (a team profile opens one this way). It is saved like a manual pick and wins over a stored
+     * selection still being restored. Nothing happens when that tournament is already the loaded selection;
+     * a tournament missing from its league falls back to the default pick, as a restored one does.
+     */
+    fun openTournament(leagueId: String, tournamentId: String) {
+        val state = _uiState.value
+        if (selectionRestored && tournamentsRequested && leagueId == state.selectedLeagueId &&
+            tournamentId == state.selectedTournamentId
+        ) return
+        selectionRestored = true
+        _uiState.update { it.copy(selectedLeagueId = leagueId) }
+        savedStateHandle[KEY_LEAGUE_ID] = leagueId
+        savedStateHandle[KEY_TOURNAMENT_ID] = tournamentId
+        save(StandingsSelection(leagueId, tournamentId))
+        loadTournaments()
+    }
+
     /** Re-fetches only the leagues; tournaments and standings are left as they are. */
     fun retryLeagues() = fetchLeagues()
 

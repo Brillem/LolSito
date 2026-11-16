@@ -14,6 +14,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -35,6 +38,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.lolsito.R
 import com.example.lolsito.core.di.AppContainer
+import com.example.lolsito.core.preferences.StandingsSelection
 import com.example.lolsito.core.ui.OfflineBanner
 import com.example.lolsito.core.ui.offlineBannerLabel
 import com.example.lolsito.feature.game.domain.GameTeam
@@ -116,7 +120,7 @@ internal fun gameTeams(argument: (String) -> String?): Map<String, GameTeam> =
 /** Top-level destinations shown in the bottom bar. Pushed screens (match detail, game stats) hide the bar. */
 private enum class TopLevelDestination(val route: String, val label: String, @DrawableRes val icon: Int) {
     SCHEDULE(Routes.SCHEDULE, "Schedule", R.drawable.ic_tab_schedule),
-    STANDINGS(Routes.STANDINGS, "Standings", R.drawable.ic_tab_standings),
+    STANDINGS(Routes.STANDINGS, "Tournaments", R.drawable.ic_tab_tournaments),
     TEAMS(Routes.TEAMS, "Teams", R.drawable.ic_tab_teams),
 }
 
@@ -148,6 +152,8 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
         navController.openMatchFromReminder(matchId)
         onMatchOpened()
     }
+    // A tournament a team profile asked to open: the Tournaments tab applies it once it is on screen.
+    var tournamentToOpen by remember { mutableStateOf<StandingsSelection?>(null) }
     val currentDestination = backStackEntry?.destination
     val barRoute = bottomBarRoute(currentDestination?.route)
     val showBottomBar = showsBottomBar(barRoute)
@@ -223,6 +229,12 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                         }
                     }
                 )
+                LaunchedEffect(tournamentToOpen) {
+                    val selection = tournamentToOpen ?: return@LaunchedEffect
+                    val tournamentId = selection.tournamentId
+                    if (tournamentId != null) vm.openTournament(selection.leagueId, tournamentId)
+                    tournamentToOpen = null
+                }
                 StandingsScreen(
                     viewModel = vm,
                     onMatchClick = { matchId -> navController.navigateFrom(entry, Routes.match(matchId)) },
@@ -241,6 +253,7 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                                 reminderScheduler = container.reminderScheduler,
                                 reminderSync = container.reminderSyncTrigger,
                                 notifications = container.notificationAvailability,
+                                teamDirectory = container.teamDirectoryRepository,
                             )
                         }
                     }
@@ -271,6 +284,8 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                                 leaguesRepository = container.leaguesRepository,
                                 preferences = container.userPreferences,
                                 lineupRepository = container.teamLineupRepository,
+                                standingsRepository = container.standingsRepository,
+                                clock = container.clock(),
                                 zoneId = container.zoneId(),
                                 reminderSync = container.reminderSyncTrigger,
                             )
@@ -281,6 +296,12 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                     viewModel = vm,
                     onBack = { navController.navigateUp() },
                     onMatchClick = { matchId -> navController.navigateFrom(entry, Routes.match(matchId)) },
+                    onTournamentClick = { leagueId, tournamentId ->
+                        if (canNavigateFrom(entry.lifecycle.currentState)) {
+                            tournamentToOpen = StandingsSelection(leagueId, tournamentId)
+                            navController.openTournamentsTab()
+                        }
+                    },
                 )
             }
             composable(
@@ -368,6 +389,14 @@ private fun NavHostController.openMatchFromReminder(matchId: String) {
     val current = currentBackStackEntry
     if (current?.destination?.route == Routes.MATCH && current.arguments?.getString(Routes.MATCH_ID_ARG) == matchId) return
     navigate(Routes.match(matchId))
+}
+
+/**
+ * Shows the Tournaments tab from a team profile. When the profile was opened from that tab, going back to it
+ * keeps its screen alive; otherwise it is a normal tab switch (which brings back whatever that tab last showed).
+ */
+private fun NavHostController.openTournamentsTab() {
+    if (!popBackStack(Routes.STANDINGS, inclusive = false)) navigateToTopLevel(Routes.STANDINGS)
 }
 
 /** Switches tabs keeping one back stack per tab: state is saved on leave and restored on return. */

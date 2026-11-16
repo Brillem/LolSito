@@ -26,8 +26,10 @@ import com.example.lolsito.feature.schedule.domain.LiveMatchesRepository
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import com.example.lolsito.feature.standings.data.StandingsRepositoryImpl
 import com.example.lolsito.feature.standings.domain.StandingsRepository
+import com.example.lolsito.feature.teams.data.TeamDirectoryRepositoryImpl
 import com.example.lolsito.feature.teams.data.TeamLineupRepositoryImpl
 import com.example.lolsito.feature.teams.data.TeamsRepositoryImpl
+import com.example.lolsito.feature.teams.domain.TeamDirectoryRepository
 import com.example.lolsito.feature.teams.domain.TeamLineupRepository
 import com.example.lolsito.feature.teams.domain.TeamsRepository
 import okhttp3.OkHttpClient
@@ -64,6 +66,7 @@ class AppContainer(private val context: Context) {
     val matchDetailRepository: MatchDetailRepository by lazy { MatchDetailRepositoryImpl(api) }
     val standingsRepository: StandingsRepository by lazy { StandingsRepositoryImpl(api) }
     val teamsRepository: TeamsRepository by lazy { TeamsRepositoryImpl(api) }
+    val teamDirectoryRepository: TeamDirectoryRepository by lazy { TeamDirectoryRepositoryImpl(api) }
     val teamLineupRepository: TeamLineupRepository by lazy { TeamLineupRepositoryImpl(matchDetailRepository, liveStatsApi) }
     val gameStatsRepository: GameStatsRepository by lazy { GameStatsRepositoryImpl(liveStatsApi, clock()) }
 

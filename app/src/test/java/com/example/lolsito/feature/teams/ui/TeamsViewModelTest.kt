@@ -11,6 +11,10 @@ import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
+import com.example.lolsito.feature.teams.domain.DirectoryTeam
+import com.example.lolsito.feature.teams.domain.Player
+import com.example.lolsito.feature.teams.domain.PlayerRole
+import com.example.lolsito.feature.teams.domain.TeamDirectoryRepository
 import com.example.lolsito.feature.teams.domain.TeamSummary
 import com.example.lolsito.testutil.FakeNotificationAvailability
 import com.example.lolsito.testutil.FakeReminderScheduler
@@ -64,9 +68,10 @@ class TeamsViewModelTest {
     private val reminderScheduler = FakeReminderScheduler()
     private val reminderSync = FakeReminderSyncTrigger()
     private val notifications = FakeNotificationAvailability()
+    private val directory = FakeDirectory()
 
     private fun viewModel() =
-        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, notifications, defaultLeagueId = LCK)
+        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, notifications, directory, defaultLeagueId = LCK)
 
     @Test
     fun `loads the leagues and the default league's current teams`() = runTest(dispatcher) {
@@ -441,6 +446,131 @@ class TeamsViewModelTest {
         assertEquals(listOf(t1), vm.uiState.value.favorites)
         assertEquals(LoadStatus.Content, vm.uiState.value.status)
         assertTrue(preferences.savedFavoriteTeams.isEmpty())
+    }
+
+    @Test
+    fun `the team list is not requested until the user types`() = runTest(dispatcher) {
+        viewModel()
+        advanceUntilIdle()
+
+        assertEquals(0, directory.requests)
+    }
+
+    @Test
+    fun `typing requests the team list once and searches it, also for later queries`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onQueryChange("fa")
+        assertEquals(LoadStatus.Loading, vm.uiState.value.searchStatus)
+        advanceUntilIdle()
+        vm.onQueryChange("faker")
+        advanceUntilIdle()
+
+        assertEquals(1, directory.requests)
+        assertEquals(LoadStatus.Content, vm.uiState.value.searchStatus)
+        assertEquals(listOf("Faker"), vm.uiState.value.searchResults.players.map { it.player.summonerName })
+        assertEquals(listOf("T1"), vm.uiState.value.searchResults.players.map { it.team.code })
+    }
+
+    @Test
+    fun `typing twice before the list arrives still requests it once`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onQueryChange("t")
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+
+        assertEquals(1, directory.requests)
+        assertEquals(listOf("T1"), vm.uiState.value.searchResults.teams.map { it.code })
+    }
+
+    @Test
+    fun `a blank query goes back to the usual tab and keeps the list for the next search`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.isSearching)
+
+        vm.clearQuery()
+
+        val state = vm.uiState.value
+        assertFalse(state.isSearching)
+        assertEquals("", state.query)
+        assertTrue(state.searchResults.isEmpty)
+        assertEquals(listOf("2", "1"), state.teams.map { it.id })
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+        assertEquals(1, directory.requests)
+        assertEquals(1, vm.uiState.value.searchResults.teams.size)
+    }
+
+    @Test
+    fun `a query shorter than two characters finds nothing`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onQueryChange(" t ")
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.isSearching)
+        assertTrue(vm.uiState.value.queryTooShort)
+        assertTrue(vm.uiState.value.searchResults.isEmpty)
+    }
+
+    @Test
+    fun `a failed list request shows an error and retrying requests it again`() = runTest(dispatcher) {
+        directory.error = IOException("offline")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+        assertEquals(LoadStatus.Error("offline"), vm.uiState.value.searchStatus)
+
+        directory.error = null
+        vm.retrySearch()
+        assertEquals(LoadStatus.Loading, vm.uiState.value.searchStatus)
+        advanceUntilIdle()
+
+        assertEquals(2, directory.requests)
+        assertEquals(LoadStatus.Content, vm.uiState.value.searchStatus)
+        assertEquals(listOf("T1"), vm.uiState.value.searchResults.teams.map { it.code })
+    }
+
+    @Test
+    fun `typing more after a failure does not request again until retry`() = runTest(dispatcher) {
+        directory.error = IOException("offline")
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+
+        vm.onQueryChange("t1 ")
+        advanceUntilIdle()
+
+        assertEquals(1, directory.requests)
+        assertTrue(vm.uiState.value.searchStatus is LoadStatus.Error)
+    }
+
+    private class FakeDirectory : TeamDirectoryRepository {
+        var requests = 0
+        var error: Throwable? = null
+        val teams = listOf(
+            DirectoryTeam(
+                "1", "T1", "T1", null, "LCK", true,
+                listOf(Player("p1", "Faker", "Sanghyeok", "Lee", null, PlayerRole.MID)),
+            ),
+            DirectoryTeam("2", "Gen.G", "GEN", null, "LCK", true, emptyList()),
+        )
+
+        override suspend fun getAllTeams(): List<DirectoryTeam> {
+            requests++
+            error?.let { throw it }
+            return teams
+        }
     }
 
     private fun team(name: String, code: String, id: String) = Team(name, code, null, null, null, id = id)

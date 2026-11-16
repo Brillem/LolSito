@@ -4,6 +4,7 @@ import com.example.lolsito.core.network.dto.PlayerDto
 import com.example.lolsito.core.network.dto.TeamDetailDto
 import com.example.lolsito.core.network.dto.TeamsResponse
 import com.example.lolsito.core.network.toHttps
+import com.example.lolsito.feature.teams.domain.DirectoryTeam
 import com.example.lolsito.feature.teams.domain.Player
 import com.example.lolsito.feature.teams.domain.PlayerRole
 import com.example.lolsito.feature.teams.domain.RoleGroup
@@ -11,6 +12,20 @@ import com.example.lolsito.feature.teams.domain.TeamProfile
 
 /** The first team of the answer, or null when there is none or it has no id. */
 fun TeamsResponse.toTeamProfile(): TeamProfile? = data.teams.firstOrNull()?.toDomain()
+
+/** Every team of the answer that has an id (nothing to open without one), in the API order. */
+fun TeamsResponse.toDirectoryTeams(): List<DirectoryTeam> = data.teams.mapNotNull { team ->
+    val teamId = team.id?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+    DirectoryTeam(
+        id = teamId,
+        name = team.name?.trim()?.takeIf { it.isNotEmpty() } ?: "TBD",
+        code = team.code?.trim()?.takeIf { it.isNotEmpty() } ?: "TBD",
+        imageUrl = team.image.toHttps(),
+        homeLeagueName = team.homeLeague?.name?.trim()?.takeIf { it.isNotEmpty() },
+        active = team.status?.trim().equals("active", ignoreCase = true),
+        players = team.players.map { it.toDomain() },
+    )
+}
 
 private fun TeamDetailDto.toDomain(): TeamProfile? {
     val teamId = id?.takeIf { it.isNotBlank() } ?: return null

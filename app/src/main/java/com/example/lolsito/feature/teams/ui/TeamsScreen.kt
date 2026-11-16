@@ -3,6 +3,7 @@ package com.example.lolsito.feature.teams.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -46,15 +47,21 @@ import com.example.lolsito.core.model.League
 import com.example.lolsito.core.preferences.FavoriteTeam
 import com.example.lolsito.core.ui.AppCard
 import com.example.lolsito.core.ui.DropdownPicker
+import com.example.lolsito.core.ui.InfoText
 import com.example.lolsito.core.ui.InlineError
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
+import com.example.lolsito.core.ui.SearchField
+import com.example.lolsito.core.ui.SectionTitle
 import com.example.lolsito.core.ui.Shapes
 import com.example.lolsito.core.ui.SkeletonBlock
 import com.example.lolsito.core.ui.SkeletonScreen
 import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.rememberTeamAccent
+import com.example.lolsito.feature.teams.domain.DirectoryTeam
+import com.example.lolsito.feature.teams.domain.PlayerHit
+import com.example.lolsito.feature.teams.domain.TeamSearchResults
 import com.example.lolsito.feature.teams.domain.TeamSummary
 import com.example.lolsito.ui.theme.LabelText
 import com.example.lolsito.ui.theme.LolSitoTheme
@@ -99,8 +106,12 @@ fun TeamsScreen(
         onTeamClick = { teamId -> onTeamClick(teamId, state.selectedLeagueId) },
         onFavoriteClick = onFavoriteClick,
         onToggleReminders = onToggleReminders,
+        onQueryChange = viewModel::onQueryChange,
+        onRetrySearch = viewModel::retrySearch,
         modifier = modifier,
     )
+    // Going back while searching clears the search first.
+    BackHandler(enabled = state.isSearching) { viewModel.clearQuery() }
 }
 
 @Composable
@@ -113,8 +124,22 @@ fun TeamsContent(
     modifier: Modifier = Modifier,
     onFavoriteClick: (String) -> Unit = {},
     onToggleReminders: () -> Unit = {},
+    onQueryChange: (String) -> Unit = {},
+    onRetrySearch: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
+        SearchField(
+            value = state.query,
+            onValueChange = onQueryChange,
+            onClear = { onQueryChange("") },
+            placeholder = "Search teams and players",
+            modifier = Modifier.padding(horizontal = Spacing.Screen, vertical = 8.dp),
+        )
+        if (state.isSearching) {
+            // A result belongs to no selected league, so it opens like a favorite: by team id only.
+            SearchResultsView(state, onRetrySearch, onResultClick = onFavoriteClick)
+            return@Column
+        }
         if (state.favorites.isNotEmpty()) {
             FavoritesRow(state.favorites, state.remindersEnabled, state.remindersNotice, onFavoriteClick, onToggleReminders)
         }
@@ -126,6 +151,8 @@ fun TeamsContent(
             modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp),
             imageUrl = state.leagues.firstOrNull { it.id == state.selectedLeagueId }?.imageUrl,
             itemImageUrl = { league -> league.imageUrl },
+            title = "League",
+            isSelected = { league -> league.id == state.selectedLeagueId },
         )
         if (state.leaguesStatus is LoadStatus.Error) {
             InlineError("Couldn't load leagues", onRetryLeagues)
@@ -134,6 +161,84 @@ fun TeamsContent(
             LazyColumn(Modifier.fillMaxSize()) {
                 items(state.teams, key = { it.id }) { team -> TeamRow(team, onClick = { onTeamClick(team.id) }) }
             }
+        }
+    }
+}
+
+/** What replaces the tab's content while the user searches: the team list loading, failing, or the results. */
+@Composable
+private fun SearchResultsView(state: TeamsUiState, onRetry: () -> Unit, onResultClick: (String) -> Unit) {
+    LoadStatusView(state.searchStatus, "", onRetry, loading = { TeamListSkeleton() }) {
+        val results = state.searchResults
+        when {
+            state.queryTooShort -> InfoText("Type at least 2 characters")
+            results.isEmpty -> InfoText("No teams or players found")
+            else -> LazyColumn(Modifier.fillMaxSize()) {
+                if (results.teams.isNotEmpty()) {
+                    item(key = "teams-title") { SectionTitle("Teams") }
+                    items(results.teams, key = { "team-${it.id}" }) { team ->
+                        SearchTeamRow(team, onClick = { onResultClick(team.id) })
+                    }
+                }
+                if (results.players.isNotEmpty()) {
+                    item(key = "players-title") { SectionTitle("Players") }
+                    items(results.players, key = { "player-${it.team.id}-${it.player.id ?: it.player.summonerName}" }) { hit ->
+                        SearchPlayerRow(hit, onClick = { onResultClick(hit.team.id) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A team result: logo, name, then its code and home league. */
+@Composable
+private fun SearchTeamRow(team: DirectoryTeam, onClick: () -> Unit) {
+    AppCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2),
+        onClick = onClick,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TeamLogo(team.imageUrl, contentDescription = null, size = 32.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(team.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOfNotNull(team.code, team.homeLeagueName).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** A player result: summoner name, real name and role, and the team's code and logo at the end. */
+@Composable
+private fun SearchPlayerRow(hit: PlayerHit, onClick: () -> Unit) {
+    val player = hit.player
+    val realName = listOfNotNull(player.firstName, player.lastName).joinToString(" ")
+    AppCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2),
+        onClick = onClick,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(player.summonerName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOf(realName, player.role.label).filter { it.isNotEmpty() }.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(hit.team.code, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Spacer(Modifier.width(8.dp))
+            TeamLogo(hit.team.imageUrl, contentDescription = hit.team.name, size = 28.dp)
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.example.lolsito.feature.teams.data
 
 import com.example.lolsito.core.network.LolEsportsJson
+import com.example.lolsito.core.network.dto.HomeLeagueDto
 import com.example.lolsito.core.network.dto.PlayerDto
 import com.example.lolsito.core.network.dto.TeamDetailDto
 import com.example.lolsito.core.network.dto.TeamsData
@@ -94,5 +95,39 @@ class TeamsMappersTest {
 
         assertEquals(emptyList<Any>(), profile.roster)
         assertNull(profile.homeLeagueName)
+    }
+
+    @Test
+    fun `the all-teams mapping keeps status and home league, and drops teams without an id`() {
+        val response = TeamsResponse(
+            TeamsData(
+                listOf(
+                    TeamDetailDto(
+                        id = "1",
+                        name = " T1 ",
+                        code = "T1",
+                        image = "http://x/t1.png",
+                        status = "active",
+                        homeLeague = HomeLeagueDto("LCK", "KOREA"),
+                        players = listOf(PlayerDto(id = "p", summonerName = "Faker", role = "mid")),
+                    ),
+                    TeamDetailDto(id = "2", name = "Old", code = "OLD", status = "archived"),
+                    TeamDetailDto(id = "3", name = "No status", code = "NS"),
+                    TeamDetailDto(id = " ", name = "No id", status = "active"),
+                    TeamDetailDto(name = "Missing id", status = "active"),
+                ),
+            ),
+        )
+
+        val teams = response.toDirectoryTeams()
+
+        assertEquals(listOf("1", "2", "3"), teams.map { it.id })
+        assertEquals(listOf(true, false, false), teams.map { it.active })
+        val t1 = teams.first()
+        assertEquals("T1", t1.name)
+        assertEquals("https://x/t1.png", t1.imageUrl)
+        assertEquals("LCK", t1.homeLeagueName)
+        assertEquals(listOf("Faker"), t1.players.map { it.summonerName })
+        assertNull(teams[1].homeLeagueName)
     }
 }

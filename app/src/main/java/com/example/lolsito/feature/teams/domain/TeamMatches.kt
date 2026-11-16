@@ -2,6 +2,7 @@ package com.example.lolsito.feature.teams.domain
 
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.Team
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.groupEventsByDay
@@ -50,4 +51,24 @@ fun buildTeamMatches(events: List<ScheduleEvent>, teamName: String, zoneId: Zone
         upcoming = groupEventsByDay(upcoming, zoneId, keyPrefix = "upcoming:"),
         previous = groupEventsByDay(previous, zoneId, newestFirst = true, keyPrefix = "previous:"),
     )
+}
+
+/**
+ * The team's next match: the soonest unstarted or live event of [teamName] with two known teams, or null.
+ * A live match started before any unstarted one, so it comes first.
+ */
+fun nextMatch(events: List<ScheduleEvent>, teamName: String): ScheduleEvent? =
+    events
+        .filter {
+            (it.state == MatchState.UNSTARTED || it.state == MatchState.IN_PROGRESS) &&
+                it.match?.teams?.size == 2 && it.isPlayedBy(teamName)
+        }
+        .minByOrNull { it.startTime }
+
+/** The team of [event] that is not [teamName]; null when the match has no other team. */
+fun opponentOf(event: ScheduleEvent, teamName: String): Team? {
+    val name = teamName.trim()
+    val teams = event.match?.teams.orEmpty()
+    val own = teams.indexOfFirst { it.name.trim().equals(name, ignoreCase = true) }
+    return if (own < 0) null else teams.filterIndexed { i, _ -> i != own }.firstOrNull()
 }

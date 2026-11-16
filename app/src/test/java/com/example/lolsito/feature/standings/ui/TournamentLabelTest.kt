@@ -32,12 +32,6 @@ class TournamentLabelTest {
         assertEquals("123", tournament(" ").label)
     }
 
-    @Test
-    fun `date range is shown when both dates are known`() {
-        assertEquals("2026-10-15 – 2026-11-15", tournament("x", "2026-10-15", "2026-11-15").dateRange)
-        assertEquals(null, tournament("x").dateRange)
-    }
-
     private fun tournament(slug: String, start: String? = null, end: String? = null) =
         Tournament("123", slug, start?.let(LocalDate::parse), end?.let(LocalDate::parse))
 }

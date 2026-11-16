@@ -54,6 +54,7 @@ import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.ui.AppCard
 import com.example.lolsito.core.ui.AppTopBar
 import com.example.lolsito.core.ui.ErrorView
+import com.example.lolsito.core.ui.FormMarks
 import com.example.lolsito.core.ui.InfoText
 import com.example.lolsito.core.ui.InlineError
 import com.example.lolsito.core.ui.LOSER_ALPHA
@@ -346,34 +347,8 @@ fun TeamFormRow(form: TeamForm, modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                form.entries.forEach { entry -> FormMark(entry) }
-            }
+            FormMarks(form.entries)
         }
-    }
-}
-
-/** "W" or "L" over the opponent's code. */
-@Composable
-private fun FormMark(entry: FormEntry) {
-    val won = entry.outcome == FormOutcome.WIN
-    Column(
-        Modifier.semantics(mergeDescendants = true) {
-            contentDescription = (if (won) "Win against " else "Loss against ") + entry.opponentCode
-        },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            if (won) "W" else "L",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = if (won) WinGreen else MaterialTheme.colorScheme.error,
-        )
-        Text(
-            entry.opponentCode,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

@@ -10,7 +10,15 @@ import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.SchedulePage
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
+import com.example.lolsito.feature.match.domain.FormEntry
+import com.example.lolsito.feature.match.domain.FormOutcome
 import com.example.lolsito.feature.schedule.ui.eventRowDisplay
+import com.example.lolsito.feature.standings.domain.Ranking
+import com.example.lolsito.feature.standings.domain.Standings
+import com.example.lolsito.feature.standings.domain.StandingsRepository
+import com.example.lolsito.feature.standings.domain.StandingsSection
+import com.example.lolsito.feature.standings.domain.StandingsStage
+import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.feature.teams.domain.InternationalLeagues
 import com.example.lolsito.feature.teams.domain.Player
 import com.example.lolsito.feature.teams.domain.PlayerRole
@@ -20,6 +28,7 @@ import com.example.lolsito.feature.teams.domain.TeamProfile
 import com.example.lolsito.feature.teams.domain.TeamsRepository
 import com.example.lolsito.testutil.FakeReminderSyncTrigger
 import com.example.lolsito.testutil.FakeUserPreferences
+import com.example.lolsito.testutil.series
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
@@ -38,7 +47,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneOffset
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -50,6 +61,8 @@ class TeamProfileViewModelTest {
     private val preferences = FakeUserPreferences()
     private val lineups = FakeTeamLineupRepository()
     private val reminderSync = FakeReminderSyncTrigger()
+    private val standings = FakeStandingsRepository()
+    private val clock = Clock.fixed(Instant.parse("2026-11-16T12:00:00Z"), ZoneOffset.UTC)
     private var leaguesError: Throwable? = null
     private val leaguesRepository = LeaguesRepository {
         leaguesError?.let { throw it }
@@ -94,6 +107,8 @@ class TeamProfileViewModelTest {
         leaguesRepository = leaguesRepository,
         preferences = preferences,
         lineupRepository = lineups,
+        standingsRepository = standings,
+        clock = clock,
         zoneId = ZoneOffset.UTC,
         reminderSync = reminderSync,
     )
@@ -667,6 +682,245 @@ class TeamProfileViewModelTest {
             requests += leagueIds to pageToken
             error?.let { throw it }
             return pages.getValue(leagueIds to pageToken)
+        }
+    }
+
+    private fun withStandings(ordinal: Int? = 3, wins: Int? = 12, losses: Int? = 4) {
+        standings.tournaments[LCK] = listOf(Tournament("t-now", "now", LocalDate.of(2026, 6, 1), LocalDate.of(2026, 12, 1)))
+        val ranking = Ranking(ordinal, Team("T1", "T1", null, null, null, id = T1_ID), wins, losses)
+        standings.standings["t-now"] = Standings(listOf(StandingsStage("Season", null, listOf(StandingsSection("Table", listOf(ranking), emptyList())))))
+    }
+
+    @Test
+    fun `the standing line of the home league arrives next to the matches`() = runTest(dispatcher) {
+        withStandings()
+
+        val vm = viewModel()
+        assertNull(vm.uiState.value.standing)
+        advanceUntilIdle()
+
+        assertEquals("3rd in LCK · 12-4", vm.uiState.value.standing)
+        // The recent tournaments ask for the same standings again (the repository caches them).
+        assertEquals(listOf("t-now"), standings.standingsRequests.distinct())
+        assertEquals(LoadStatus.Content, vm.uiState.value.matchesStatus)
+    }
+
+    @Test
+    fun `a failed standings request leaves no line and the rest of the profile untouched`() = runTest(dispatcher) {
+        withStandings()
+        standings.error = IOException("standings down")
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertNull(state.standing)
+        assertEquals(LoadStatus.Content, state.status)
+        assertEquals(LoadStatus.Content, state.matchesStatus)
+        assertEquals(listOf("u1"), state.upcomingIds)
+    }
+
+    @Test
+    fun `a team that is not ranked, or without a home league, has no line`() = runTest(dispatcher) {
+        standings.tournaments[LCK] = listOf(Tournament("t-now", "now", LocalDate.of(2026, 6, 1), LocalDate.of(2026, 12, 1)))
+        standings.standings["t-now"] = Standings(emptyList())
+        assertNull(viewModel().also { advanceUntilIdle() }.uiState.value.standing)
+
+        withStandings()
+        teams.profiles[T1_ID] = teams.profiles.getValue(T1_ID).copy(homeLeagueName = null)
+        schedule.pages[InternationalLeagues.ids.sorted() to null] = SchedulePage(emptyList(), olderToken = null, newerToken = null)
+        assertNull(viewModel(originLeagueId = LCK).also { advanceUntilIdle() }.uiState.value.standing)
+    }
+
+    @Test
+    fun `failed leagues leave no standing line`() = runTest(dispatcher) {
+        withStandings()
+        leaguesError = IOException("no leagues")
+
+        val vm = viewModel(originLeagueId = LCK)
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.standing)
+        assertEquals(LoadStatus.Content, vm.uiState.value.matchesStatus)
+    }
+
+    private fun withRecentTournaments() {
+        withStandings()
+        standings.tournaments[LCK] = standings.tournaments.getValue(LCK) +
+            Tournament("t-old", "old", LocalDate.of(2026, 1, 10), LocalDate.of(2026, 4, 1))
+        standings.standings["t-old"] = Standings(
+            listOf(StandingsStage("Season", null, listOf(StandingsSection("Table", listOf(Ranking(1, Team("T1", "T1", null, null, null, id = T1_ID), 9, 1)), emptyList())))),
+        )
+        // The team is not in the Worlds of the year, so it is not a recent tournament.
+        standings.tournaments[InternationalLeagues.WORLDS] = listOf(Tournament("w", "worlds_2026", LocalDate.of(2026, 10, 15), LocalDate.of(2026, 11, 15)))
+        standings.standings["w"] = Standings(
+            listOf(StandingsStage("Swiss", null, listOf(StandingsSection("Table", listOf(Ranking(1, Team("Gen.G", "GEN", null, null, null, id = "gen"), 3, 0)), emptyList())))),
+        )
+    }
+
+    @Test
+    fun `the recent tournaments the team played arrive with how far it got, most recent first`() = runTest(dispatcher) {
+        withRecentTournaments()
+
+        val vm = viewModel()
+        assertTrue(vm.uiState.value.recentTournaments.isEmpty())
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                RecentTournament(LCK, "t-now", "Now", "In progress", null),
+                RecentTournament(LCK, "t-old", "Old", "1st", null),
+            ),
+            vm.uiState.value.recentTournaments,
+        )
+        assertEquals(LoadStatus.Content, vm.uiState.value.matchesStatus)
+    }
+
+    @Test
+    fun `no spoilers hides the result of a finished tournament and keeps the one in progress`() = runTest(dispatcher) {
+        withRecentTournaments()
+        preferences.noSpoilers = true
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf("In progress", null), vm.uiState.value.recentTournaments.map { it.result })
+        assertEquals(listOf("Now", "Old"), vm.uiState.value.recentTournaments.map { it.name })
+    }
+
+    @Test
+    fun `a tournament whose standings fail is left out and the others stay`() = runTest(dispatcher) {
+        withRecentTournaments()
+        standings.standings.remove("t-old")
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf("t-now"), vm.uiState.value.recentTournaments.map { it.tournamentId })
+        assertEquals("3rd in LCK · 12-4", vm.uiState.value.standing)
+    }
+
+    @Test
+    fun `when every request fails there are no recent tournaments and the rest is untouched`() = runTest(dispatcher) {
+        withRecentTournaments()
+        standings.error = IOException("standings down")
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertTrue(state.recentTournaments.isEmpty())
+        assertEquals(LoadStatus.Content, state.status)
+        assertEquals(LoadStatus.Content, state.matchesStatus)
+        assertEquals(listOf("u1"), state.upcomingIds)
+    }
+
+    @Test
+    fun `retrying loads the recent tournaments again without repeating them`() = runTest(dispatcher) {
+        withRecentTournaments()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.retry()
+        advanceUntilIdle()
+
+        assertEquals(listOf("t-now", "t-old"), vm.uiState.value.recentTournaments.map { it.tournamentId })
+    }
+
+    private fun withFormEvents() {
+        schedule.pages[lckFilter to null] = SchedulePage(
+            events = (1..6).map { day -> series("m$day", day, "T1", "Gen.G", firstWon = day % 2 == 0) } +
+                series("lost-to", 7, "DRX", "T1", firstWon = true) +
+                series("unknown", 8, "T1", "KT Rolster", firstWon = null) +
+                series("other", 9, "Gen.G", "DRX", firstWon = true) +
+                series("next", 20, "T1", "Dplus KIA", state = MatchState.UNSTARTED),
+            olderToken = null,
+            newerToken = null,
+        )
+    }
+
+    @Test
+    fun `the recent form is the last five finished series, newest first, from the loaded events`() = runTest(dispatcher) {
+        withFormEvents()
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                FormEntry("lost-to", FormOutcome.LOSS, "DRX"),
+                FormEntry("m6", FormOutcome.WIN, "GEN"),
+                FormEntry("m5", FormOutcome.LOSS, "GEN"),
+                FormEntry("m4", FormOutcome.WIN, "GEN"),
+                FormEntry("m3", FormOutcome.LOSS, "GEN"),
+            ),
+            vm.uiState.value.form,
+        )
+        assertEquals(listOf(lckFilter to null), schedule.requests)
+    }
+
+    @Test
+    fun `no finished matches means no form, and no spoilers hides it`() = runTest(dispatcher) {
+        schedule.pages[lckFilter to null] = SchedulePage(
+            events = listOf(event("u1", "2026-11-20T10:00:00Z", MatchState.UNSTARTED, "Dplus KIA", "T1")),
+            olderToken = null,
+            newerToken = null,
+        )
+        assertEquals(emptyList<FormEntry>(), viewModel().also { advanceUntilIdle() }.uiState.value.form)
+
+        withFormEvents()
+        preferences.noSpoilers = true
+        assertEquals(emptyList<FormEntry>(), viewModel().also { advanceUntilIdle() }.uiState.value.form)
+    }
+
+    @Test
+    fun `the next match is the soonest upcoming one and stays in the upcoming list`() = runTest(dispatcher) {
+        schedule.pages[lckFilter to null] = SchedulePage(
+            events = listOf(
+                event("later", "2026-11-25T10:00:00Z", MatchState.UNSTARTED, "T1", "DRX"),
+                event("soon", "2026-11-20T10:00:00Z", MatchState.UNSTARTED, "Dplus KIA", "T1"),
+                event("p1", "2026-10-01T10:00:00Z", MatchState.COMPLETED, "T1", "Gen.G"),
+            ),
+            olderToken = null,
+            newerToken = null,
+        )
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertEquals("soon", vm.uiState.value.nextMatch?.matchId)
+        assertEquals(listOf("soon", "later"), vm.uiState.value.upcomingIds)
+    }
+
+    @Test
+    fun `without an upcoming match there is no next match`() = runTest(dispatcher) {
+        schedule.pages[lckFilter to null] = SchedulePage(
+            events = listOf(event("p1", "2026-10-01T10:00:00Z", MatchState.COMPLETED, "T1", "Gen.G")),
+            olderToken = null,
+            newerToken = null,
+        )
+
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.nextMatch)
+    }
+
+    private class FakeStandingsRepository : StandingsRepository {
+        val tournaments = mutableMapOf<String, List<Tournament>>()
+        val standings = mutableMapOf<String, Standings>()
+        val standingsRequests = mutableListOf<String>()
+        var error: Throwable? = null
+
+        override suspend fun getTournaments(leagueId: String): List<Tournament> {
+            error?.let { throw it }
+            return tournaments[leagueId].orEmpty()
+        }
+
+        override suspend fun getStandings(tournamentId: String): Standings {
+            error?.let { throw it }
+            standingsRequests += tournamentId
+            return standings.getValue(tournamentId)
         }
     }
 

@@ -23,10 +23,3 @@ fun formatTournamentSlug(slug: String): String =
 /** Readable tournament name; falls back to the id when the slug is blank. */
 val Tournament.label: String
     get() = formatTournamentSlug(slug).ifBlank { id }
-
-val Tournament.dateRange: String?
-    get() {
-        val start = startDate ?: return null
-        val end = endDate ?: return null
-        return "$start – $end"
-    }

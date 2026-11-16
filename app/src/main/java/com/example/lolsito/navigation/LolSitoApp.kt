@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -34,6 +35,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.lolsito.R
 import com.example.lolsito.core.di.AppContainer
+import com.example.lolsito.core.ui.OfflineBanner
+import com.example.lolsito.core.ui.offlineBannerLabel
 import com.example.lolsito.feature.game.domain.GameTeam
 import com.example.lolsito.feature.game.ui.GameStatsScreen
 import com.example.lolsito.feature.game.ui.GameStatsViewModel
@@ -47,6 +50,7 @@ import com.example.lolsito.feature.teams.ui.TeamProfileScreen
 import com.example.lolsito.feature.teams.ui.TeamProfileViewModel
 import com.example.lolsito.feature.teams.ui.TeamsScreen
 import com.example.lolsito.feature.teams.ui.TeamsViewModel
+import java.time.LocalDate
 
 object Routes {
     const val SCHEDULE = "schedule"
@@ -147,8 +151,15 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
     val currentDestination = backStackEntry?.destination
     val barRoute = bottomBarRoute(currentDestination?.route)
     val showBottomBar = showsBottomBar(barRoute)
+    val cachedSince by container.offlineState.cachedSince.collectAsStateWithLifecycle()
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        topBar = {
+            cachedSince?.let { since ->
+                val zone = container.zoneId()
+                OfflineBanner(offlineBannerLabel(since, zone, today = LocalDate.now(container.clock().withZone(zone))))
+            }
+        },
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar {

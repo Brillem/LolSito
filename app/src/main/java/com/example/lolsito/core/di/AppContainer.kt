@@ -5,6 +5,8 @@ import com.example.lolsito.core.leagues.CachedLeaguesRepository
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.leagues.RemoteLeaguesRepository
 import com.example.lolsito.core.network.NetworkModule
+import com.example.lolsito.core.network.OfflineCache
+import com.example.lolsito.core.network.OfflineState
 import com.example.lolsito.core.preferences.DataStoreUserPreferences
 import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.feature.game.data.GameStatsRepositoryImpl
@@ -28,6 +30,7 @@ import com.example.lolsito.feature.teams.data.TeamsRepositoryImpl
 import com.example.lolsito.feature.teams.domain.TeamLineupRepository
 import com.example.lolsito.feature.teams.domain.TeamsRepository
 import okhttp3.OkHttpClient
+import java.io.File
 import java.time.Clock
 import java.time.ZoneId
 
@@ -35,8 +38,22 @@ import java.time.ZoneId
 class AppContainer(private val context: Context) {
     /** Shares one connection pool; the livestats feed uses it as is, without the gateway API key. */
     private val baseOkHttpClient by lazy { OkHttpClient() }
-    private val okHttpClient by lazy { NetworkModule.createOkHttpClient(baseOkHttpClient.newBuilder()) }
+    /** Observed by the app to tell that stored data is shown. */
+    val offlineState = OfflineState()
+
+    /** Gateway client of the screens: without a network it answers with the last stored copy. */
+    private val okHttpClient by lazy {
+        NetworkModule.createOkHttpClient(
+            baseOkHttpClient.newBuilder(),
+            OfflineCache(File(context.cacheDir, "gateway_http_cache"), offlineState),
+        )
+    }
     private val api by lazy { NetworkModule.createApi(client = okHttpClient) }
+
+    /** Gateway without stored copies, for work that must never act on old data. */
+    private val networkOnlyApi by lazy {
+        NetworkModule.createApi(client = NetworkModule.createOkHttpClient(baseOkHttpClient.newBuilder()))
+    }
     private val liveStatsApi by lazy { NetworkModule.createLiveStatsApi(client = baseOkHttpClient) }
 
     /** One cached leagues list shared by Schedule and Standings. */
@@ -57,9 +74,19 @@ class AppContainer(private val context: Context) {
 
     val notificationAvailability: NotificationAvailability by lazy { SystemNotificationAvailability(context) }
 
-    /** Run by the background sync worker. */
+    /**
+     * Run by the background sync worker. Its teams and schedule come from the network only, so a sync
+     * that loses the connection fails and is retried instead of scheduling reminders from a stored copy.
+     */
     val syncMatchReminders: SyncMatchReminders by lazy {
-        SyncMatchReminders(userPreferences, teamsRepository, leaguesRepository, scheduleRepository, reminderScheduler, clock())
+        SyncMatchReminders(
+            userPreferences,
+            TeamsRepositoryImpl(networkOnlyApi),
+            leaguesRepository,
+            ScheduleRepositoryImpl(networkOnlyApi),
+            reminderScheduler,
+            clock(),
+        )
     }
 
     /**

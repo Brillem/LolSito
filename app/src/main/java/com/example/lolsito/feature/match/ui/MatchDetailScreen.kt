@@ -2,27 +2,26 @@ package com.example.lolsito.feature.match.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,9 +32,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import android.content.ActivityNotFoundException
@@ -49,9 +51,18 @@ import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
+import com.example.lolsito.core.ui.AppCard
+import com.example.lolsito.core.ui.AppTopBar
 import com.example.lolsito.core.ui.ErrorView
+import com.example.lolsito.core.ui.InfoText
+import com.example.lolsito.core.ui.InlineError
 import com.example.lolsito.core.ui.LOSER_ALPHA
-import com.example.lolsito.core.ui.LoadingView
+import com.example.lolsito.core.ui.LiveBadge
+import com.example.lolsito.core.ui.SectionTitle
+import com.example.lolsito.core.ui.Shapes
+import com.example.lolsito.core.ui.SkeletonBlock
+import com.example.lolsito.core.ui.SkeletonScreen
+import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.rememberTeamAccent
 import com.example.lolsito.core.ui.WhileStarted
@@ -71,6 +82,8 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import com.example.lolsito.feature.match.domain.MatchGame
 import com.example.lolsito.feature.match.domain.WatchLink
+import com.example.lolsito.ui.theme.LabelText
+import com.example.lolsito.ui.theme.LolSitoTheme
 import com.example.lolsito.ui.theme.WinGreen
 
 /** Container: wires the ViewModel to the stateless [MatchDetailContent]. */
@@ -124,18 +137,9 @@ fun MatchDetailContent(
     onRefresh: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("Match") },
-            // The app Scaffold already applies the system bar insets.
-            windowInsets = WindowInsets(0),
-            navigationIcon = {
-                IconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
-                    Text("←", style = MaterialTheme.typography.titleLarge)
-                }
-            },
-        )
+        AppTopBar("Match", onBack)
         when (state) {
-            MatchDetailUiState.Loading -> LoadingView()
+            MatchDetailUiState.Loading -> MatchDetailSkeleton()
             is MatchDetailUiState.Error -> ErrorView(state.message, onRetry)
             is MatchDetailUiState.Content -> PullToRefreshBox(
                 isRefreshing = isRefreshing,
@@ -176,7 +180,7 @@ private fun MatchDetailBody(
             item(key = "watch-live") {
                 Button(
                     onClick = { context.openWatchLink(live) },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp),
                 ) { Text("Watch live") }
             }
         }
@@ -185,7 +189,7 @@ private fun MatchDetailBody(
             item(key = "add-to-calendar") {
                 OutlinedButton(
                     onClick = { context.addToCalendar(calendarEvent) },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp),
                 ) { Text("Add to calendar") }
             }
         }
@@ -193,28 +197,15 @@ private fun MatchDetailBody(
             item(key = "show-result") {
                 OutlinedButton(
                     onClick = onShowResult,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp),
                 ) { Text("Show result") }
             }
         }
         if (content.showsGames) {
-            item(key = "games-title") {
-                Text(
-                    "Games",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
+            item(key = "games-title") { SectionTitle("Games") }
             val games = content.displayedGames
             if (games.isEmpty()) {
-                item(key = "no-games") {
-                    Text(
-                        "No games yet",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
-                }
+                item(key = "no-games") { InfoText("No games yet") }
             }
             val keys = content.displayedGameKeys
             items(games.size, key = { keys[it] }) { index ->
@@ -227,7 +218,6 @@ private fun MatchDetailBody(
                     onWatch = content.watchLinkFor(game)?.let { vod -> { context.openWatchLink(vod) } },
                     showState = content.showsGameState,
                 )
-                HorizontalDivider()
             }
         }
         historySections(history, detail.teams, content.showsHeadToHead, onRetryHistory, onMatchClick)
@@ -236,8 +226,8 @@ private fun MatchDetailBody(
 
 /**
  * "Recent form" and, with [showHeadToHead], "Head to head", below the games. Nothing for
- * [MatchHistoryUiState.None]; while loading or after a failure each section says so under its title, the failure
- * with a retry.
+ * [MatchHistoryUiState.None]; while loading each section shows skeleton rows under its title, and after a failure
+ * an error with a retry. The form of both teams shares one card; each meeting has its own.
  */
 private fun LazyListScope.historySections(
     history: MatchHistoryUiState,
@@ -252,66 +242,93 @@ private fun LazyListScope.historySections(
     if (loaded == null) {
         item(key = "form-status") { HistoryStatus(history, onRetry) }
     } else {
-        items(loaded.form.size, key = { "form:$it" }) { index -> TeamFormRow(loaded.form[index]) }
+        item(key = "form") {
+            AppCard(Modifier.fillMaxWidth().cardMargins()) {
+                loaded.form.forEach { form -> TeamFormRow(form) }
+            }
+        }
     }
     if (!showHeadToHead) return
     item(key = "h2h-title") { SectionTitle("Head to head") }
     when {
         loaded == null -> item(key = "h2h-status") { HistoryStatus(history, onRetry) }
-        loaded.meetings.isEmpty() -> item(key = "h2h-empty") { HistoryNote("No previous meetings") }
+        loaded.meetings.isEmpty() -> item(key = "h2h-empty") { InfoText("No previous meetings") }
         else -> items(loaded.meetings, key = { "meeting:${it.matchId}" }) { meeting ->
             MeetingRow(meeting, teams, onClick = { onMatchClick(meeting.matchId) })
-            HorizontalDivider()
         }
     }
 }
 
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
-    )
-}
+/** The margins of a card in this screen's list: inset from the screen edges and from its neighbours. */
+private fun Modifier.cardMargins(): Modifier = padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)
 
-@Composable
-private fun HistoryNote(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(horizontal = 16.dp),
-    )
-}
-
-/** What a section shows while the history is loading or after it failed. */
+/** What a section shows while the history is loading (skeleton rows) or after it failed (an error with a retry). */
 @Composable
 private fun HistoryStatus(history: MatchHistoryUiState, onRetry: () -> Unit) {
     if (history == MatchHistoryUiState.Error) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            HistoryNote("Could not load", Modifier.weight(1f))
-            TextButton(onClick = onRetry, modifier = Modifier.padding(end = 8.dp)) { Text("Retry") }
-        }
+        InlineError("Could not load", onRetry)
     } else {
-        HistoryNote("Loading…")
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.Screen, vertical = 8.dp)
+                .semantics { contentDescription = "Loading" },
+            verticalArrangement = Arrangement.spacedBy(Spacing.CardGap),
+        ) {
+            repeat(2) { SkeletonBlock(Modifier.fillMaxWidth().height(32.dp)) }
+        }
     }
 }
 
-/** One team's recent form: its logo and code, then a mark per series, most recent first. */
+/**
+ * Loading state of the whole screen, shaped like it: the two team logos around the score, then a title and
+ * three game cards.
+ */
+@Composable
+private fun MatchDetailSkeleton(modifier: Modifier = Modifier) {
+    SkeletonScreen(modifier) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().padding(Spacing.Screen),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                SkeletonBlock(Modifier.size(56.dp), CircleShape)
+                Spacer(Modifier.width(32.dp))
+                SkeletonBlock(Modifier.size(width = 72.dp, height = 32.dp))
+                Spacer(Modifier.width(32.dp))
+                SkeletonBlock(Modifier.size(56.dp), CircleShape)
+            }
+            SkeletonBlock(
+                Modifier.padding(start = Spacing.Screen, top = 16.dp, bottom = 8.dp).size(width = 96.dp, height = 20.dp),
+            )
+            repeat(3) {
+                AppCard(Modifier.fillMaxWidth().cardMargins()) {
+                    SkeletonBlock(Modifier.size(width = 88.dp, height = 18.dp))
+                    Spacer(Modifier.height(6.dp))
+                    SkeletonBlock(Modifier.size(width = 140.dp, height = 12.dp))
+                }
+            }
+        }
+    }
+}
+
+/** One team's recent form: its logo and code, then a mark per series, most recent first. It has no side padding: it goes inside a card. */
 @Composable
 fun TeamFormRow(form: TeamForm, modifier: Modifier = Modifier) {
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TeamLogo(form.team.imageUrl, contentDescription = form.team.name, size = 28.dp)
         Text(
             form.team.code,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 8.dp).width(48.dp),
+            style = LabelText.TeamCode,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 8.dp).width(56.dp),
         )
         if (form.entries.isEmpty()) {
             Text(
@@ -351,50 +368,61 @@ private fun FormMark(entry: FormEntry) {
     }
 }
 
-/** A previous meeting: its date and league, and the score between the codes of the current match's [teams]. */
+/**
+ * A previous meeting as a card: the score between the codes of the current match's [teams], and its date and
+ * league below. The team that lost it is dimmed.
+ */
 @Composable
 fun MeetingRow(meeting: Meeting, teams: List<Team>, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Row(
-        modifier
+    AppCard(
+        modifier = modifier
             .fillMaxWidth()
-            .clickable(onClickLabel = "View match", onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .cardMargins()
+            .clip(Shapes.Card)
+            .clickable(onClickLabel = "View match", onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(meetingDateFormatter.format(meeting.date), style = MaterialTheme.typography.bodyLarge)
-            if (meeting.leagueName.isNotBlank()) {
-                Text(
-                    meeting.leagueName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                MeetingTeamCode(teams.getOrNull(0), meeting.winnerIndex, index = 0)
+            }
+            Text(
+                meeting.score ?: "vs",
+                style = LabelText.Score,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(min = 72.dp).padding(horizontal = 8.dp),
+            )
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                MeetingTeamCode(teams.getOrNull(1), meeting.winnerIndex, index = 1)
             }
         }
-        Spacer(Modifier.width(8.dp))
-        MeetingTeamCode(teams.getOrNull(0), meeting.winnerIndex == 0)
+        val caption = listOfNotNull(
+            meetingDateFormatter.format(meeting.date),
+            meeting.leagueName.takeIf { it.isNotBlank() },
+        ).joinToString(" · ")
         Text(
-            meeting.score ?: "vs",
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-        MeetingTeamCode(teams.getOrNull(1), meeting.winnerIndex == 1)
-        Text(
-            "›",
-            style = MaterialTheme.typography.titleMedium,
+            caption,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 8.dp),
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 6.dp),
         )
     }
 }
 
+/** The code of the team at [index]: bold when it won the meeting, dimmed when it lost; neither while [winnerIndex] is unknown. */
 @Composable
-private fun MeetingTeamCode(team: Team?, won: Boolean) {
+private fun MeetingTeamCode(team: Team?, winnerIndex: Int?, index: Int) {
     Text(
         team?.code.orEmpty(),
-        style = MaterialTheme.typography.bodyLarge,
-        fontWeight = if (won) FontWeight.ExtraBold else FontWeight.Normal,
+        style = LabelText.TeamCode,
+        fontWeight = if (winnerIndex == index) FontWeight.Bold else FontWeight.Medium,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.alpha(if (winnerIndex != null && winnerIndex != index) LOSER_ALPHA else 1f),
     )
 }
 
@@ -488,11 +516,15 @@ private fun HeaderTeam(
         Text(
             team.code,
             style = MaterialTheme.typography.titleMedium,
-            fontWeight = if (emphasis == TeamEmphasis.WINNER) FontWeight.ExtraBold else FontWeight.SemiBold,
+            fontWeight = if (emphasis == TeamEmphasis.WINNER) FontWeight.Bold else FontWeight.Medium,
         )
     }
 }
 
+/**
+ * One game of the series as a card: its name and each team's side, its state, a Watch button when it has a VOD
+ * ([onWatch]) and a chevron when it opens its stats ([onClick]).
+ */
 @Composable
 fun GameRow(
     game: MatchGame,
@@ -503,44 +535,50 @@ fun GameRow(
     /** False while results are hidden: the game's state would give them away. */
     showState: Boolean = true,
 ) {
-    Row(
-        modifier
+    AppCard(
+        modifier = modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClickLabel = "View stats", onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .cardMargins()
+            .clip(Shapes.Card)
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = "View stats", onClick = onClick) else Modifier),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text("Game ${game.number}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-            val sides = teams.mapNotNull { team ->
-                game.sideOf(team.id)?.let { side -> "${team.code} ${side.label}" }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Game ${game.number}", style = MaterialTheme.typography.titleMedium)
+                val sides = teams.mapNotNull { team ->
+                    game.sideOf(team.id)?.let { side -> "${team.code} ${side.label}" }
+                }
+                if (sides.isNotEmpty()) {
+                    Text(
+                        sides.joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            if (sides.isNotEmpty()) {
+            Spacer(Modifier.width(8.dp))
+            if (showState) {
+                if (game.state == GameState.IN_PROGRESS) {
+                    LiveBadge()
+                } else {
+                    Text(
+                        game.state.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (onWatch != null) {
+                OutlinedButton(onClick = onWatch, modifier = Modifier.padding(start = 8.dp)) { Text("Watch") }
+            }
+            if (onClick != null) {
                 Text(
-                    sides.joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
+                    "›",
+                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp),
                 )
             }
-        }
-        Spacer(Modifier.width(8.dp))
-        if (showState) {
-            Text(
-                game.state.label,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (game.state == GameState.IN_PROGRESS) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (onWatch != null) {
-            OutlinedButton(onClick = onWatch, modifier = Modifier.padding(start = 8.dp)) { Text("Watch") }
-        }
-        if (onClick != null) {
-            Text(
-                "›",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 8.dp),
-            )
         }
     }
 }
@@ -582,6 +620,7 @@ private val GameSide.label: String
 private val GameState.label: String
     get() = when (this) {
         GameState.UNSTARTED -> "Upcoming"
+        // Not drawn as text: a live game shows the LiveBadge instead.
         GameState.IN_PROGRESS -> "LIVE"
         GameState.COMPLETED -> "Completed"
         GameState.UNNEEDED -> "Not needed"
@@ -625,48 +664,56 @@ private val previewHistory = MatchHistory(
     meetings = listOf(Meeting("h1", LocalDate.of(2026, 1, 15), "Sample League", score = "2 - 1", winnerIndex = 0)),
 )
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun MatchDetailContentPreview() {
-    MatchDetailContent(
-        state = MatchDetailUiState.Content(previewDetail),
-        onBack = {},
-        onRetry = {},
-        onGameClick = {},
-        history = MatchHistoryUiState.Content(previewHistory),
-    )
+    LolSitoTheme {
+        MatchDetailContent(
+            state = MatchDetailUiState.Content(previewDetail),
+            onBack = {},
+            onRetry = {},
+            onGameClick = {},
+            history = MatchHistoryUiState.Content(previewHistory),
+        )
+    }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun MatchDetailHistoryErrorPreview() {
-    MatchDetailContent(
-        state = MatchDetailUiState.Content(previewDetail),
-        onBack = {},
-        onRetry = {},
-        onGameClick = {},
-        history = MatchHistoryUiState.Error,
-    )
+    LolSitoTheme {
+        MatchDetailContent(
+            state = MatchDetailUiState.Content(previewDetail),
+            onBack = {},
+            onRetry = {},
+            onGameClick = {},
+            history = MatchHistoryUiState.Error,
+        )
+    }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun MatchDetailErrorPreview() {
-    MatchDetailContent(
-        state = MatchDetailUiState.Error("Could not load the match"),
-        onBack = {},
-        onRetry = {},
-        onGameClick = {},
-    )
+    LolSitoTheme {
+        MatchDetailContent(
+            state = MatchDetailUiState.Error("Could not load the match"),
+            onBack = {},
+            onRetry = {},
+            onGameClick = {},
+        )
+    }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun MatchDetailHiddenPreview() {
-    MatchDetailContent(
-        state = MatchDetailUiState.Content(previewDetail, resultsHidden = true),
-        onBack = {},
-        onRetry = {},
-        onGameClick = {},
-    )
+    LolSitoTheme {
+        MatchDetailContent(
+            state = MatchDetailUiState.Content(previewDetail, resultsHidden = true),
+            onBack = {},
+            onRetry = {},
+            onGameClick = {},
+        )
+    }
 }

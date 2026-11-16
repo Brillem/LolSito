@@ -185,6 +185,10 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
             navController = navController,
             startDestination = START_ROUTE,
             modifier = Modifier.padding(innerPadding),
+            enterTransition = { screenEnter(isTabSwitch(initialState.destination.route, targetState.destination.route)) },
+            exitTransition = { screenExit() },
+            popEnterTransition = { screenPopEnter() },
+            popExitTransition = { screenPopExit(isTabSwitch(initialState.destination.route, targetState.destination.route)) },
         ) {
             composable(Routes.SCHEDULE) { entry ->
                 val vm: ScheduleViewModel = viewModel(

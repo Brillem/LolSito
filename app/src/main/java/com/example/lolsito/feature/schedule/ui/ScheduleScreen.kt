@@ -2,7 +2,6 @@ package com.example.lolsito.feature.schedule.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +26,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -62,6 +60,8 @@ import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LiveBadge
+import com.example.lolsito.core.ui.MatchCard
+import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.MessageView
 import com.example.lolsito.core.ui.TeamLogo
@@ -69,6 +69,7 @@ import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.isFavoriteIn
+import com.example.lolsito.ui.theme.LabelText
 import com.example.lolsito.ui.theme.LolSitoTheme
 import java.time.Instant
 import java.time.LocalDate
@@ -385,14 +386,15 @@ private val timeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
 @Composable
 fun DayHeader(date: LocalDate, modifier: Modifier = Modifier) {
+    // Opaque, since as a sticky header the cards scroll under it.
     Text(
-        text = date.format(dayFormatter),
-        style = MaterialTheme.typography.labelLarge,
+        text = date.format(dayFormatter).uppercase(),
+        style = LabelText.Overline,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .background(MaterialTheme.colorScheme.background)
+            .padding(start = Spacing.Screen, end = Spacing.Screen, top = 12.dp, bottom = 4.dp),
     )
 }
 
@@ -401,17 +403,16 @@ fun DayHeader(date: LocalDate, modifier: Modifier = Modifier) {
 private fun SectionHeader(title: String, modifier: Modifier = Modifier, accent: Boolean = false) {
     Text(
         text = title,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
+        style = MaterialTheme.typography.titleLarge,
         color = if (accent) MaterialTheme.colorScheme.inversePrimary else MaterialTheme.colorScheme.onBackground,
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+            .padding(start = Spacing.Screen, end = Spacing.Screen, top = 16.dp, bottom = 4.dp),
     )
 }
 
 /**
- * Scoreboard row: first team, result, second team, with the caption centered below. The result is the
+ * Scoreboard card: first team, result, second team, with the caption centered below. The result is the
  * score of a finished match, the current score and the LIVE badge of a live one, and the start time of
  * a match that has not started. The start time of a finished match goes into the caption instead; a
  * live match shows no time at all, so the time appears once, wherever it matters.
@@ -444,47 +445,40 @@ fun EventRow(
         event.blockName,
         result.formatLabel,
     ).joinToString(" · ")
-    Column(
-        modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                    if (hasTeams) TeamCell(teams[0], result.emphasisFor(0), favorite = teams[0].isFavoriteIn(favoriteNames))
+    MatchCard(modifier, onClick) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                if (hasTeams) TeamCell(teams[0], result.emphasisFor(0), favorite = teams[0].isFavoriteIn(favoriteNames))
+            }
+            Column(
+                Modifier.widthIn(min = 72.dp).padding(horizontal = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                when {
+                    !hasTeams -> Text("TBD", style = LabelText.Score)
+                    score != null -> Text(score, style = LabelText.Score)
+                    else -> Text(time, style = LabelText.Time)
                 }
-                Column(
-                    Modifier.widthIn(min = 72.dp).padding(horizontal = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    when {
-                        !hasTeams -> Text("TBD", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        score != null -> Text(score, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        else -> Text(time, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    }
-                    if (isLive) {
-                        Spacer(Modifier.height(2.dp))
-                        LiveBadge()
-                    }
-                }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    if (hasTeams) TeamCell(teams[1], result.emphasisFor(1), mirrored = true, favorite = teams[1].isFavoriteIn(favoriteNames))
+                if (isLive) {
+                    Spacer(Modifier.height(2.dp))
+                    LiveBadge()
                 }
             }
-            if (caption.isNotEmpty()) {
-                Text(
-                    caption,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (hasTeams) TeamCell(teams[1], result.emphasisFor(1), mirrored = true, favorite = teams[1].isFavoriteIn(favoriteNames))
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        if (caption.isNotEmpty()) {
+            Text(
+                caption,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
     }
 }
 
@@ -502,8 +496,8 @@ internal fun TeamCell(team: Team, emphasis: TeamEmphasis = TeamEmphasis.NEUTRAL,
         val code = @Composable {
             Text(
                 team.code,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (emphasis == TeamEmphasis.WINNER) FontWeight.ExtraBold else FontWeight.SemiBold,
+                style = LabelText.TeamCode,
+                fontWeight = if (emphasis == TeamEmphasis.WINNER) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Ellipsis,

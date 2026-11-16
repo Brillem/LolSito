@@ -42,18 +42,20 @@ fun ErrorView(message: String, onRetry: () -> Unit, modifier: Modifier = Modifie
 }
 
 /**
- * Shows the view for [status]: a spinner while loading, an error with retry, [emptyMessage] when
- * there is nothing to show, and [content] once loaded.
+ * Shows the view for [status]: [loading] (a skeleton shaped like the content, by default a list of
+ * match cards) while loading, an error with retry, [emptyMessage] when there is nothing to show, and
+ * [content] once loaded.
  */
 @Composable
 fun LoadStatusView(
     status: LoadStatus,
     emptyMessage: String,
     onRetry: () -> Unit,
+    loading: @Composable () -> Unit = { MatchListSkeleton() },
     content: @Composable () -> Unit,
 ) {
     when (status) {
-        LoadStatus.Loading -> LoadingView()
+        LoadStatus.Loading -> loading()
         is LoadStatus.Error -> ErrorView(status.message, onRetry)
         LoadStatus.Empty -> MessageView(emptyMessage)
         LoadStatus.Content -> content()

@@ -43,7 +43,6 @@ object ReminderNotifications {
             .setContentText(reminder.detail)
             .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setWhen(reminder.startTime.toEpochMilli())
             .setShowWhen(true)
             .setContentIntent(contentIntent)
             .setAutoCancel(true)

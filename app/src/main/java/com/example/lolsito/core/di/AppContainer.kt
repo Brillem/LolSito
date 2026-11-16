@@ -13,6 +13,7 @@ import com.example.lolsito.feature.game.data.GameStatsRepositoryImpl
 import com.example.lolsito.feature.game.domain.GameStatsRepository
 import com.example.lolsito.feature.match.data.MatchDetailRepositoryImpl
 import com.example.lolsito.feature.match.domain.MatchDetailRepository
+import com.example.lolsito.feature.reminders.domain.CheckMatchStart
 import com.example.lolsito.feature.reminders.domain.NotificationAvailability
 import com.example.lolsito.feature.reminders.domain.ReminderScheduler
 import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
@@ -88,6 +89,11 @@ class AppContainer(private val context: Context) {
             reminderScheduler,
             clock(),
         )
+    }
+
+    /** Run by each check of a reminder. Its live feed comes from the network only, never from a stored copy. */
+    val checkMatchStart: CheckMatchStart by lazy {
+        CheckMatchStart(userPreferences, LiveMatchesRepositoryImpl(networkOnlyApi), reminderScheduler, clock())
     }
 
     /**

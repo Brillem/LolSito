@@ -9,15 +9,25 @@ import com.example.lolsito.feature.teams.domain.teamScheduleLeagueIds
 import java.time.Duration
 import java.time.Instant
 
-/** How long before a match starts its reminder is due. Fixed: there is no setting for it. */
+/**
+ * How long before the official start of a match the first check of whether it has started is due, since
+ * a match may start a little early. Fixed: there is no setting for it.
+ */
 val REMINDER_LEAD: Duration = Duration.ofMinutes(15)
+
+/** How long to wait between two checks of whether a match has started. */
+val START_CHECK_INTERVAL: Duration = Duration.ofMinutes(5)
+
+/** How long after its official start a match that never went live stops being checked (postponed, cancelled). */
+val START_CHECK_GIVE_UP: Duration = Duration.ofHours(3)
 
 /** How far ahead a sync looks for matches to remind. */
 val REMINDER_WINDOW: Duration = Duration.ofHours(48)
 
 /**
- * The start-of-match reminder of one match. It holds only what is known before the match starts
- * (teams, league, format), never a score or a result.
+ * The start-of-match reminder of one match: a notification shown once the match is really in progress,
+ * whatever its official start time. It holds only what is known before the match starts (teams, league,
+ * format), never a score or a result.
  */
 data class MatchReminder(
     val matchId: String,
@@ -29,6 +39,7 @@ data class MatchReminder(
     /** The names of the match's teams, to check when it is shown that one is still a favorite. */
     val teamNames: List<String>,
 ) {
+    /** When the first check of whether the match has started is due. */
     val triggerAt: Instant get() = startTime.minus(REMINDER_LEAD)
 
     /** Changes whenever the start time or anything shown changes, so such a match is scheduled again. */
@@ -44,13 +55,16 @@ data class ReminderPlan(val toSchedule: List<MatchReminder>, val toCancel: List<
 
 /**
  * The reminders [events] call for: one per unstarted match of a favorite (recognized by name, like the
- * Schedule star) starting after [now] and at most [REMINDER_WINDOW] later. Events without a match have
- * no identity to remind about.
+ * Schedule star) starting at most [REMINDER_WINDOW] after [now]. A match past its official start still
+ * qualifies while it is unstarted and its checks have not given up ([START_CHECK_GIVE_UP]), so a sync
+ * does not cancel the checks of a match that is running late. Events without a match have no identity
+ * to remind about.
  */
 fun remindersFor(events: List<ScheduleEvent>, favoriteNames: Collection<String>, now: Instant): List<MatchReminder> {
     val horizon = now.plus(REMINDER_WINDOW)
+    val stillChecked = now.minus(START_CHECK_GIVE_UP)
     return events
-        .filter { it.state == MatchState.UNSTARTED && it.startTime.isAfter(now) && !it.startTime.isAfter(horizon) }
+        .filter { it.state == MatchState.UNSTARTED && it.startTime.isAfter(stillChecked) && !it.startTime.isAfter(horizon) }
         .filter { it.involvesFavorite(favoriteNames) }
         .mapNotNull { it.toReminder() }
         .distinctBy { it.matchId }
@@ -81,22 +95,40 @@ fun planReminders(wanted: List<MatchReminder>, scheduled: Collection<ScheduledRe
     )
 }
 
-/** How long to wait before showing [reminder]; zero when its time already passed. */
+/** How long to wait before the first check of [reminder]; zero when its time already passed. */
 fun reminderDelay(reminder: MatchReminder, now: Instant): Duration =
     Duration.between(now, reminder.triggerAt).takeUnless { it.isNegative } ?: Duration.ZERO
 
-/**
- * The notification title, from the minutes left when it is shown (rounded up), since Android may
- * show it a little late: "GEN vs BLG starts in 15 minutes", or "is starting" once the time has come.
- */
-fun reminderTitle(teamsLabel: String, startTime: Instant, now: Instant): String {
-    val secondsLeft = Duration.between(now, startTime).seconds
-    if (secondsLeft <= 0) return "$teamsLabel is starting"
-    val minutes = (secondsLeft + 59) / 60
-    return "$teamsLabel starts in $minutes ${if (minutes == 1L) "minute" else "minutes"}"
+/** The notification title, e.g. "GEN vs BLG has started". */
+fun startedTitle(teamsLabel: String): String = "$teamsLabel has started"
+
+/** What a check of whether a match has started leads to. */
+enum class StartCheck {
+    /** The match is in progress: show its notification. */
+    NOTIFY,
+
+    /** Not in progress yet, or the live feed could not be read: check again after [START_CHECK_INTERVAL]. */
+    CHECK_AGAIN,
+
+    /** [START_CHECK_GIVE_UP] has passed since the official start without the match going live: stop. */
+    GIVE_UP,
 }
 
-/** Checked when the reminder is due: the bell is still on and one of the match's teams is still a favorite. */
+/**
+ * Decides a check of [reminder] at [now]. [liveMatchIds] are the matches in progress in the live feed
+ * (see [matchIdsInProgress]), or null when the feed could not be read.
+ */
+fun startCheck(reminder: MatchReminder, liveMatchIds: Set<String>?, now: Instant): StartCheck = when {
+    liveMatchIds != null && reminder.matchId in liveMatchIds -> StartCheck.NOTIFY
+    now.isBefore(reminder.startTime.plus(START_CHECK_GIVE_UP)) -> StartCheck.CHECK_AGAIN
+    else -> StartCheck.GIVE_UP
+}
+
+/** The ids of the matches being played among the [liveEvents] of the live feed. */
+fun matchIdsInProgress(liveEvents: List<ScheduleEvent>): Set<String> =
+    liveEvents.filter { it.state == MatchState.IN_PROGRESS }.mapNotNullTo(HashSet()) { it.match?.id }
+
+/** Checked at every check of the reminder: the bell is still on and one of the match's teams is still a favorite. */
 fun MatchReminder.isStillWanted(remindersEnabled: Boolean, favoriteNames: Collection<String>): Boolean =
     remindersEnabled && teamNames.any { name -> Team(name, code = "", imageUrl = null, outcome = null, gameWins = null).isFavoriteIn(favoriteNames) }
 

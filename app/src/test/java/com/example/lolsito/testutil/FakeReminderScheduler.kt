@@ -10,6 +10,7 @@ import com.example.lolsito.feature.reminders.domain.ScheduledReminder
 class FakeReminderScheduler : ReminderScheduler {
     val reminders = linkedMapOf<String, MatchReminder>()
     val scheduledCalls = mutableListOf<MatchReminder>()
+    val checkAgainCalls = mutableListOf<MatchReminder>()
     val cancelledCalls = mutableListOf<String>()
     var cancelAllCalls = 0
 
@@ -19,6 +20,10 @@ class FakeReminderScheduler : ReminderScheduler {
     override fun schedule(reminder: MatchReminder) {
         scheduledCalls += reminder
         reminders[reminder.matchId] = reminder
+    }
+
+    override fun checkAgain(reminder: MatchReminder) {
+        checkAgainCalls += reminder
     }
 
     override fun cancel(matchId: String) {

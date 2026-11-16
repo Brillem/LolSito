@@ -72,15 +72,16 @@ class MatchRemindersTest {
     }
 
     @Test
-    fun `only matches starting after now and up to 48 hours ahead qualify`() {
+    fun `unstarted matches qualify from 3 hours after their official start up to 48 hours ahead`() {
         val events = listOf(
+            event("gone", start = now.minus(Duration.ofHours(3))),
+            event("late", start = now.minus(Duration.ofHours(3)).plusSeconds(1)),
             event("past", start = now.minusSeconds(60)),
-            event("now", start = now),
             event("soon", start = now.plusSeconds(60)),
             event("edge", start = now.plus(Duration.ofHours(48))),
             event("later", start = now.plus(Duration.ofHours(48)).plusSeconds(1)),
         )
-        assertEquals(listOf("soon", "edge"), remindersFor(events, favorites, now).map { it.matchId })
+        assertEquals(listOf("late", "past", "soon", "edge"), remindersFor(events, favorites, now).map { it.matchId })
     }
 
     @Test
@@ -96,14 +97,14 @@ class MatchRemindersTest {
     // When it is due.
 
     @Test
-    fun `a reminder is due 15 minutes before the start`() {
+    fun `the first check is due 15 minutes before the official start`() {
         val reminder = remindersFor(listOf(event()), favorites, now).single()
         assertEquals(now.plus(Duration.ofHours(2)).minus(Duration.ofMinutes(15)), reminder.triggerAt)
         assertEquals(Duration.ofMinutes(105), reminderDelay(reminder, now))
     }
 
     @Test
-    fun `a reminder whose time already passed is due at once`() {
+    fun `a first check whose time already passed is due at once`() {
         val reminder = remindersFor(listOf(event(start = now.plus(Duration.ofMinutes(5)))), favorites, now).single()
         assertEquals(Duration.ZERO, reminderDelay(reminder, now))
     }
@@ -131,20 +132,64 @@ class MatchRemindersTest {
     }
 
     @Test
-    fun `the title says how many minutes are left when it is shown`() {
-        val start = now.plus(Duration.ofMinutes(15))
-        assertEquals("GEN vs BLG starts in 15 minutes", reminderTitle("GEN vs BLG", start, now))
-        assertEquals("GEN vs BLG starts in 15 minutes", reminderTitle("GEN vs BLG", start, now.minusSeconds(-20)))
-        assertEquals("GEN vs BLG starts in 1 minute", reminderTitle("GEN vs BLG", now.plusSeconds(30), now))
-        assertEquals("GEN vs BLG is starting", reminderTitle("GEN vs BLG", now, now))
-        assertEquals("GEN vs BLG is starting", reminderTitle("GEN vs BLG", now.minusSeconds(120), now))
+    fun `the title says the match has started`() {
+        assertEquals("GEN vs BLG has started", startedTitle("GEN vs BLG"))
+    }
+
+    // Whether it has started.
+
+    private val reminder = remindersFor(listOf(event()), favorites, now).single()
+    private val giveUpAt = reminder.startTime.plus(Duration.ofHours(3))
+
+    @Test
+    fun `a match in progress in the live feed is notified`() {
+        assertEquals(StartCheck.NOTIFY, startCheck(reminder, liveMatchIds = setOf("other", "m1"), now = now))
+    }
+
+    @Test
+    fun `a match not live yet is checked again, also after its official start`() {
+        assertEquals(StartCheck.CHECK_AGAIN, startCheck(reminder, liveMatchIds = emptySet(), now = now))
+        assertEquals(StartCheck.CHECK_AGAIN, startCheck(reminder, liveMatchIds = setOf("other"), now = reminder.startTime.plusSeconds(3600)))
+        assertEquals(StartCheck.CHECK_AGAIN, startCheck(reminder, liveMatchIds = emptySet(), now = giveUpAt.minusSeconds(1)))
+    }
+
+    @Test
+    fun `a live feed that could not be read is asked again without notifying`() {
+        assertEquals(StartCheck.CHECK_AGAIN, startCheck(reminder, liveMatchIds = null, now = now))
+    }
+
+    @Test
+    fun `3 hours after the official start the checks give up`() {
+        assertEquals(StartCheck.GIVE_UP, startCheck(reminder, liveMatchIds = emptySet(), now = giveUpAt))
+        assertEquals(StartCheck.GIVE_UP, startCheck(reminder, liveMatchIds = null, now = giveUpAt.plusSeconds(60)))
+    }
+
+    @Test
+    fun `a match found live at the last check is still notified`() {
+        assertEquals(StartCheck.NOTIFY, startCheck(reminder, liveMatchIds = setOf("m1"), now = giveUpAt))
+    }
+
+    @Test
+    fun `checks are 5 minutes apart`() {
+        assertEquals(Duration.ofMinutes(5), START_CHECK_INTERVAL)
+    }
+
+    @Test
+    fun `only matches in progress count as started in the live feed`() {
+        val live = listOf(
+            event("playing", state = MatchState.IN_PROGRESS),
+            event("waiting", state = MatchState.UNSTARTED),
+            event("done", state = MatchState.COMPLETED),
+            event(matchId = null, state = MatchState.IN_PROGRESS),
+        )
+        assertEquals(setOf("playing"), matchIdsInProgress(live))
     }
 
     @Test
     fun `a reminder never carries a result`() {
         val scored = event(teams = listOf(team("Gen.G", "GEN", wins = 3, outcome = MatchOutcome.WIN), team("Bilibili Gaming", "BLG", wins = 2, outcome = MatchOutcome.LOSS)))
         val reminder = remindersFor(listOf(scored), favorites, now).single()
-        val shown = listOf(reminder.teamsLabel, reminder.detail, reminderTitle(reminder.teamsLabel, reminder.startTime, reminder.triggerAt))
+        val shown = listOf(reminder.teamsLabel, reminder.detail, startedTitle(reminder.teamsLabel))
         shown.forEach { text ->
             assertFalse(text, text.contains("3"))
             assertFalse(text, text.contains("2"))

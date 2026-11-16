@@ -9,28 +9,25 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,18 +41,30 @@ import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
-import com.example.lolsito.core.model.TeamEmphasis
-import com.example.lolsito.core.ui.LOSER_ALPHA
+import com.example.lolsito.core.ui.DropdownPicker
+import com.example.lolsito.core.ui.GroupLabel
+import com.example.lolsito.core.ui.InfoText
+import com.example.lolsito.core.ui.InlineError
+import com.example.lolsito.core.ui.LiveBadge
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
+import com.example.lolsito.core.ui.MatchCard
+import com.example.lolsito.core.ui.SectionTitle
+import com.example.lolsito.core.ui.Shapes
+import com.example.lolsito.core.ui.SkeletonBlock
+import com.example.lolsito.core.ui.SkeletonScreen
+import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.feature.schedule.ui.StarIcon
+import com.example.lolsito.feature.schedule.ui.TeamCell
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
 import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
+import com.example.lolsito.ui.theme.LabelText
+import com.example.lolsito.ui.theme.LolSitoTheme
 import java.time.LocalDate
 
 /** Container: wires the ViewModel to the stateless [StandingsContent]. */
@@ -103,19 +112,21 @@ fun StandingsContent(
 ) {
     Column(modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.CardGap),
         ) {
             // Always shown: without leagues it still names the current selection, with no options.
-            Picker(
+            DropdownPicker(
                 label = state.selectedLeagueLabel,
                 items = state.leagues,
                 itemLabel = { it.name },
                 onSelect = { onSelectLeague(it.id) },
                 modifier = Modifier.weight(1f),
+                imageUrl = state.selectedLeague?.imageUrl,
+                itemImageUrl = { it.imageUrl },
             )
             if (state.tournaments.isNotEmpty()) {
-                Picker(
+                DropdownPicker(
                     label = state.selectedTournament?.label ?: "Tournament",
                     items = state.tournaments,
                     itemLabel = { t -> listOfNotNull(t.label, t.dateRange).joinToString("\n") },
@@ -124,11 +135,22 @@ fun StandingsContent(
                 )
             }
         }
+        // Inline, picker-only error: the rest of the tab keeps working without the leagues.
         if (state.leaguesStatus is LoadStatus.Error) {
-            LeaguesError(onRetryLeagues)
+            InlineError("Couldn't load leagues", onRetryLeagues)
         }
-        LoadStatusView(state.tournamentsStatus, "No tournaments for this league", onRetryTournaments) {
-            LoadStatusView(state.standingsStatus, "No standings for this tournament yet", onRetryStandings) {
+        LoadStatusView(
+            state.tournamentsStatus,
+            "No tournaments for this league",
+            onRetryTournaments,
+            loading = { StandingsSkeleton() },
+        ) {
+            LoadStatusView(
+                state.standingsStatus,
+                "No standings for this tournament yet",
+                onRetryStandings,
+                loading = { StandingsSkeleton() },
+            ) {
                 PullToRefreshBox(isRefreshing = state.isRefreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
                     StandingsList(
                         state.rows,
@@ -143,53 +165,16 @@ fun StandingsContent(
     }
 }
 
-/** Inline, picker-only error: the rest of the tab keeps working without the leagues. */
+/** Loading state shaped like a standings table: a stage title and the rows of its table. */
 @Composable
-private fun LeaguesError(onRetry: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "Couldn't load leagues",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onRetry) { Text("Retry") }
-    }
-}
-
-/**
- * Dropdown picker. [items] are shown in order; [label] is the current selection. With no [items]
- * it only shows the selection and cannot be opened.
- */
-@Composable
-private fun <T> Picker(
-    label: String,
-    items: List<T>,
-    itemLabel: (T) -> String,
-    onSelect: (T) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier) {
-        OutlinedButton(
-            onClick = { expanded = true },
-            enabled = items.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("$label ▾", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        DropdownMenu(expanded = expanded && items.isNotEmpty(), onDismissRequest = { expanded = false }) {
-            items.forEach { item ->
-                DropdownMenuItem(
-                    text = { Text(itemLabel(item)) },
-                    onClick = {
-                        expanded = false
-                        onSelect(item)
-                    },
-                )
+private fun StandingsSkeleton(modifier: Modifier = Modifier, rows: Int = 8) {
+    SkeletonScreen(modifier) {
+        Column {
+            SkeletonBlock(
+                Modifier.padding(start = Spacing.Screen, top = 16.dp, bottom = 8.dp).size(width = 140.dp, height = 20.dp),
+            )
+            repeat(rows) {
+                SkeletonBlock(Modifier.padding(horizontal = Spacing.Screen, vertical = 2.dp).fillMaxWidth().height(44.dp))
             }
         }
     }
@@ -206,12 +191,18 @@ fun StandingsList(
     favoriteNames: List<String> = emptyList(),
 ) {
     LazyColumn(modifier.fillMaxSize()) {
-        items(rows, key = { it.key }) { row ->
+        itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
             when (row) {
-                is StandingsRow.StageHeader -> StageHeader(row.name)
-                is StandingsRow.SectionHeader -> SectionHeader(row.name)
+                is StandingsRow.StageHeader -> SectionTitle(row.name)
+                is StandingsRow.SectionHeader -> GroupLabel(row.name, color = MaterialTheme.colorScheme.inversePrimary)
                 is StandingsRow.TableHeader -> TableHeader()
-                is StandingsRow.RankingRow -> RankingRow(row, onTeamClick, favorite = row.isFavorite(favoriteNames))
+                is StandingsRow.RankingRow -> RankingRow(
+                    row,
+                    onTeamClick,
+                    favorite = row.isFavorite(favoriteNames),
+                    // The table ends where the next row is not another ranking.
+                    last = rows.getOrNull(index + 1) !is StandingsRow.RankingRow,
+                )
                 is StandingsRow.EmptySection -> InfoText("No standings for this section yet")
                 is StandingsRow.EliminationNotice -> EliminationNotice()
                 is StandingsRow.MatchRow -> SectionMatchRow(
@@ -227,43 +218,28 @@ fun StandingsList(
     }
 }
 
-@Composable
-private fun StageHeader(name: String) {
-    Text(
-        text = name,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    )
-}
-
-@Composable
-private fun SectionHeader(name: String) {
-    Text(
-        text = name,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
-    )
-}
-
+/** The top of a ranking table: the column names on the card surface its [RankingRow]s continue. */
 @Composable
 private fun TableHeader() {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        val style = MaterialTheme.typography.labelSmall
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.Screen)
+            .background(MaterialTheme.colorScheme.surfaceContainer, TABLE_TOP_SHAPE)
+            .padding(start = Spacing.CardPadding, end = Spacing.CardPadding, top = 10.dp, bottom = 4.dp),
+    ) {
+        val style = LabelText.Overline
         val color = MaterialTheme.colorScheme.onSurfaceVariant
         Text("#", style = style, color = color, modifier = Modifier.width(POSITION_WIDTH))
-        Text("Team", style = style, color = color, modifier = Modifier.weight(1f))
+        Text("TEAM", style = style, color = color, modifier = Modifier.weight(1f))
         Text("W-L", style = style, color = color, textAlign = TextAlign.End, modifier = Modifier.width(RECORD_WIDTH))
     }
 }
 
 /**
- * Opens the team profile on tap, unless the team has nothing to open: see [StandingsRow.RankingRow.teamId].
- * [favorite] draws the star next to the team's code.
+ * One row of a ranking table, on the same surface as the header above it; [last] rounds its bottom
+ * corners to close the table. Opens the team profile on tap, unless the team has nothing to open: see
+ * [StandingsRow.RankingRow.teamId]. [favorite] draws the star next to the team's code.
  */
 @Composable
 fun RankingRow(
@@ -271,22 +247,39 @@ fun RankingRow(
     onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     favorite: Boolean = false,
+    last: Boolean = false,
 ) {
     val team = row.ranking.team
     val teamId = row.teamId
     Row(
         modifier
             .fillMaxWidth()
+            .padding(horizontal = Spacing.Screen)
+            .clip(if (last) TABLE_BOTTOM_SHAPE else RectangleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .then(if (teamId != null) Modifier.clickable { onTeamClick(teamId) } else Modifier)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(start = Spacing.CardPadding, end = Spacing.CardPadding, top = 8.dp, bottom = if (last) 12.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(row.position, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.width(POSITION_WIDTH))
+        Text(
+            row.position,
+            style = LabelText.Number,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(POSITION_WIDTH),
+        )
         TeamLogo(team.imageUrl, contentDescription = team.name)
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(team.code, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    team.code,
+                    style = LabelText.TeamCode,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
                 if (favorite) {
                     Spacer(Modifier.width(4.dp))
                     FavoriteStar()
@@ -300,7 +293,7 @@ fun RankingRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(row.record, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.End, modifier = Modifier.width(RECORD_WIDTH))
+        Text(row.record, style = LabelText.Number, textAlign = TextAlign.End, maxLines = 1, modifier = Modifier.width(RECORD_WIDTH))
     }
 }
 
@@ -317,7 +310,7 @@ internal fun FavoriteStar(modifier: Modifier = Modifier) {
 
 @Composable
 private fun EliminationNotice() {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
         Text("Elimination stage", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         Text(
             "Bracket and Swiss stages have no standings table. Matches:",
@@ -327,17 +320,10 @@ private fun EliminationNotice() {
     }
 }
 
-@Composable
-private fun InfoText(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-    )
-}
-
-/** Undecided (TBD) matches are not clickable: see [StandingsRow.MatchRow.isNavigable]. */
+/**
+ * Scoreboard card like Schedule's: first team, result, second team, with the LIVE badge under the result
+ * of a match being played. Undecided (TBD) matches are not clickable: see [StandingsRow.MatchRow.isNavigable].
+ */
 @Composable
 fun SectionMatchRow(
     row: StandingsRow.MatchRow,
@@ -348,64 +334,41 @@ fun SectionMatchRow(
 ) {
     val teams = row.sectionMatch.match.teams
     val result = row.displayedResult(noSpoilers)
-    Row(
-        modifier
-            .fillMaxWidth()
-            .then(if (row.isNavigable) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (row.hasBothTeams) {
-            MatchTeam(teams[0], result.emphasisFor(0), Modifier.weight(1f), alignEnd = true, favorite = row.isFavorite(0, favoriteNames))
-            Text(
-                text = result.score ?: "vs",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (result.score != null) FontWeight.Bold else null,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.width(56.dp),
-            )
-            MatchTeam(teams[1], result.emphasisFor(1), Modifier.weight(1f), alignEnd = false, favorite = row.isFavorite(1, favoriteNames))
-        } else {
-            Text("TBD", style = MaterialTheme.typography.bodyMedium)
-        }
-        if (row.isLive) {
-            Text("LIVE", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@Composable
-private fun MatchTeam(team: Team, emphasis: TeamEmphasis, modifier: Modifier, alignEnd: Boolean, favorite: Boolean) {
-    Row(
-        modifier.alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
-    ) {
-        val code = @Composable {
-            Text(
-                team.code,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (emphasis == TeamEmphasis.WINNER) FontWeight.ExtraBold else FontWeight.SemiBold,
-            )
-        }
-        val logo = @Composable { TeamLogo(team.imageUrl, contentDescription = team.name, size = 24.dp) }
-        // The star sits on the outer side of the code, away from the score.
-        if (alignEnd && favorite) {
-            FavoriteStar()
-            Spacer(Modifier.width(4.dp))
-        }
-        if (alignEnd) code() else logo()
-        Spacer(Modifier.width(6.dp))
-        if (alignEnd) logo() else code()
-        if (!alignEnd && favorite) {
-            Spacer(Modifier.width(4.dp))
-            FavoriteStar()
+    val score = result.score
+    MatchCard(modifier, onClick = if (row.isNavigable) onClick else null) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                if (row.hasBothTeams) TeamCell(teams[0], result.emphasisFor(0), favorite = row.isFavorite(0, favoriteNames))
+            }
+            Column(
+                Modifier.widthIn(min = 72.dp).padding(horizontal = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                when {
+                    !row.hasBothTeams -> Text("TBD", style = LabelText.Score)
+                    score != null -> Text(score, style = LabelText.Score)
+                    else -> Text("vs", style = LabelText.Time, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (row.isLive) {
+                    Spacer(Modifier.height(2.dp))
+                    LiveBadge()
+                }
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (row.hasBothTeams) {
+                    TeamCell(teams[1], result.emphasisFor(1), mirrored = true, favorite = row.isFavorite(1, favoriteNames))
+                }
+            }
         }
     }
 }
 
 private val POSITION_WIDTH = 32.dp
-private val RECORD_WIDTH = 48.dp
+private val RECORD_WIDTH = 56.dp
+
+/** A ranking table is one card cut into lazy rows: the header carries its top corners, the last row its bottom ones. */
+private val TABLE_TOP_SHAPE = Shapes.Card.copy(bottomEnd = ZeroCornerSize, bottomStart = ZeroCornerSize)
+private val TABLE_BOTTOM_SHAPE = Shapes.Card.copy(topStart = ZeroCornerSize, topEnd = ZeroCornerSize)
 
 private fun previewTeam(code: String, outcome: MatchOutcome? = null, wins: Int? = null) =
     Team(code, code, null, outcome, wins, id = code)
@@ -445,51 +408,57 @@ private val previewStandings = Standings(
     ),
 )
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun StandingsContentPreview() {
-    StandingsContent(
-        state = StandingsUiState(
-            leagues = listOf(League("1", "lck", "LCK", null, null)),
-            leaguesStatus = LoadStatus.Content,
-            selectedLeagueId = "1",
-            tournamentsStatus = LoadStatus.Content,
-            tournaments = listOf(Tournament("t", "lck_split_3_2026", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 1))),
-            selectedTournamentId = "t",
-            standingsStatus = LoadStatus.Content,
-            rows = buildStandingsRows(previewStandings),
-        ),
-        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
-    )
+    LolSitoTheme {
+        StandingsContent(
+            state = StandingsUiState(
+                leagues = listOf(League("1", "lck", "LCK", null, null)),
+                leaguesStatus = LoadStatus.Content,
+                selectedLeagueId = "1",
+                tournamentsStatus = LoadStatus.Content,
+                tournaments = listOf(Tournament("t", "lck_split_3_2026", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 1))),
+                selectedTournamentId = "t",
+                standingsStatus = LoadStatus.Content,
+                rows = buildStandingsRows(previewStandings),
+            ),
+            onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
+        )
+    }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun StandingsErrorPreview() {
-    StandingsContent(
-        state = StandingsUiState(
-            leagues = listOf(League("1", "lck", "LCK", null, null)),
-            leaguesStatus = LoadStatus.Content,
-            selectedLeagueId = "1",
-            tournamentsStatus = LoadStatus.Error("Could not load tournaments"),
-        ),
-        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
-    )
+    LolSitoTheme {
+        StandingsContent(
+            state = StandingsUiState(
+                leagues = listOf(League("1", "lck", "LCK", null, null)),
+                leaguesStatus = LoadStatus.Content,
+                selectedLeagueId = "1",
+                tournamentsStatus = LoadStatus.Error("Could not load tournaments"),
+            ),
+            onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
+        )
+    }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun StandingsLeaguesErrorPreview() {
-    StandingsContent(
-        state = StandingsUiState(
-            leaguesStatus = LoadStatus.Error("Could not load leagues"),
-            selectedLeagueId = "98767991310872058",
-            tournamentsStatus = LoadStatus.Content,
-            tournaments = listOf(Tournament("t", "lck_split_3_2026", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 1))),
-            selectedTournamentId = "t",
-            standingsStatus = LoadStatus.Content,
-            rows = buildStandingsRows(previewStandings),
-        ),
-        onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
-    )
+    LolSitoTheme {
+        StandingsContent(
+            state = StandingsUiState(
+                leaguesStatus = LoadStatus.Error("Could not load leagues"),
+                selectedLeagueId = "98767991310872058",
+                tournamentsStatus = LoadStatus.Content,
+                tournaments = listOf(Tournament("t", "lck_split_3_2026", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 1))),
+                selectedTournamentId = "t",
+                standingsStatus = LoadStatus.Content,
+                rows = buildStandingsRows(previewStandings),
+            ),
+            onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
+        )
+    }
 }

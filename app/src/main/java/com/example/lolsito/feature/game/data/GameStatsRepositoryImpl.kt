@@ -6,6 +6,7 @@ import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.feature.game.domain.GameStatsRepository
 import com.example.lolsito.feature.game.domain.GoldHistory
 import com.example.lolsito.feature.game.domain.GoldSample
+import com.example.lolsito.feature.game.domain.winnerTeamId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -36,6 +37,9 @@ class GameStatsRepositoryImpl(private val api: LiveStatsApi, private val clock: 
     /** Gold samples already fetched, by game id; kept for as long as this repository lives. */
     private val goldCaches = ConcurrentHashMap<String, GoldCache>()
 
+    /** Winner team id by game id, of the games whose winner is known. */
+    private val winners = ConcurrentHashMap<String, String>()
+
     private class GoldCache {
         @Volatile
         var start: GoldSample? = null
@@ -65,6 +69,17 @@ class GameStatsRepositoryImpl(private val api: LiveStatsApi, private val clock: 
             return@coroutineScope stats
         }
         stats.withDetails(gameDetails.players, gameDetails.frameTime ?: stats.frameTime)
+    }
+
+    /**
+     * Only the window feed is asked: the details add nothing to who won. A winner never changes, so one
+     * found is kept for as long as this repository lives; an unknown one is asked for again.
+     */
+    override suspend fun getWinnerTeamId(gameId: String): String? {
+        winners[gameId]?.let { return it }
+        val response = api.getWindow(gameId, latestStartingTime(clock.instant()))
+        if (!response.isSuccessful) throw HttpException(response)
+        return response.body()?.toGameStats()?.winnerTeamId()?.also { winners[gameId] = it }
     }
 
     /**

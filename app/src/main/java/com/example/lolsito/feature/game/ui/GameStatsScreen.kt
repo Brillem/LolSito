@@ -1,5 +1,10 @@
 package com.example.lolsito.feature.game.ui
 
+import com.example.lolsito.ui.theme.WinGreen
+import com.example.lolsito.feature.game.domain.winnerSide
+import com.example.lolsito.feature.game.domain.MapSide
+import com.example.lolsito.core.ui.LOSER_ALPHA
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -260,14 +265,20 @@ private fun TeamTag(
     color: Color,
     style: TextStyle,
     modifier: Modifier = Modifier,
+    /** How the game ended for this team; null while it is being played or when the winner is unknown. */
+    won: Boolean? = null,
 ) {
     Row(
-        modifier,
+        modifier.alpha(if (won == false) LOSER_ALPHA else 1f),
         horizontalArrangement = if (mirrored) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!mirrored && logoUrl != null) {
             TeamLogo(logoUrl, contentDescription = null, size = TEAM_LOGO_SIZE)
+            Spacer(Modifier.width(6.dp))
+        }
+        if (mirrored && won == true) {
+            WinBadge()
             Spacer(Modifier.width(6.dp))
         }
         Text(
@@ -278,11 +289,27 @@ private fun TeamTag(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
         )
+        if (!mirrored && won == true) {
+            Spacer(Modifier.width(6.dp))
+            WinBadge()
+        }
         if (mirrored && logoUrl != null) {
             Spacer(Modifier.width(6.dp))
             TeamLogo(logoUrl, contentDescription = null, size = TEAM_LOGO_SIZE)
         }
     }
+}
+
+/** Marks the team that won the game, in the green the app uses for a win. */
+@Composable
+private fun WinBadge() {
+    Text(
+        "WIN",
+        style = LabelText.Overline,
+        fontWeight = FontWeight.Bold,
+        color = Color.Black,
+        modifier = Modifier.background(WinGreen, Shapes.Block).padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 private val TEAM_LOGO_SIZE = 20.dp
@@ -291,11 +318,14 @@ private val TEAM_LOGO_SIZE = 20.dp
 @Composable
 private fun TeamComparison(stats: GameStats, blue: GameTeam?, red: GameTeam?, modifier: Modifier = Modifier) {
     AppCard(modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)) {
+        // The feed does not say who won: see winnerSide for how it is told, and when it is not.
+        val winner = stats.winnerSide()
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TeamTag(
                     teamLabel(blue?.code, "Blue"), blue?.logoUrl, mirrored = false, color = Side.BLUE.color,
                     style = LabelText.TeamCode, modifier = Modifier.weight(1f),
+                    won = winner?.let { it == MapSide.BLUE },
                 )
                 Text(
                     if (stats.isFinished) "Final" else "LIVE",
@@ -307,6 +337,7 @@ private fun TeamComparison(stats: GameStats, blue: GameTeam?, red: GameTeam?, mo
                 TeamTag(
                     teamLabel(red?.code, "Red"), red?.logoUrl, mirrored = true, color = Side.RED.color,
                     style = LabelText.TeamCode, modifier = Modifier.weight(1f),
+                    won = winner?.let { it == MapSide.RED },
                 )
             }
             teamRowsBeforeDragons.forEach { (label, value) ->

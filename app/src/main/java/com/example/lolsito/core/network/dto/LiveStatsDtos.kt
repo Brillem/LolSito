@@ -48,6 +48,7 @@ data class LiveStatsTeamFrameDto(
     val totalGold: Int? = null,
     val totalKills: Int? = null,
     val towers: Int? = null,
+    val inhibitors: Int? = null,
     val barons: Int? = null,
     /** One entry per dragon taken, in the order taken: its type, such as "cloud" or "hextech". */
     val dragons: List<String>? = null,

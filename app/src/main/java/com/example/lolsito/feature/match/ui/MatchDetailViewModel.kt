@@ -6,7 +6,11 @@ import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.polling.MATCH_DETAIL_POLL_INTERVAL
 import com.example.lolsito.core.polling.pollWhile
 import com.example.lolsito.core.preferences.UserPreferences
+import com.example.lolsito.feature.match.domain.GameOutcome
+import com.example.lolsito.feature.match.domain.GameWinnerSource
 import com.example.lolsito.feature.match.domain.MatchDetail
+import com.example.lolsito.feature.match.domain.completedGameIds
+import com.example.lolsito.feature.match.domain.gameOutcomes
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.feature.match.domain.MatchDetailRepository
 import com.example.lolsito.core.model.Team
@@ -25,6 +29,9 @@ import java.time.Instant
 import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,6 +89,7 @@ class MatchDetailViewModel(
     private val scheduleRepository: ScheduleRepository,
     private val leaguesRepository: LeaguesRepository,
     private val zoneId: ZoneId,
+    private val gameWinners: GameWinnerSource = GameWinnerSource { null },
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<MatchDetailUiState>(MatchDetailUiState.Loading)
@@ -99,6 +107,23 @@ class MatchDetailViewModel(
 
     /** A pull to refresh is running; the content stays as it is meanwhile. */
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    private val _gameOutcomes = MutableStateFlow<Map<String, GameOutcome>>(emptyMap())
+
+    /**
+     * Who won each completed game, by game id, and the series score after it. The API does not say, so
+     * [gameWinners] is asked once per completed game and the series score settles what it cannot tell
+     * (see [gameOutcomes]); a game whose winner stays unknown has no entry. Secondary like the history: it
+     * loads on its own and a failure only leaves games without a winner. Empty while results are hidden.
+     */
+    val gameOutcomes: StateFlow<Map<String, GameOutcome>> = _gameOutcomes.asStateFlow()
+
+    /** What was worked out, whether or not it may be shown; [gameOutcomes] is what the screen gets. */
+    private var outcomes: Map<String, GameOutcome> = emptyMap()
+
+    /** The completed games [outcomes] was worked out for; null to work it out again. */
+    private var outcomesFor: List<String>? = null
+    private var outcomesJob: Job? = null
 
     /** What was loaded, whether or not it may be shown; [historyState] is what the screen gets. */
     private var history: MatchHistoryUiState = MatchHistoryUiState.None
@@ -127,6 +152,7 @@ class MatchDetailViewModel(
         revealed = true
         _uiState.update { if (it is MatchDetailUiState.Content) it.copy(resultsHidden = false) else it }
         publishHistory()
+        publishOutcomes()
     }
 
     private fun resultsHidden(): Boolean = noSpoilers == true && !revealed
@@ -154,6 +180,7 @@ class MatchDetailViewModel(
         _isRefreshing.value = true
         refreshJob = viewModelScope.launch {
             try {
+                outcomesFor = null // Ask again for the winners that could not be told or failed.
                 val detail = publishFreshDetail()
                 refreshHistory(detail.teams)
             } catch (e: CancellationException) {
@@ -170,7 +197,44 @@ class MatchDetailViewModel(
         val detail = repository.getMatchDetail(matchId)
         // Only replace content: a reload started meanwhile owns the state.
         _uiState.update { if (it is MatchDetailUiState.Content) MatchDetailUiState.Content(detail, resultsHidden()) else it }
+        loadGameOutcomes(detail)
         return detail
+    }
+
+    /**
+     * Works out who won each completed game of [detail], unless that was done for these same games (the
+     * polling of a live series only asks again when another game has ended). Every game is asked at once.
+     */
+    private fun loadGameOutcomes(detail: MatchDetail) {
+        val gameIds = detail.completedGameIds()
+        if (gameIds == outcomesFor) return
+        outcomesFor = gameIds
+        outcomesJob?.cancel()
+        if (gameIds.isEmpty()) {
+            outcomes = emptyMap()
+            publishOutcomes()
+            return
+        }
+        outcomesJob = viewModelScope.launch {
+            val winnerTeamIds = coroutineScope {
+                gameIds.map { gameId -> async { gameId to winnerOf(gameId) } }.awaitAll().toMap()
+            }
+            outcomes = detail.gameOutcomes(winnerTeamIds)
+            publishOutcomes()
+        }
+    }
+
+    /** A request that fails is a winner the stats could not tell. */
+    private suspend fun winnerOf(gameId: String): String? = try {
+        gameWinners.winnerTeamId(gameId)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun publishOutcomes() {
+        _gameOutcomes.value = if (resultsHidden()) emptyMap() else outcomes
     }
 
     /**
@@ -212,6 +276,7 @@ class MatchDetailViewModel(
                 val hidden = readNoSpoilers()
                 val detail = repository.getMatchDetail(matchId)
                 if (historyJob == null) loadHistory(detail.teams)
+                loadGameOutcomes(detail)
                 MatchDetailUiState.Content(detail, hidden)
             } catch (e: CancellationException) {
                 throw e

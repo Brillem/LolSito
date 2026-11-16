@@ -92,6 +92,8 @@ data class TeamStats(
     val players: List<PlayerStats>,
     /** The type of each dragon taken, in the order taken; [dragons] is their count. */
     val dragonTypes: List<DragonType> = emptyList(),
+    /** Inhibitors destroyed. Not shown; it is what tells who won (see [winnerSide]). */
+    val inhibitors: Int = 0,
 )
 
 /** The kind of a dragon a team took; [UNKNOWN] is a type the feed sent that the app does not know. */
@@ -146,4 +148,10 @@ interface GameStatsRepository {
      * built. It is secondary to the stats: a repository without it has none.
      */
     suspend fun getGoldHistory(gameId: String, until: Instant): GoldHistory? = null
+
+    /**
+     * Id of the team that won game [gameId], or null when the game is not finished, has no stats, or its
+     * stats do not tell (see [winnerTeamId]).
+     */
+    suspend fun getWinnerTeamId(gameId: String): String? = getGameStats(gameId)?.winnerTeamId()
 }

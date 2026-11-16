@@ -56,6 +56,7 @@ private fun LiveStatsTeamFrameDto?.toTeamStats(metadata: LiveStatsTeamMetadataDt
             }
             .sortedBy { it.participantId },
         dragonTypes = dragonTypes,
+        inhibitors = this?.inhibitors ?: 0,
     )
 }
 

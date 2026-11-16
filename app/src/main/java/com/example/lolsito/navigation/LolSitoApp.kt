@@ -294,6 +294,7 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                             MatchDetailViewModel(
                                 matchId = matchId,
                                 repository = container.matchDetailRepository,
+                                gameWinners = container.gameStatsRepository::getWinnerTeamId,
                                 preferences = container.userPreferences,
                                 teamsRepository = container.teamsRepository,
                                 scheduleRepository = container.scheduleRepository,

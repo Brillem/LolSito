@@ -81,4 +81,46 @@ class TeamMatchesTest {
         assertEquals(emptyList<Any>(), matches.upcoming)
         assertEquals(emptyList<Any>(), matches.previous)
     }
+
+    @Test
+    fun `the next match is the soonest unstarted one of the team`() {
+        val events = listOf(
+            event("done", "2026-10-01T10:00:00Z", MatchState.COMPLETED, "T1", "Gen.G"),
+            event("later", "2026-11-22T10:00:00Z", MatchState.UNSTARTED, "T1", "DRX"),
+            event("soon", "2026-11-20T10:00:00Z", MatchState.UNSTARTED, "Dplus KIA", "T1"),
+            event("other", "2026-11-19T10:00:00Z", MatchState.UNSTARTED, "Gen.G", "DRX"),
+        )
+
+        assertEquals("soon", nextMatch(events, "T1")?.matchId)
+    }
+
+    @Test
+    fun `a live match counts as the next one`() {
+        val events = listOf(
+            event("soon", "2026-11-20T10:00:00Z", MatchState.UNSTARTED, "T1", "DRX"),
+            event("live", "2026-11-16T10:00:00Z", MatchState.IN_PROGRESS, "T1", "Gen.G"),
+        )
+
+        assertEquals("live", nextMatch(events, "T1")?.matchId)
+    }
+
+    @Test
+    fun `no upcoming match, or one without two teams, means no next match`() {
+        val events = listOf(
+            event("done", "2026-10-01T10:00:00Z", MatchState.COMPLETED, "T1", "Gen.G"),
+            event("tbd", "2026-11-20T10:00:00Z", MatchState.UNSTARTED, "T1"),
+            event(null, "2026-11-21T10:00:00Z", MatchState.UNSTARTED, "T1", "DRX"),
+        )
+
+        assertNull(nextMatch(events, "T1"))
+        assertNull(nextMatch(emptyList(), "T1"))
+    }
+
+    @Test
+    fun `the opponent is the other team of the match`() {
+        val match = event("m", "2026-11-20T10:00:00Z", MatchState.UNSTARTED, "Dplus KIA", "T1")
+
+        assertEquals("Dplus KIA", opponentOf(match, "t1")?.name)
+        assertNull(opponentOf(match, "Gen.G"))
+    }
 }

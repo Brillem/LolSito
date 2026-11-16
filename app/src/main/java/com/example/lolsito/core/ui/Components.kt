@@ -10,23 +10,31 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +46,7 @@ import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.lolsito.ui.theme.LabelText
+import kotlinx.coroutines.launch
 
 /**
  * A rounded surface a step lighter than the black background: the container of anything shown as a
@@ -139,10 +148,14 @@ fun InlineError(message: String, onRetry: () -> Unit, modifier: Modifier = Modif
 }
 
 /**
- * Dropdown picker drawn as a card. [label] names the current selection and [imageUrl] is its picture, if
- * any (a league logo); [items] are listed in order, each with its own picture from [itemImageUrl]. With
- * no [items] it only shows the selection and cannot be opened.
+ * Picker drawn as a card. [label] names the current selection and [imageUrl] is its picture, if any (a
+ * league logo). Tapping the card opens a bottom sheet, headed by [title] when given, that lists [items]
+ * in order, each with its own picture from [itemImageUrl]; the sheet scrolls by dragging its list and is
+ * dismissed by dragging it down. The row where [isSelected] is true is highlighted with the accent color
+ * and a check; by default it is the one whose label equals [label]. With no [items] it only shows the
+ * selection and cannot be opened.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun <T> DropdownPicker(
     label: String,
@@ -152,6 +165,8 @@ fun <T> DropdownPicker(
     modifier: Modifier = Modifier,
     imageUrl: String? = null,
     itemImageUrl: (T) -> String? = { null },
+    title: String? = null,
+    isSelected: (T) -> Boolean = { itemLabel(it) == label },
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
@@ -173,25 +188,123 @@ fun <T> DropdownPicker(
                     modifier = Modifier.weight(1f),
                 )
                 if (items.isNotEmpty()) {
-                    Text("▾", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        ChevronDownIcon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
         }
-        DropdownMenu(expanded = expanded && items.isNotEmpty(), onDismissRequest = { expanded = false }) {
-            items.forEach { item ->
-                val itemImage = itemImageUrl(item)
-                DropdownMenuItem(
-                    text = { Text(itemLabel(item)) },
-                    leadingIcon = itemImage?.let { url -> { TeamLogo(url, contentDescription = null, size = 22.dp) } },
-                    onClick = {
-                        expanded = false
-                        onSelect(item)
-                    },
-                )
+    }
+    if (expanded && items.isNotEmpty()) {
+        val sheetState = rememberModalBottomSheetState()
+        val scope = rememberCoroutineScope()
+        PickerSheet(title = title, onDismiss = { expanded = false }, sheetState = sheetState) {
+            LazyColumn(contentPadding = WindowInsets.navigationBars.asPaddingValues()) {
+                items(items) { item ->
+                    PickerRow(
+                        label = itemLabel(item),
+                        imageUrl = itemImageUrl(item),
+                        selected = isSelected(item),
+                        onClick = {
+                            onSelect(item)
+                            scope.launch { sheetState.hide() }.invokeOnCompletion { expanded = false }
+                        },
+                    )
+                }
             }
         }
     }
 }
+
+/**
+ * The bottom sheet shared by every picker: a dark container with the default drag handle, the [title]
+ * when given, then [content], typically a [LazyColumn] of [PickerRow]s that honors the navigation bar
+ * insets. It is dismissed by dragging it down, tapping the scrim or going back, which calls [onDismiss].
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PickerSheet(
+    title: String?,
+    onDismiss: () -> Unit,
+    sheetState: SheetState,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        if (title != null) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp),
+            )
+        }
+        content()
+    }
+}
+
+/**
+ * One row of a [PickerSheet]: the optional picture at [imageUrl], the [label] and, when [selected], the
+ * accent color, a tinted background and a check at the end.
+ */
+@Composable
+fun PickerRow(label: String, imageUrl: String?, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .heightIn(min = 52.dp)
+            .padding(horizontal = Spacing.Screen, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (imageUrl != null) {
+            TeamLogo(imageUrl, contentDescription = null, size = 28.dp)
+            Spacer(Modifier.width(12.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                CheckIcon,
+                contentDescription = "Selected",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** Material "keyboard arrow down" chevron. Drawn here because the project has no icon library. */
+val ChevronDownIcon: ImageVector =
+    ImageVector.Builder("ChevronDown", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
+        .addPath(
+            pathData = addPathNodes("M7.41,8.59L12,13.17l4.59,-4.58L18,10l-6,6 -6,-6 1.41,-1.41z"),
+            fill = SolidColor(Color.Black),
+        )
+        .build()
+
+/** Material "check" mark. Drawn here because the project has no icon library. */
+val CheckIcon: ImageVector =
+    ImageVector.Builder("Check", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
+        .addPath(
+            pathData = addPathNodes("M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z"),
+            fill = SolidColor(Color.Black),
+        )
+        .build()
 
 /** Material "arrow back" glyph. Drawn here because the project has no icon library. */
 val BackIcon: ImageVector =

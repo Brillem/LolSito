@@ -799,6 +799,72 @@ class StandingsViewModelTest {
         assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
     }
 
+    @Test
+    fun `opening a tournament of another league shows it and saves it like a manual pick`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.openTournament(WORLDS, WORLDS_2025)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(WORLDS, state.selectedLeagueId)
+        assertEquals(WORLDS_2025, state.selectedTournamentId)
+        assertEquals(LoadStatus.Content, state.standingsStatus)
+        assertEquals(StandingsSelection(WORLDS, WORLDS_2025), preferences.savedStandingsSelections.last())
+    }
+
+    @Test
+    fun `opening a tournament of the same league changes only the tournament`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.openTournament(LCK, LCK_SPRING)
+        advanceUntilIdle()
+
+        assertEquals(LCK, vm.uiState.value.selectedLeagueId)
+        assertEquals(LCK_SPRING, vm.uiState.value.selectedTournamentId)
+        assertEquals(StandingsSelection(LCK, LCK_SPRING), preferences.savedStandingsSelections.last())
+    }
+
+    @Test
+    fun `opening the tournament already shown requests and saves nothing`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        val requests = repository.requests.size
+
+        vm.openTournament(LCK, LCK_SUMMER)
+        advanceUntilIdle()
+
+        assertEquals(requests, repository.requests.size)
+        assertTrue(preferences.savedStandingsSelections.isEmpty())
+    }
+
+    @Test
+    fun `a tournament opened on a fresh screen wins over the stored selection`() = runTest(dispatcher) {
+        preferences.standingsSelection = StandingsSelection(LCK, LCK_SPRING)
+        val vm = viewModel()
+
+        vm.openTournament(WORLDS, WORLDS_2026)
+        advanceUntilIdle()
+
+        assertEquals(WORLDS, vm.uiState.value.selectedLeagueId)
+        assertEquals(WORLDS_2026, vm.uiState.value.selectedTournamentId)
+        assertEquals(StandingsSelection(WORLDS, WORLDS_2026), preferences.savedStandingsSelections.last())
+        assertEquals(1, repository.requests.count { it.startsWith("t:") })
+    }
+
+    @Test
+    fun `opening a tournament missing from its league falls back to the default one`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.openTournament(WORLDS, "gone")
+        advanceUntilIdle()
+
+        assertEquals(WORLDS_2026, vm.uiState.value.selectedTournamentId)
+    }
+
     private fun favorite(name: String) = FavoriteTeam("id-$name", name.trim().lowercase(), name, name.trim().take(3), null)
 
     private fun tournament(id: String, start: String, end: String) =

@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -32,8 +33,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -41,7 +48,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -57,6 +67,7 @@ import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
+import com.example.lolsito.core.ui.ChevronDownIcon
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LiveBadge
@@ -64,6 +75,8 @@ import com.example.lolsito.core.ui.MatchCard
 import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.MessageView
+import com.example.lolsito.core.ui.PickerRow
+import com.example.lolsito.core.ui.PickerSheet
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
@@ -73,6 +86,7 @@ import com.example.lolsito.ui.theme.LabelText
 import com.example.lolsito.ui.theme.LolSitoTheme
 import java.time.Instant
 import java.time.LocalDate
+import kotlinx.coroutines.delay
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -86,8 +100,17 @@ fun ScheduleScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     WhileStarted(viewModel) { viewModel.pollWhileVisible() }
+    // Ticks once per minute, on the minute, only while the screen is visible; drives the match countdowns.
+    var now by remember { mutableStateOf(Instant.now()) }
+    WhileStarted(Unit) {
+        while (true) {
+            now = Instant.now()
+            delay(60_000L - now.toEpochMilli() % 60_000L)
+        }
+    }
     // Favorites are starred in a team's profile: read them again whenever this tab comes back.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshFavorites() }
+    CompositionLocalProvider(LocalNow provides now) {
     ScheduleContent(
         state = state,
         onToggleLeague = viewModel::toggleLeague,
@@ -101,7 +124,11 @@ fun ScheduleScreen(
         modifier = modifier,
         onRefresh = viewModel::refresh,
     )
+    }
 }
+
+/** The current minute, ticked by [ScheduleScreen]; null (no countdowns) wherever nothing provides it. */
+private val LocalNow = compositionLocalOf<Instant?> { null }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -170,9 +197,11 @@ private fun NoSpoilersToggle(noSpoilers: Boolean, onToggle: () -> Unit, modifier
 }
 
 /**
- * The LIVE toggle, always first and always there, then the Favorites toggle, followed by one chip per
- * league once they loaded. Without [onToggleFavoritesOnly] (callers that have no favorites) that chip is left out.
+ * The LIVE toggle, always first and always there, then the Favorites toggle, then once the leagues
+ * loaded a single chip that shows which are on and opens a sheet to toggle them. Without
+ * [onToggleFavoritesOnly] (callers that have no favorites) the Favorites chip is left out.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleFilterRow(
     leagues: List<League>,
@@ -185,72 +214,114 @@ fun ScheduleFilterRow(
     onToggleFavoritesOnly: (() -> Unit)? = null,
 ) {
     val accent = MaterialTheme.colorScheme.primary
-    LazyRow(
-        modifier = modifier.fillMaxWidth(),
+    var sheetOpen by remember { mutableStateOf(false) }
+    Row(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
     ) {
-        item(key = "live-toggle") {
-            FilterChip(
+        FilterChip(
+            selected = liveOnly,
+            onClick = onToggleLiveOnly,
+            label = { Text("LIVE", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false) },
+            leadingIcon = {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (liveOnly) MaterialTheme.colorScheme.onPrimary else accent),
+                )
+            },
+            colors = FilterChipDefaults.filterChipColors(
+                labelColor = MaterialTheme.colorScheme.inversePrimary,
+                selectedContainerColor = accent,
+                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+            ),
+            border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
                 selected = liveOnly,
-                onClick = onToggleLiveOnly,
-                label = { Text("LIVE", fontWeight = FontWeight.Bold) },
+                borderColor = accent,
+                selectedBorderColor = accent,
+            ),
+        )
+        if (onToggleFavoritesOnly != null) {
+            FilterChip(
+                selected = favoritesOnly,
+                onClick = onToggleFavoritesOnly,
+                label = { Text("Favorites", maxLines = 1, softWrap = false) },
                 leadingIcon = {
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(if (liveOnly) MaterialTheme.colorScheme.onPrimary else accent),
+                    Icon(
+                        imageVector = StarIcon,
+                        contentDescription = null,
+                        modifier = Modifier.size(FilterChipDefaults.IconSize),
                     )
                 },
-                colors = FilterChipDefaults.filterChipColors(
-                    labelColor = MaterialTheme.colorScheme.inversePrimary,
-                    selectedContainerColor = accent,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                ),
                 border = FilterChipDefaults.filterChipBorder(
                     enabled = true,
-                    selected = liveOnly,
-                    borderColor = accent,
+                    selected = favoritesOnly,
                     selectedBorderColor = accent,
                 ),
             )
         }
-        if (onToggleFavoritesOnly != null) {
-            item(key = "favorites-toggle") {
-                FilterChip(
-                    selected = favoritesOnly,
-                    onClick = onToggleFavoritesOnly,
-                    label = { Text("Favorites") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = StarIcon,
-                            contentDescription = null,
-                            modifier = Modifier.size(FilterChipDefaults.IconSize),
-                        )
-                    },
-                    border = FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = favoritesOnly,
-                        selectedBorderColor = accent,
-                    ),
-                )
-            }
-        }
-        items(leagues, key = { it.id }) { league ->
-            val selected = league.id in selectedIds
+        if (leagues.isNotEmpty()) {
+            val selectedLeagues = leagues.filter { it.id in selectedIds }
+            val logos = selectedLeagues.mapNotNull { it.imageUrl }.take(MAX_CHIP_LOGOS)
             FilterChip(
-                selected = selected,
-                onClick = { onToggleLeague(league.id) },
-                label = { Text(league.name) },
+                selected = selectedLeagues.isNotEmpty(),
+                onClick = { sheetOpen = true },
+                label = {
+                    Text(
+                        leaguesChipLabel(selectedLeagues.map { it.name }),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                // Logos are not tinted: they are often white on transparent, which reads on the black chip.
+                leadingIcon = if (logos.isEmpty()) null else {
+                    {
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            logos.forEach { TeamLogo(it, contentDescription = null, size = 18.dp) }
+                        }
+                    }
+                },
+                trailingIcon = {
+                    Icon(ChevronDownIcon, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize))
+                },
                 border = FilterChipDefaults.filterChipBorder(
                     enabled = true,
-                    selected = selected,
+                    selected = selectedLeagues.isNotEmpty(),
                     selectedBorderColor = accent,
                 ),
+                modifier = Modifier.weight(1f, fill = false),
             )
         }
     }
+    if (sheetOpen && leagues.isNotEmpty()) {
+        // Multi-select: the sheet stays open while leagues are toggled.
+        PickerSheet(title = "Leagues", onDismiss = { sheetOpen = false }, sheetState = rememberModalBottomSheetState()) {
+            LazyColumn(contentPadding = WindowInsets.navigationBars.asPaddingValues()) {
+                items(leagues, key = { it.id }) { league ->
+                    PickerRow(
+                        label = league.name,
+                        imageUrl = league.imageUrl,
+                        selected = league.id in selectedIds,
+                        onClick = { onToggleLeague(league.id) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private const val MAX_CHIP_LOGOS = 3
+
+/**
+ * Label of the leagues chip: the name when one league is on, "Leagues" when none and only the count when
+ * several, since the chip already shows their logos and has little room next to the other filters.
+ */
+internal fun leaguesChipLabel(selectedNames: List<String>): String = when (selectedNames.size) {
+    0 -> "Leagues"
+    1 -> selectedNames.first()
+    else -> selectedNames.size.toString()
 }
 
 /** Live matches of every league; an empty feed shows a message instead of an empty list. */
@@ -439,6 +510,8 @@ fun EventRow(
     val score = display.score
     // With a score (or live badge) in the middle the time has no place there: a finished match keeps it in the caption.
     val timeInCaption = !isLive && (score != null || !hasTeams)
+    val now = LocalNow.current
+    val countdown = now?.let { countdownLabel(event.startTime, it, event.state) }?.takeIf { !isLive && hasTeams }
     val caption = listOfNotNull(
         time.takeIf { timeInCaption },
         event.leagueName.takeIf { it.isNotBlank() },
@@ -468,7 +541,21 @@ fun EventRow(
                 if (hasTeams) TeamCell(teams[1], result.emphasisFor(1), mirrored = true, favorite = teams[1].isFavoriteIn(favoriteNames))
             }
         }
-        if (caption.isNotEmpty()) {
+        if (countdown != null) {
+            val accent = MaterialTheme.colorScheme.primary
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = accent)) { append(countdown) }
+                    if (caption.isNotEmpty()) append(" · $caption")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        } else if (caption.isNotEmpty()) {
             Text(
                 caption,
                 style = MaterialTheme.typography.bodySmall,

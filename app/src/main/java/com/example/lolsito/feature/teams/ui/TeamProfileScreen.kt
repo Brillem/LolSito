@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.teams.ui
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +22,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,37 +35,51 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.ui.AppCard
 import com.example.lolsito.core.ui.AppTopBar
+import com.example.lolsito.core.ui.FormMarks
 import com.example.lolsito.core.ui.GroupLabel
 import com.example.lolsito.core.ui.InfoText
 import com.example.lolsito.core.ui.InlineError
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.core.ui.LiveBadge
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.MatchCardSkeleton
 import com.example.lolsito.core.ui.SectionTitle
 import com.example.lolsito.core.ui.SkeletonBlock
+import com.example.lolsito.core.ui.Shapes
 import com.example.lolsito.core.ui.SkeletonScreen
 import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.TeamLogo
+import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.core.ui.rememberTeamAccent
 import com.example.lolsito.feature.schedule.domain.ScheduleDay
+import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.ui.DayHeader
 import com.example.lolsito.feature.schedule.ui.EventRow
 import com.example.lolsito.feature.schedule.ui.StarIcon
+import com.example.lolsito.feature.schedule.ui.countdownLabel
 import com.example.lolsito.feature.schedule.ui.StarOutlineIcon
 import com.example.lolsito.feature.teams.domain.Player
+import com.example.lolsito.feature.teams.domain.RESULT_CHAMPION
 import com.example.lolsito.feature.teams.domain.PlayerRole
 import com.example.lolsito.feature.teams.domain.RoleGroup
 import com.example.lolsito.feature.teams.domain.RosterSplit
 import com.example.lolsito.feature.teams.domain.TeamProfile
+import com.example.lolsito.feature.teams.domain.opponentOf
 import com.example.lolsito.ui.theme.LabelText
 import com.example.lolsito.ui.theme.LolSitoTheme
+import kotlinx.coroutines.delay
+import java.time.Instant
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 /** Container: wires the ViewModel to the stateless [TeamProfileContent]. */
 @Composable
@@ -69,6 +87,7 @@ fun TeamProfileScreen(
     viewModel: TeamProfileViewModel,
     onBack: () -> Unit,
     onMatchClick: (String) -> Unit,
+    onTournamentClick: (leagueId: String, tournamentId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -78,6 +97,7 @@ fun TeamProfileScreen(
         onRetry = viewModel::retry,
         onLoadOlder = viewModel::loadOlder,
         onMatchClick = onMatchClick,
+        onTournamentClick = onTournamentClick,
         onToggleFavorite = viewModel::toggleFavorite,
         modifier = modifier,
     )
@@ -92,6 +112,7 @@ fun TeamProfileContent(
     onMatchClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     onToggleFavorite: () -> Unit = {},
+    onTournamentClick: (leagueId: String, tournamentId: String) -> Unit = { _, _ -> },
 ) {
     Column(modifier.fillMaxSize()) {
         AppTopBar(
@@ -105,9 +126,64 @@ fun TeamProfileContent(
         LoadStatusView(state.status, "Team not found", onRetry, loading = { ProfileSkeleton() }) {
             val profile = state.profile ?: return@LoadStatusView
             LazyColumn(Modifier.fillMaxSize()) {
-                item(key = "header") { ProfileHeader(profile) }
+                item(key = "header") { ProfileHeader(profile, state.standing) }
+                state.nextMatch?.let { next ->
+                    item(key = "next-match") {
+                        NextMatchCard(next, profile.name, state.zoneId, onClick = next.matchId?.let { id -> { onMatchClick(id) } })
+                    }
+                }
+                if (state.form.isNotEmpty()) {
+                    item(key = "form-title") { SectionTitle("Recent form") }
+                    item(key = "form") {
+                        AppCard(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)) {
+                            FormMarks(state.form)
+                        }
+                    }
+                }
+                if (state.recentTournaments.isNotEmpty()) {
+                    item(key = "tournaments-title") { SectionTitle("Recent tournaments") }
+                    itemsIndexed(state.recentTournaments, key = { _, t -> "tournament:${t.tournamentId}" }) { _, tournament ->
+                        TournamentRow(tournament, onClick = { onTournamentClick(tournament.leagueId, tournament.tournamentId) })
+                    }
+                }
                 rosterRows(profile, state.lineup)
                 matchRows(state, onRetry, onLoadOlder, onMatchClick)
+            }
+        }
+    }
+}
+
+/**
+ * A tournament the team played: the league logo, its name and, on the right, how far the team got ("Finalist",
+ * "3rd"), in the primary color for the champion. Opens that tournament in the Tournaments tab.
+ */
+@Composable
+private fun TournamentRow(tournament: RecentTournament, onClick: () -> Unit) {
+    AppCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2),
+        onClick = onClick,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (tournament.leagueImageUrl != null) {
+                TeamLogo(tournament.leagueImageUrl, contentDescription = null, size = 32.dp)
+                Spacer(Modifier.width(12.dp))
+            }
+            Text(
+                tournament.name,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (tournament.result != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    tournament.result,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = if (tournament.result == RESULT_CHAMPION) FontWeight.Bold else null,
+                    color = if (tournament.result == RESULT_CHAMPION) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
             }
         }
     }
@@ -133,7 +209,7 @@ private fun FavoriteButton(isFavorite: Boolean, onToggle: () -> Unit) {
 
 /** Logo, name and home league over a glow of the team's color, which fades out towards the bottom. */
 @Composable
-private fun ProfileHeader(profile: TeamProfile) {
+private fun ProfileHeader(profile: TeamProfile, standing: String?) {
     val accent = rememberTeamAccent(profile.imageUrl)
     Column(
         Modifier
@@ -155,11 +231,90 @@ private fun ProfileHeader(profile: TeamProfile) {
         Text(profile.name, style = MaterialTheme.typography.headlineSmall)
         val league = listOfNotNull(profile.code, profile.homeLeagueName, profile.homeLeagueRegion).joinToString(" · ")
         Text(league, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // "3rd in LCK · 12-4": absent until known, and for good when the standings give nothing.
+        if (standing != null) Text(standing, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
 /** How strong the team's color is at the top of the header, as in the match header. */
 private const val ACCENT_GLOW_ALPHA = 0.38f
+
+private val nextDayFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+private val nextTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+
+/**
+ * The team's next match, highlighted: "Next match", the opponent, when it starts in [zoneId] and, on the right, the
+ * LIVE badge or the countdown in the primary color. The countdown ticks once per minute, on the minute, only while
+ * the screen is visible. Opens the match like its row in "Upcoming matches".
+ */
+@Composable
+private fun NextMatchCard(event: ScheduleEvent, teamName: String, zoneId: ZoneId, onClick: (() -> Unit)?) {
+    val opponent = opponentOf(event, teamName) ?: return
+    val isLive = event.state == MatchState.IN_PROGRESS
+    var now by remember { mutableStateOf(Instant.now()) }
+    WhileStarted(Unit) {
+        while (true) {
+            now = Instant.now()
+            delay(60_000L - now.toEpochMilli() % 60_000L)
+        }
+    }
+    val countdown = if (isLive) null else countdownLabel(event.startTime, now, event.state)
+    val start = event.startTime.atZone(zoneId)
+    val meta = listOfNotNull(
+        event.leagueName.takeIf { it.isNotBlank() },
+        event.blockName,
+        event.match?.format?.label,
+    ).joinToString(" · ")
+    Column {
+        SectionTitle("Next match")
+        AppCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)
+                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), Shapes.Card),
+            onClick = onClick,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TeamLogo(opponent.imageUrl, contentDescription = opponent.name, size = 44.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "vs ${opponent.name}",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "${start.format(nextDayFormatter)} · ${start.format(nextTimeFormatter)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (meta.isNotEmpty()) {
+                        Text(
+                            meta,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (isLive) {
+                    Spacer(Modifier.width(8.dp))
+                    LiveBadge()
+                } else if (countdown != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        countdown,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
 
 private fun LazyListScope.rosterRows(profile: TeamProfile, lineup: RosterSplit?) {
     if (lineup != null) {

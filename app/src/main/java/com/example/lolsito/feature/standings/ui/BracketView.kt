@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,7 +33,10 @@ import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LiveBadge
+import com.example.lolsito.core.ui.Shapes
+import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.TeamLogo
+import com.example.lolsito.ui.theme.LabelText
 
 /**
  * A bracket drawn from its official layout: one column per API column, each cell under its official title,
@@ -69,7 +71,7 @@ fun SwissView(
         modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = Spacing.Screen, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(CONNECTOR_WIDTH),
     ) {
         row.rounds.forEach { round ->
@@ -79,7 +81,7 @@ fun SwissView(
                     if (group.record != null) {
                         Text(
                             group.record,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = LabelText.Overline,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -98,12 +100,13 @@ fun SwissView(
     }
 }
 
+/** The title of a bracket cell or Swiss round: small capitals in the accent color, on one line. */
 @Composable
 private fun ColumnTitle(text: String, modifier: Modifier = Modifier) {
     Text(
-        text,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
+        text.uppercase(),
+        style = LabelText.Overline,
+        color = MaterialTheme.colorScheme.inversePrimary,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier.height(TITLE_HEIGHT),
@@ -133,7 +136,7 @@ private fun BracketColumns(
         modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = Spacing.Screen, vertical = 8.dp),
     ) {
         Box(Modifier.size(width, slot * placement.height)) {
             Canvas(Modifier.matchParentSize()) {
@@ -186,8 +189,8 @@ private fun BracketMatchCard(
         modifier
             .width(CARD_WIDTH)
             .height(CARD_HEIGHT)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clip(Shapes.Card)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .then(if (row.isNavigable) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
@@ -196,7 +199,7 @@ private fun BracketMatchCard(
                 BracketTeamLine(teams[0], result.emphasisFor(0), row.displayedGameWins(0, noSpoilers), row.isFavorite(0, favoriteNames))
                 BracketTeamLine(teams[1], result.emphasisFor(1), row.displayedGameWins(1, noSpoilers), row.isFavorite(1, favoriteNames))
             } else {
-                Text("TBD", style = MaterialTheme.typography.bodyMedium)
+                Text("TBD", style = LabelText.Number, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         // A live match shows no score, so the badge takes the room the game wins would use.
@@ -208,7 +211,7 @@ private fun BracketMatchCard(
 
 @Composable
 private fun BracketTeamLine(team: Team, emphasis: TeamEmphasis, gameWins: String?, favorite: Boolean) {
-    val weight = if (emphasis == TeamEmphasis.WINNER) FontWeight.ExtraBold else FontWeight.SemiBold
+    val weight = if (emphasis == TeamEmphasis.WINNER) FontWeight.Bold else FontWeight.Medium
     Row(
         Modifier.fillMaxWidth().alpha(if (emphasis == TeamEmphasis.LOSER) LOSER_ALPHA else 1f),
         verticalAlignment = Alignment.CenterVertically,
@@ -218,7 +221,7 @@ private fun BracketTeamLine(team: Team, emphasis: TeamEmphasis, gameWins: String
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 team.code,
-                style = MaterialTheme.typography.bodyMedium,
+                style = LabelText.Number,
                 fontWeight = weight,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -230,7 +233,7 @@ private fun BracketTeamLine(team: Team, emphasis: TeamEmphasis, gameWins: String
             }
         }
         if (gameWins != null) {
-            Text(gameWins, style = MaterialTheme.typography.bodyMedium, fontWeight = weight)
+            Text(gameWins, style = LabelText.Number, fontWeight = weight)
         }
     }
 }

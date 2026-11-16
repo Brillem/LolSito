@@ -5,8 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,33 +15,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -51,10 +44,19 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.preferences.FavoriteTeam
+import com.example.lolsito.core.ui.AppCard
+import com.example.lolsito.core.ui.DropdownPicker
+import com.example.lolsito.core.ui.InlineError
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
+import com.example.lolsito.core.ui.Shapes
+import com.example.lolsito.core.ui.SkeletonBlock
+import com.example.lolsito.core.ui.SkeletonScreen
+import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.TeamLogo
+import com.example.lolsito.core.ui.rememberTeamAccent
 import com.example.lolsito.feature.teams.domain.TeamSummary
+import com.example.lolsito.ui.theme.LabelText
 import com.example.lolsito.ui.theme.LolSitoTheme
 
 /**
@@ -116,24 +118,19 @@ fun TeamsContent(
         if (state.favorites.isNotEmpty()) {
             FavoritesRow(state.favorites, state.remindersEnabled, state.remindersNotice, onFavoriteClick, onToggleReminders)
         }
-        LeaguePicker(
+        DropdownPicker(
             label = state.selectedLeagueName,
-            leagues = state.leagues,
-            onSelect = onSelectLeague,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            items = state.leagues,
+            itemLabel = { league -> league.name },
+            onSelect = { league -> onSelectLeague(league.id) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp),
+            imageUrl = state.leagues.firstOrNull { it.id == state.selectedLeagueId }?.imageUrl,
+            itemImageUrl = { league -> league.imageUrl },
         )
         if (state.leaguesStatus is LoadStatus.Error) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Couldn't load leagues",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onRetryLeagues) { Text("Retry") }
-            }
+            InlineError("Couldn't load leagues", onRetryLeagues)
         }
-        LoadStatusView(state.status, "No teams for this league right now", onRetry) {
+        LoadStatusView(state.status, "No teams for this league right now", onRetry, loading = { TeamListSkeleton() }) {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(state.teams, key = { it.id }) { team -> TeamRow(team, onClick = { onTeamClick(team.id) }) }
             }
@@ -142,9 +139,10 @@ fun TeamsContent(
 }
 
 /**
- * The favorites above the league picker, one compact card each; tapping one opens its profile. The
- * bell next to the title turns the start-of-match reminders for all of them on and off; [remindersNotice]
- * (why it could not be turned on, or that the system does not allow notifications) shows under the title.
+ * The favorites above the league picker, one compact card each, outlined in the team's color; tapping
+ * one opens its profile. The bell next to the title turns the start-of-match reminders for all of them on
+ * and off; [remindersNotice] (why it could not be turned on, or that the system does not allow
+ * notifications) shows under the title.
  */
 @Composable
 private fun FavoritesRow(
@@ -155,11 +153,12 @@ private fun FavoritesRow(
     onToggleReminders: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = Spacing.Screen, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Styled like the shared SectionTitle, which cannot share a row with the bell.
             Text(
                 "Favorites",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.weight(1f),
             )
             RemindersBell(remindersEnabled, onToggleReminders)
@@ -169,27 +168,34 @@ private fun FavoritesRow(
                 remindersNotice,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = Spacing.Screen),
             )
         }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = Spacing.Screen, vertical = 8.dp),
         ) {
-            items(favorites, key = { it.id }) { team ->
-                Row(
-                    Modifier
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                        .clickable { onClick(team.id) }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TeamLogo(team.imageUrl, contentDescription = team.name, size = 28.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text(team.code, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                }
-            }
+            items(favorites, key = { it.id }) { team -> FavoriteChip(team, onClick = { onClick(team.id) }) }
         }
+    }
+}
+
+/** One favorite: logo and code on a card whose border is the team's color, once it is known. */
+@Composable
+private fun FavoriteChip(team: FavoriteTeam, onClick: () -> Unit) {
+    val accent = rememberTeamAccent(team.imageUrl)
+    Row(
+        Modifier
+            .clip(Shapes.Card)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(1.dp, accent, Shapes.Card)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TeamLogo(team.imageUrl, contentDescription = team.name, size = 28.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(team.code, style = LabelText.TeamCode, maxLines = 1)
     }
 }
 
@@ -211,45 +217,47 @@ private fun RemindersBell(enabled: Boolean, onToggle: () -> Unit) {
     }
 }
 
-/** Dropdown of [leagues]; with none it only names the current selection and cannot be opened. */
+/** The card of one team of the list: logo, name and code. */
 @Composable
-private fun LeaguePicker(label: String, leagues: List<League>, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier) {
-        OutlinedButton(onClick = { expanded = true }, enabled = leagues.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-            Text("$label ▾", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        DropdownMenu(expanded = expanded && leagues.isNotEmpty(), onDismissRequest = { expanded = false }) {
-            leagues.forEach { league ->
-                DropdownMenuItem(
-                    text = { Text(league.name) },
-                    onClick = {
-                        expanded = false
-                        onSelect(league.id)
-                    },
+private fun TeamRow(team: TeamSummary, onClick: () -> Unit) {
+    AppCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2),
+        onClick = onClick,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TeamLogo(team.imageUrl, contentDescription = null, size = 32.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(team.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    team.code,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                 )
             }
         }
     }
 }
 
+/** The team list while it loads: the silhouette of [rows] team cards. */
 @Composable
-private fun TeamRow(team: TeamSummary, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            TeamLogo(team.imageUrl, contentDescription = null, size = 32.dp)
-            Spacer(Modifier.width(12.dp))
-            Text(
-                team.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Text(team.code, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun TeamListSkeleton(rows: Int = 8) {
+    SkeletonScreen {
+        Column {
+            repeat(rows) {
+                AppCard(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SkeletonBlock(Modifier.size(32.dp), CircleShape)
+                        Spacer(Modifier.width(12.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SkeletonBlock(Modifier.size(width = 140.dp, height = 18.dp))
+                            SkeletonBlock(Modifier.size(width = 44.dp, height = 12.dp))
+                        }
+                    }
+                }
+            }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 

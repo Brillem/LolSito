@@ -12,6 +12,8 @@ import androidx.work.WorkManager
 import com.example.lolsito.feature.reminders.domain.MatchReminder
 import com.example.lolsito.feature.reminders.domain.ReminderScheduler
 import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
+import com.example.lolsito.feature.reminders.domain.START_CHECK_GIVE_UP
+import com.example.lolsito.feature.reminders.domain.START_CHECK_INTERVAL
 import com.example.lolsito.feature.reminders.domain.ScheduledReminder
 import com.example.lolsito.feature.reminders.domain.reminderDelay
 import kotlinx.coroutines.flow.first
@@ -21,8 +23,9 @@ import java.util.concurrent.TimeUnit
 
 /**
  * [ReminderScheduler] and [ReminderSyncTrigger] on WorkManager, which keeps the work across reboots.
- * Each reminder is a unique one-time work named after its match, so scheduling a match again replaces
- * it; its tags carry the match id and the [MatchReminder.version] (WorkInfo does not expose input data).
+ * Each reminder is a unique work named after its match: a chain of one-time checks of whether the match
+ * has started, each appended by the one before it, so scheduling a match again replaces the chain. Its
+ * tags carry the match id and the [MatchReminder.version] (WorkInfo does not expose input data).
  * The sync runs as a 6-hour periodic work and as one-time requests, both only with a network.
  */
 class WorkManagerReminders(context: Context, private val clock: Clock) : ReminderScheduler, ReminderSyncTrigger {
@@ -39,20 +42,38 @@ class WorkManagerReminders(context: Context, private val clock: Clock) : Reminde
             .distinctBy { it.matchId }
 
     override fun schedule(reminder: MatchReminder) {
-        val now = clock.instant()
+        val firstCheckIn = reminderDelay(reminder, clock.instant())
+        workManager.enqueueUniqueWork(reminderWorkName(reminder.matchId), ExistingWorkPolicy.REPLACE, checkRequest(reminder, firstCheckIn))
+    }
+
+    /**
+     * Appended to the reminder's own unique work, so it runs once the running check has finished and
+     * [cancel] or a newer [schedule] drop the whole chain.
+     */
+    override fun checkAgain(reminder: MatchReminder) {
+        workManager.enqueueUniqueWork(
+            reminderWorkName(reminder.matchId),
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            checkRequest(reminder, START_CHECK_INTERVAL),
+        )
+    }
+
+    /** One check of whether [reminder]'s match has started, [delay] from now and only with a network. */
+    private fun checkRequest(reminder: MatchReminder, delay: Duration): OneTimeWorkRequest {
         // WorkManager prunes finished work at each process start once its retention has passed. The
-        // record of a shown reminder must outlive the start of its match, or a sync in between would
-        // not see it in scheduled() and would show the reminder again.
-        val keepShownFor = Duration.between(now, reminder.startTime).coerceAtLeast(Duration.ZERO)
-        val request = OneTimeWorkRequest.Builder(MatchReminderWorker::class.java)
-            .setInitialDelay(reminderDelay(reminder, now).toMillis(), TimeUnit.MILLISECONDS)
-            .keepResultsForAtLeast(keepShownFor.toMillis(), TimeUnit.MILLISECONDS)
+        // record of a handled reminder must outlive the time its match stops qualifying for one, or a
+        // sync in between would not see it in scheduled() and would schedule the reminder again.
+        val keepHandledFor = Duration.between(clock.instant(), reminder.startTime.plus(START_CHECK_GIVE_UP))
+            .coerceAtLeast(Duration.ZERO)
+        return OneTimeWorkRequest.Builder(MatchReminderWorker::class.java)
+            .setInitialDelay(delay.toMillis(), TimeUnit.MILLISECONDS)
+            .setConstraints(networkRequired)
+            .keepResultsForAtLeast(keepHandledFor.toMillis(), TimeUnit.MILLISECONDS)
             .setInputData(MatchReminderWorker.inputOf(reminder))
             .addTag(TAG_REMINDER)
             .addTag(TAG_MATCH_PREFIX + reminder.matchId)
             .addTag(TAG_VERSION_PREFIX + reminder.version)
             .build()
-        workManager.enqueueUniqueWork(reminderWorkName(reminder.matchId), ExistingWorkPolicy.REPLACE, request)
     }
 
     override fun cancel(matchId: String) {

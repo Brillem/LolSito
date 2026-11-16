@@ -151,7 +151,7 @@ class TeamsViewModel(
     private fun publishResults() {
         val teams = directory
         _uiState.update { state ->
-            state.copy(searchResults = if (teams == null) TeamSearchResults() else searchTeamsAndPlayers(teams, state.query))
+            state.copy(searchResults = if (teams == null) TeamSearchResults() else searchTeamsAndPlayers(teams, state.query, leagueOrder = state.leagues.map { it.name }))
         }
     }
 
@@ -228,6 +228,8 @@ class TeamsViewModel(
                 _uiState.update {
                     it.copy(leagues = leagues, leaguesStatus = if (leagues.isEmpty()) LoadStatus.Empty else LoadStatus.Content)
                 }
+                // The league order decides which team keeps a duplicated player.
+                publishResults()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -77,8 +77,9 @@ fun participated(standings: Standings, teamId: String, teamName: String): Boolea
  *    known winner, claims nothing and the next rule applies.
  * 3. Otherwise the last stage the team appears in decides. A ranked table gives the place ("3rd", the stage name
  *    when the API sent no ordinal). A bracket or Swiss stage that is not the last one gives its name ("Play-Ins",
- *    "Swiss"); in the last stage it is the round of the team's last match ("Semifinals"), or the stage name when
- *    the round is only a number ("Round 3").
+ *    "Swiss"); in the last stage it is the round of the team's last match ("Semifinals"). When that round is only a
+ *    number ("Round 3") an elimination stage gives no label (null: a qualifier ladder's name, "Road to MSI",
+ *    does not read as a result), any other stage gives its name.
  */
 fun tournamentResult(
     standings: Standings,
@@ -98,8 +99,9 @@ fun tournamentResult(
         val round = lastRound(stage, matcher) ?: continue
         val stageName = stage.name.takeIf { it.isNotBlank() }
         if (stage !== lastStage) return stageName ?: round.section.takeIf { it.isNotBlank() }
-        return round.cell.takeUnless { it.isBlank() || BARE_ROUND.matches(it.trim()) }
-            ?: stageName
+        round.cell.takeUnless { it.isBlank() || BARE_ROUND.matches(it.trim()) }?.let { return it }
+        if (stage.isElimination) return null
+        return stageName
             ?: round.section.takeIf { it.isNotBlank() }
     }
     return null

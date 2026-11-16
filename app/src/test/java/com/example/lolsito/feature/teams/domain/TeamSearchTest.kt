@@ -13,7 +13,12 @@ class TeamSearchTest {
         league: String? = "LCK",
         active: Boolean = true,
         players: List<Player> = emptyList(),
-    ) = DirectoryTeam(id, name, code, null, league, active, players)
+        padRoster: Boolean = true,
+    ) = DirectoryTeam(id, name, code, null, league, active, if (padRoster) withBench(id, players) else players)
+
+    /** [players] plus bench players up to a full roster, so the team counts as searchable. */
+    private fun withBench(teamId: String, players: List<Player>): List<Player> =
+        players + (players.size until MIN_SEARCHABLE_ROSTER).map { Player("bench-$teamId-$it", "Bench$it", null, null, null, PlayerRole.OTHER) }
 
     private fun player(summoner: String, first: String? = null, last: String? = null) =
         Player(summoner, summoner, first, last, null, PlayerRole.MID)
@@ -144,5 +149,77 @@ class TeamSearchTest {
         assertEquals(SEARCH_RESULT_LIMIT, results.teams.size)
         assertEquals(SEARCH_RESULT_LIMIT, results.players.size)
         assertEquals(5, searchTeamsAndPlayers(teams, "team", limit = 5).teams.size)
+    }
+
+    @Test
+    fun `teams with fewer than five players are not searched, nor are their players`() {
+        val teams = listOf(
+            team("1", "Alpha Full", "ALF", players = listOf(player("Ana"), player("Bo"), player("Cy"), player("Di"), player("Ed"))),
+            team("2", "Alpha Four", "AL4", players = listOf(player("Ann"), player("Bob"), player("Cyd"), player("Dio")), padRoster = false),
+            team("3", "Alpha Empty", "AL0", padRoster = false),
+        )
+
+        assertEquals(listOf("Alpha Full"), names(searchTeamsAndPlayers(teams, "alpha")))
+        assertTrue(searchTeamsAndPlayers(teams, "al4").isEmpty)
+        assertTrue(searchTeamsAndPlayers(teams, "al0").isEmpty)
+        assertTrue(searchTeamsAndPlayers(teams, "ann").players.isEmpty())
+        assertEquals(1, searchTeamsAndPlayers(teams, "ana").players.size)
+    }
+
+    private fun faker(id: String? = "p1") = Player(id, "Faker", "Sanghyeok", "Lee", null, PlayerRole.MID)
+
+    @Test
+    fun `a player on two teams is listed once, under the team whose league comes first`() {
+        val academy = team("1", "T1 Academy", "T1A", league = "LCK Challengers", players = listOf(faker()))
+        val main = team("2", "T1", "T1", league = "LCK", players = listOf(faker()))
+        val order = listOf("LCS", "LCK", "LCK Challengers")
+
+        for (teams in listOf(listOf(academy, main), listOf(main, academy))) {
+            val hits = searchTeamsAndPlayers(teams, "faker", leagueOrder = order).players
+            assertEquals(listOf("2"), hits.map { it.team.id })
+        }
+    }
+
+    @Test
+    fun `league order matches names trimmed and ignoring case`() {
+        val teams = listOf(
+            team("1", "B", "B1", league = "LEC", players = listOf(faker())),
+            team("2", "A", "A1", league = " lck ", players = listOf(faker())),
+        )
+
+        assertEquals(listOf("2"), searchTeamsAndPlayers(teams, "faker", leagueOrder = listOf("LCK", "LEC")).players.map { it.team.id })
+    }
+
+    @Test
+    fun `a team whose league is not in the order loses to a listed one, and ties keep the first team`() {
+        val unknown = team("1", "A", "A1", league = "Mystery", players = listOf(faker()))
+        val listed = team("2", "B", "B1", league = "LCK", players = listOf(faker()))
+
+        assertEquals(listOf("2"), searchTeamsAndPlayers(listOf(unknown, listed), "faker", leagueOrder = listOf("LCK")).players.map { it.team.id })
+        assertEquals(listOf("1"), searchTeamsAndPlayers(listOf(unknown, listed), "faker").players.map { it.team.id })
+    }
+
+    @Test
+    fun `players without an id are never merged`() {
+        val teams = listOf(
+            team("1", "A", "A1", players = listOf(faker(id = null))),
+            team("2", "B", "B1", players = listOf(faker(id = " "))),
+        )
+
+        assertEquals(2, searchTeamsAndPlayers(teams, "faker").players.size)
+    }
+
+    @Test
+    fun `the cap counts distinct players`() {
+        val shared = (1..4).map { Player("s$it", "Shared $it", null, null, null, PlayerRole.MID) }
+        val teams = listOf(
+            team("1", "A", "A1", league = "LCK Challengers", players = shared),
+            team("2", "B", "B1", league = "LCK", players = shared + Player("x", "Shared 5", null, null, null, PlayerRole.MID)),
+        )
+
+        val hits = searchTeamsAndPlayers(teams, "shared", limit = 5, leagueOrder = listOf("LCK", "LCK Challengers")).players
+
+        assertEquals(listOf("Shared 1", "Shared 2", "Shared 3", "Shared 4", "Shared 5"), hits.map { it.player.summonerName })
+        assertEquals(setOf("2"), hits.map { it.team.id }.toSet())
     }
 }

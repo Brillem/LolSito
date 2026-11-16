@@ -7,6 +7,7 @@ import com.example.lolsito.core.network.dto.StandingsResponse
 import com.example.lolsito.core.network.dto.TeamsResponse
 import com.example.lolsito.core.network.dto.TournamentsResponse
 import retrofit2.http.GET
+import retrofit2.http.Headers
 import retrofit2.http.Query
 
 interface LolEsportsApi {
@@ -23,8 +24,9 @@ interface LolEsportsApi {
     /**
      * Events being played right now, of every league, with the same shape as a schedule page (no
      * pagination). Empty when nothing is live. Entries of another `type` than `match` (shows) are
-     * possible, so callers must filter them.
+     * possible, so callers must filter them. Never stored for offline use: stale live data would mislead.
      */
+    @Headers("Cache-Control: no-store")
     @GET("getLive")
     suspend fun getLive(): ScheduleResponse
 

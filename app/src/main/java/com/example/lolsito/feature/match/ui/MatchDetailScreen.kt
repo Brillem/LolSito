@@ -67,6 +67,7 @@ import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.core.ui.rememberTeamAccent
 import com.example.lolsito.core.ui.WhileStarted
 import com.example.lolsito.feature.match.domain.CalendarEvent
+import com.example.lolsito.feature.match.domain.GameOutcome
 import com.example.lolsito.feature.match.domain.GameSide
 import com.example.lolsito.feature.match.domain.GameState
 import com.example.lolsito.feature.match.domain.GameStatsLink
@@ -100,6 +101,7 @@ fun MatchDetailScreen(
     val history by viewModel.historyState.collectAsStateWithLifecycle()
     val startTime by viewModel.startTime.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val gameOutcomes by viewModel.gameOutcomes.collectAsStateWithLifecycle()
     WhileStarted(viewModel) { viewModel.pollWhileVisible() }
     MatchDetailContent(
         state = state,
@@ -109,6 +111,7 @@ fun MatchDetailScreen(
         onGameClick = onGameClick,
         onTeamClick = onTeamClick,
         history = history,
+        gameOutcomes = gameOutcomes,
         onRetryHistory = viewModel::retryHistory,
         onMatchClick = onMatchClick,
         modifier = modifier,
@@ -129,6 +132,8 @@ fun MatchDetailContent(
     onShowResult: () -> Unit = {},
     onTeamClick: (String) -> Unit = {},
     history: MatchHistoryUiState = MatchHistoryUiState.None,
+    /** Who won each completed game, by game id; see [MatchDetailViewModel.gameOutcomes]. */
+    gameOutcomes: Map<String, GameOutcome> = emptyMap(),
     onRetryHistory: () -> Unit = {},
     onMatchClick: (String) -> Unit = {},
     /** When the match starts, if known: with it a series still to be played offers "Add to calendar". */
@@ -156,6 +161,8 @@ fun MatchDetailContent(
                     onTeamClick,
                     onRetryHistory,
                     onMatchClick,
+                    // Hidden results hide who won each game too, whatever was worked out.
+                    if (state.resultsHidden) emptyMap() else gameOutcomes,
                 )
             }
         }
@@ -172,6 +179,7 @@ private fun MatchDetailBody(
     onTeamClick: (String) -> Unit,
     onRetryHistory: () -> Unit,
     onMatchClick: (String) -> Unit,
+    gameOutcomes: Map<String, GameOutcome>,
 ) {
     val detail = content.detail
     val context = LocalContext.current
@@ -217,6 +225,7 @@ private fun MatchDetailBody(
                     onClick = statsLink?.let { link -> { onGameClick(link) } },
                     onWatch = content.watchLinkFor(game)?.let { vod -> { context.openWatchLink(vod) } },
                     showState = content.showsGameState,
+                    outcome = game.id?.let(gameOutcomes::get),
                 )
             }
         }
@@ -521,6 +530,26 @@ private fun HeaderTeam(
     }
 }
 
+/** The team that won a game, by logo and code, and under it the series score after that game when it is known. */
+@Composable
+private fun GameWinner(winner: Team, seriesScore: String?) {
+    Column(
+        horizontalAlignment = Alignment.End,
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription = "Won by ${winner.code}" + (seriesScore?.let { ", series at $it" } ?: "")
+        },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TeamLogo(winner.imageUrl, contentDescription = null, size = 20.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(winner.code, style = LabelText.TeamCode, fontWeight = FontWeight.Bold, color = WinGreen)
+        }
+        if (seriesScore != null) {
+            Text(seriesScore, style = LabelText.Number, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 /**
  * One game of the series as a card: its name and each team's side, its state, a Watch button when it has a VOD
  * ([onWatch]) and a chevron when it opens its stats ([onClick]).
@@ -534,6 +563,8 @@ fun GameRow(
     onWatch: (() -> Unit)? = null,
     /** False while results are hidden: the game's state would give them away. */
     showState: Boolean = true,
+    /** Who won the game and the series score after it, when known; it takes the place of "Completed". */
+    outcome: GameOutcome? = null,
 ) {
     AppCard(
         modifier = modifier
@@ -557,7 +588,10 @@ fun GameRow(
                 }
             }
             Spacer(Modifier.width(8.dp))
-            if (showState) {
+            val winner = outcome?.let { teams.getOrNull(it.winnerIndex) }
+            if (showState && winner != null) {
+                GameWinner(winner, outcome.seriesScore)
+            } else if (showState) {
                 if (game.state == GameState.IN_PROGRESS) {
                     LiveBadge()
                 } else {

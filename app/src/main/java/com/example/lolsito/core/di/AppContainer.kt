@@ -75,14 +75,15 @@ class AppContainer(private val context: Context) {
     val notificationAvailability: NotificationAvailability by lazy { SystemNotificationAvailability(context) }
 
     /**
-     * Run by the background sync worker. Its teams and schedule come from the network only, so a sync
-     * that loses the connection fails and is retried instead of scheduling reminders from a stored copy.
+     * Run by the background sync worker. Everything it asks the gateway comes from the network only (the
+     * leagues from a list of its own, not the one the screens share), so a sync that loses the connection
+     * fails and is retried instead of scheduling reminders from a stored copy or turning the app offline.
      */
     val syncMatchReminders: SyncMatchReminders by lazy {
         SyncMatchReminders(
             userPreferences,
             TeamsRepositoryImpl(networkOnlyApi),
-            leaguesRepository,
+            CachedLeaguesRepository(RemoteLeaguesRepository(networkOnlyApi)),
             ScheduleRepositoryImpl(networkOnlyApi),
             reminderScheduler,
             clock(),

@@ -30,9 +30,16 @@ class OfflineFallbackTest {
 
     /** Flipped off to make every request fail below the cache, as a device without a connection does. */
     private var networkUp = true
+
+    /** Flipped on to cancel every call while its request is on the way, as a cancelled coroutine does. */
+    private var cancelInFlight = false
     private val baseClient = OkHttpClient.Builder()
         .addNetworkInterceptor(
             Interceptor { chain ->
+                if (cancelInFlight) {
+                    chain.call().cancel()
+                    throw IOException("Canceled")
+                }
                 if (!networkUp) throw UnknownHostException("no network")
                 chain.proceed(chain.request())
             }
@@ -176,6 +183,33 @@ class OfflineFallbackTest {
         val failure = failureOf { api.getSchedule(leagueIds = "1") }
 
         assertEquals(500, (failure as HttpException).code())
+        assertNull(offlineState.cachedSince.value)
+    }
+
+    @Test
+    fun `an error answer the cache could store does not replace the stored copy`() = runTest {
+        server.enqueue(storable("getSchedule_worlds.json"))
+        server.enqueue(MockResponse.Builder().code(404).addHeader("Cache-Control", "max-age=60, public").build())
+        api.getSchedule(leagueIds = "1")
+        val failure = failureOf { api.getSchedule(leagueIds = "1") }
+        assertEquals(404, (failure as HttpException).code())
+
+        networkUp = false
+        val copy = api.getSchedule(leagueIds = "1")
+
+        assertEquals(80, copy.data.schedule.events.size)
+        assertNotNull(offlineState.cachedSince.value)
+    }
+
+    @Test
+    fun `a cancelled call is not answered from the stored copy and leaves the state online`() = runTest {
+        server.enqueue(storable("getSchedule_worlds.json"))
+        api.getSchedule(leagueIds = "1")
+
+        cancelInFlight = true
+        val failure = failureOf { api.getSchedule(leagueIds = "1") }
+
+        assertTrue(failure is IOException)
         assertNull(offlineState.cachedSince.value)
     }
 

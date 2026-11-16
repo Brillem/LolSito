@@ -59,3 +59,20 @@ class OfflineFallbackInterceptor(private val state: OfflineState) : Interceptor 
         val NETWORK_UNSTORED: CacheControl = CacheControl.Builder().noCache().noStore().build()
     }
 }
+
+/**
+ * Network interceptor that keeps error answers out of the cache. OkHttp stores some error statuses by
+ * default (404, 410 and others), and one of them would replace the last good copy of its request, which
+ * is the one to show without a network. The caller still gets the error as the gateway sent it.
+ */
+class KeepGoodCopiesInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        if (response.code < HTTP_BAD_REQUEST) return response
+        return response.newBuilder().header("Cache-Control", "no-store").build()
+    }
+
+    private companion object {
+        const val HTTP_BAD_REQUEST = 400
+    }
+}

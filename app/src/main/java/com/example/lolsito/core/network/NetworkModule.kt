@@ -27,6 +27,7 @@ object NetworkModule {
         if (offlineCache != null) {
             builder.cache(Cache(offlineCache.directory, OFFLINE_CACHE_MAX_BYTES))
             builder.addInterceptor(OfflineFallbackInterceptor(offlineCache.state))
+            builder.addNetworkInterceptor(KeepGoodCopiesInterceptor())
         }
         return builder.build()
     }

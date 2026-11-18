@@ -1447,6 +1447,18 @@ class ScheduleViewModelTest {
     }
 
     @Test
+    fun `the schedule sections show only while there are favorites to filter by`() = runTest(dispatcher) {
+        favoritesSetUp()
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.showsSections)
+
+        vm.toggleFavoritesOnly()
+
+        assertFalse(vm.uiState.value.showsSections)
+    }
+
+    @Test
     fun `LIVE and favorites on with no live match of a favorite shows its own message`() = runTest(dispatcher) {
         favoritesSetUp()
         preferences.favoriteTeams = listOf(favorite("Fnatic"))

@@ -82,6 +82,12 @@ data class ScheduleUiState(
             else -> null
         }
 
+    /**
+     * Whether the Upcoming and Results sections (with their paging buttons) can show: not while the Favorites
+     * toggle is on without any favorite, since no page could ever have a match to list.
+     */
+    val showsSections: Boolean get() = !favoritesOnly || favoriteNames.isNotEmpty()
+
     /** Only one page loads at a time, so both paging buttons are disabled while one is in flight. */
     val isPaging: Boolean get() = isLoadingOlder || isLoadingNewer
 

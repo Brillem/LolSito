@@ -251,6 +251,8 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                                 leaguesRepository = container.leaguesRepository,
                                 preferences = container.userPreferences,
                                 clock = container.clock(),
+                                scheduleRepository = container.scheduleRepository,
+                                zoneId = container.zoneId(),
                                 savedStateHandle = createSavedStateHandle(),
                             )
                         }

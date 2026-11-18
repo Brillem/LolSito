@@ -17,7 +17,10 @@ import com.example.lolsito.feature.standings.domain.StandingsSection
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
+import com.example.lolsito.testutil.FakeScheduleRepository
 import com.example.lolsito.testutil.FakeUserPreferences
+import com.example.lolsito.testutil.series
+import com.example.lolsito.feature.schedule.domain.SchedulePage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -76,12 +79,14 @@ class StandingsViewModelTest {
     }
 
     private val preferences = FakeUserPreferences()
+    private val schedule = FakeScheduleRepository()
 
     private fun viewModel(savedStateHandle: SavedStateHandle = SavedStateHandle()) = StandingsViewModel(
         repository = repository,
         leaguesRepository = leaguesRepository,
         preferences = preferences,
         clock = clock,
+        scheduleRepository = schedule,
         savedStateHandle = savedStateHandle,
         defaultLeagueId = LCK,
     )
@@ -875,6 +880,274 @@ class StandingsViewModelTest {
         advanceUntilIdle()
 
         assertEquals(WORLDS_2026, vm.uiState.value.selectedTournamentId)
+    }
+
+    // Stages, Table | Matches and the team filter
+
+    private fun rankedTeam(name: String) = Team(name, name.take(3).uppercase(), "logo-$name", null, null, id = "id-$name")
+
+    /** A played regular season (Alpha 5-0, Beta 4-1, Gamma 0-5) and a playoff final not played yet. */
+    private fun stagedStandings() = Standings(
+        listOf(
+            StandingsStage(
+                "Regular Season", "regular_season",
+                listOf(
+                    StandingsSection(
+                        "Regular Season",
+                        listOf(Ranking(1, rankedTeam("Alpha"), 5, 0), Ranking(2, rankedTeam("Beta"), 4, 1), Ranking(3, rankedTeam("Gamma"), 0, 5)),
+                        emptyList(),
+                    ),
+                ),
+            ),
+            StandingsStage(
+                "Playoffs", "playoffs",
+                listOf(
+                    StandingsSection(
+                        "Playoffs",
+                        emptyList(),
+                        listOf(SectionMatch(MatchState.UNSTARTED, Match("final", listOf(rankedTeam("Alpha"), rankedTeam("Beta")), null))),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    private fun event(id: String, date: String, first: String, second: String) =
+        series(id, 1, first, second).copy(startTime = Instant.parse("${date}T12:00:00Z"))
+
+    /** LCK Summer runs 2026-06-10..2026-08-30: m1 and m2 are regular season, "final" the playoff, "old" before it. */
+    private fun stagedSchedule() {
+        schedule.pages[null] = SchedulePage(
+            listOf(
+                event("old", "2026-03-01", "Alpha", "Gamma"),
+                event("m1", "2026-06-12", "Alpha", "Beta"),
+                event("m2", "2026-06-13", "Beta", "Gamma"),
+                event("final", "2026-08-29", "Alpha", "Beta"),
+            ),
+            olderToken = null,
+            newerToken = null,
+        )
+    }
+
+    private val StandingsUiState.matchIds: List<String?>
+        get() = matchDays.flatMap { day -> day.events.map { it.matchId } }
+
+    private val StandingsUiState.stageKey: (String) -> String
+        get() = { name -> stageTabs.first { it.name == name }.key }
+
+    @Test
+    fun `the default stage is shown alone, with a tab per stage`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(listOf("Regular Season", "Playoffs"), state.stageTabs.map { it.name })
+        assertEquals(state.stageKey("Regular Season"), state.selectedStageKey)
+        assertEquals(listOf("Regular Season"), state.stageNames)
+    }
+
+    @Test
+    fun `a selected stage shows its rows and survives a new view model on the same saved state`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        val handle = SavedStateHandle()
+        val vm = viewModel(handle)
+        advanceUntilIdle()
+
+        vm.selectStage(vm.uiState.value.stageKey("Playoffs"))
+
+        assertEquals(listOf("Playoffs"), vm.uiState.value.stageNames)
+        val restored = viewModel(handle)
+        advanceUntilIdle()
+        assertEquals(listOf("Playoffs"), restored.uiState.value.stageNames)
+    }
+
+    @Test
+    fun `the selected stage resets when the tournament or the league changes`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        repository.standings[LCK_SPRING] = stagedStandings()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.selectStage(vm.uiState.value.stageKey("Playoffs"))
+        vm.selectTournament(LCK_SPRING)
+        advanceUntilIdle()
+        assertEquals(listOf("Regular Season"), vm.uiState.value.stageNames)
+
+        vm.selectStage(vm.uiState.value.stageKey("Playoffs"))
+        vm.selectLeague(WORLDS)
+        advanceUntilIdle()
+        vm.selectLeague(LCK)
+        advanceUntilIdle()
+        assertEquals(LCK_SUMMER, vm.uiState.value.selectedTournamentId)
+        assertEquals(listOf("Regular Season"), vm.uiState.value.stageNames)
+    }
+
+    @Test
+    fun `a refresh keeps the selected stage`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.selectStage(vm.uiState.value.stageKey("Playoffs"))
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf(LCK_SUMMER), repository.refreshes)
+        assertEquals(listOf("Playoffs"), vm.uiState.value.stageNames)
+    }
+
+    @Test
+    fun `matches are offered for a ranked stage of a tournament with dates only`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.canShowMatches)
+
+        vm.selectStage(vm.uiState.value.stageKey("Playoffs"))
+        assertFalse(vm.uiState.value.canShowMatches)
+
+        repository.tournaments[LCK] = listOf(Tournament(LCK_SUMMER, LCK_SUMMER, LocalDate.parse("2026-06-10"), null))
+        val undated = viewModel()
+        advanceUntilIdle()
+        assertFalse(undated.uiState.value.canShowMatches)
+    }
+
+    @Test
+    fun `matches load only when first opened, keep the regular stage ones and are kept per tournament`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        stagedSchedule()
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertTrue(schedule.requests.isEmpty())
+        assertEquals(StageView.TABLE, vm.uiState.value.stageView)
+
+        vm.selectStageView(StageView.MATCHES)
+        assertEquals(LoadStatus.Loading, vm.uiState.value.matchesStatus)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(StageView.MATCHES, state.stageView)
+        assertEquals(LoadStatus.Content, state.matchesStatus)
+        assertEquals(listOf<String?>("m1", "m2"), state.matchIds)
+        assertEquals(listOf(LocalDate.parse("2026-06-12"), LocalDate.parse("2026-06-13")), state.matchDays.map { it.date })
+        assertEquals(listOf(listOf(LCK) to null), schedule.requests)
+
+        vm.selectStageView(StageView.TABLE)
+        vm.selectStageView(StageView.MATCHES)
+        advanceUntilIdle()
+        assertEquals(1, schedule.requests.size)
+        assertEquals(listOf<String?>("m1", "m2"), vm.uiState.value.matchIds)
+    }
+
+    @Test
+    fun `a matches failure shows an error and retry loads them`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        stagedSchedule()
+        schedule.error = IOException("offline")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.selectStageView(StageView.MATCHES)
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.matchesStatus is LoadStatus.Error)
+
+        schedule.error = null
+        vm.retryMatches()
+        advanceUntilIdle()
+        assertEquals(LoadStatus.Content, vm.uiState.value.matchesStatus)
+        assertEquals(listOf<String?>("m1", "m2"), vm.uiState.value.matchIds)
+    }
+
+    @Test
+    fun `a tournament change goes back to the table and loads its matches again when opened`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        repository.standings[LCK_SPRING] = stagedStandings()
+        stagedSchedule()
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.selectStageView(StageView.MATCHES)
+        advanceUntilIdle()
+
+        vm.selectTournament(LCK_SPRING)
+        advanceUntilIdle()
+        assertEquals(StageView.TABLE, vm.uiState.value.stageView)
+
+        vm.selectStageView(StageView.MATCHES)
+        advanceUntilIdle()
+        assertEquals(2, schedule.requests.size)
+        // LCK Spring runs 2026-01-15..2026-04-20: only "old" (March) falls in it.
+        assertEquals(listOf<String?>("old"), vm.uiState.value.matchIds)
+    }
+
+    @Test
+    fun `the team filter keeps that team's matches, shows its standing and lists favorites first`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        stagedSchedule()
+        preferences.favoriteTeams = listOf(favorite("Gamma"))
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.selectStageView(StageView.MATCHES)
+        advanceUntilIdle()
+        assertEquals(listOf("Gamma", "Alpha", "Beta"), vm.uiState.value.teamOptions.map { it.team.name })
+
+        vm.selectTeamFilter(rankedTeam("Gamma"))
+
+        assertEquals(listOf<String?>("m2"), vm.uiState.value.matchIds)
+        assertEquals("3rd · 0-5", vm.uiState.value.teamFilterStanding)
+        assertEquals(1, schedule.requests.size)
+
+        vm.selectTeamFilter(null)
+        assertEquals(listOf<String?>("m1", "m2"), vm.uiState.value.matchIds)
+        assertNull(vm.uiState.value.teamFilterStanding)
+    }
+
+    @Test
+    fun `the team filter survives the table and other stages, and resets with the tournament`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        repository.standings[LCK_SPRING] = stagedStandings()
+        stagedSchedule()
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.selectStageView(StageView.MATCHES)
+        advanceUntilIdle()
+        vm.selectTeamFilter(rankedTeam("Beta"))
+
+        vm.selectStageView(StageView.TABLE)
+        vm.selectStage(vm.uiState.value.stageKey("Playoffs"))
+        assertNull(vm.uiState.value.teamFilterStanding)
+        vm.selectStage(vm.uiState.value.stageKey("Regular Season"))
+        vm.selectStageView(StageView.MATCHES)
+
+        assertEquals(rankedTeam("Beta"), vm.uiState.value.teamFilter)
+        assertEquals("2nd · 4-1", vm.uiState.value.teamFilterStanding)
+        assertEquals(listOf<String?>("m1", "m2"), vm.uiState.value.matchIds)
+
+        vm.selectTournament(LCK_SPRING)
+        advanceUntilIdle()
+        assertNull(vm.uiState.value.teamFilter)
+    }
+
+    @Test
+    fun `a refresh reloads the matches once they were loaded, and only then`() = runTest(dispatcher) {
+        repository.standings[LCK_SUMMER] = stagedStandings()
+        stagedSchedule()
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.refresh()
+        advanceUntilIdle()
+        assertTrue(schedule.requests.isEmpty())
+
+        vm.selectStageView(StageView.MATCHES)
+        advanceUntilIdle()
+        schedule.pages[null] = SchedulePage(listOf(event("m3", "2026-06-20", "Alpha", "Gamma")), null, null)
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals(2, schedule.requests.size)
+        assertEquals(listOf<String?>("m3"), vm.uiState.value.matchIds)
+        assertFalse(vm.uiState.value.isRefreshing)
     }
 
     private fun favorite(name: String) = FavoriteTeam("id-$name", name.trim().lowercase(), name, name.trim().take(3), null)

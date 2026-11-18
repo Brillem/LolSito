@@ -9,7 +9,24 @@ import com.example.lolsito.core.model.League
 import com.example.lolsito.core.preferences.StandingsSelection
 import com.example.lolsito.core.preferences.UserPreferences
 import com.example.lolsito.core.ui.LoadStatus
+import com.example.lolsito.core.model.Team
+import com.example.lolsito.feature.schedule.domain.ScheduleDay
+import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import com.example.lolsito.feature.schedule.domain.favoriteNamesOf
+import com.example.lolsito.feature.schedule.domain.ScheduleEvent
+import com.example.lolsito.feature.schedule.domain.groupEventsByDay
+import com.example.lolsito.feature.standings.domain.StageTab
+import com.example.lolsito.feature.standings.domain.Standings
+import com.example.lolsito.feature.standings.domain.TeamOption
+import com.example.lolsito.feature.standings.domain.defaultStageIndex
+import com.example.lolsito.feature.standings.domain.involvesTeam
+import com.example.lolsito.feature.standings.domain.isRanked
+import com.example.lolsito.feature.standings.domain.loadEventsBetween
+import com.example.lolsito.feature.standings.domain.regularStageMatches
+import com.example.lolsito.feature.standings.domain.stageRankingOf
+import com.example.lolsito.feature.standings.domain.stageStandingLine
+import com.example.lolsito.feature.standings.domain.stageTabs
+import com.example.lolsito.feature.standings.domain.stageTeamOptions
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.feature.standings.domain.pickDefaultTournament
@@ -24,6 +41,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Clock
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZoneOffset
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -42,6 +61,25 @@ data class StandingsUiState(
     val favoriteNames: List<String> = emptyList(),
     /** A pull to refresh is reloading the standings; [rows] stay as they are meanwhile. */
     val isRefreshing: Boolean = false,
+    /** One tab per stage of the loaded standings; the selector shows only with more than one. */
+    val stageTabs: List<StageTab> = emptyList(),
+    /** Key of the stage [rows] show, one of [stageTabs]. */
+    val selectedStageKey: String? = null,
+    /** Table or Matches; Matches only applies while [canShowMatches]. */
+    val stageView: StageView = StageView.TABLE,
+    /** The selected stage is ranked and the tournament has dates, so its matches can be listed. */
+    val canShowMatches: Boolean = false,
+    val matchesStatus: LoadStatus = LoadStatus.Loading,
+    /** The regular stage matches by day, oldest first, only those of [teamFilter] when set. */
+    val matchDays: List<ScheduleDay> = emptyList(),
+    /** Teams of the selected stage the matches can be filtered by. */
+    val teamOptions: List<TeamOption> = emptyList(),
+    /** The team whose matches are shown, or null for all teams. */
+    val teamFilter: Team? = null,
+    /** [teamFilter]'s place and record in the selected stage, e.g. "2nd · 5-0"; null when unranked there. */
+    val teamFilterStanding: String? = null,
+    /** Zone of the match times and days. */
+    val zoneId: ZoneId = ZoneOffset.UTC,
 ) {
     /**
      * Name of the selected league, or a neutral label until the leagues load. A leagues retry keeps
@@ -52,6 +90,9 @@ data class StandingsUiState(
     val selectedLeague: League? get() = leagues.firstOrNull { it.id == selectedLeagueId }
     val selectedTournament: Tournament? get() = tournaments.firstOrNull { it.id == selectedTournamentId }
 }
+
+/** What a ranked stage shows: its ranking table or its matches. */
+enum class StageView(val label: String) { TABLE("Table"), MATCHES("Matches") }
 
 /**
  * Loads the leagues for the picker and, independently, the selected league's tournaments followed
@@ -77,24 +118,41 @@ data class StandingsUiState(
  *
  * [refresh] (pull to refresh) asks again for the standings of the selected tournament and keeps the rows on
  * screen meanwhile; a failure leaves them as they were. Any other load of the standings supersedes it.
+ *
+ * The standings show one stage at a time ([selectStage]); a tournament opens on [defaultStageIndex], or on
+ * the stage picked for it before, kept in [savedStateHandle]. A ranked stage of a tournament with dates also
+ * lists its matches ([StageView.MATCHES]): the standings carry none, so they come from the league's schedule
+ * ([loadEventsBetween], then [regularStageMatches]), loaded the first time that view opens for a tournament
+ * and kept in memory per tournament. [selectTeamFilter] narrows them to one team, in memory. Changing the
+ * tournament or the league goes back to its default stage, the table and all teams; a refresh keeps them
+ * and reloads the matches when they were loaded.
  */
 class StandingsViewModel(
     private val repository: StandingsRepository,
     private val leaguesRepository: LeaguesRepository,
     private val preferences: UserPreferences,
     private val clock: Clock,
+    private val scheduleRepository: ScheduleRepository,
+    private val zoneId: ZoneId = clock.zone,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     defaultLeagueId: String = DEFAULT_LEAGUE_ID,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
-        StandingsUiState(selectedLeagueId = savedStateHandle[KEY_LEAGUE_ID] ?: defaultLeagueId)
+        StandingsUiState(selectedLeagueId = savedStateHandle[KEY_LEAGUE_ID] ?: defaultLeagueId, zoneId = zoneId)
     )
     val uiState: StateFlow<StandingsUiState> = _uiState.asStateFlow()
 
     private var leaguesJob: Job? = null
     private var tournamentsJob: Job? = null
     private var standingsJob: Job? = null
+    private var matchesJob: Job? = null
+
+    /** The standings of the selected tournament once loaded, null meanwhile; [presented] derives the shown stage from it. */
+    private var standings: Standings? = null
+
+    /** Regular stage matches of each tournament whose Matches view was opened, by tournament id. */
+    private val matchesByTournament = mutableMapOf<String, List<ScheduleEvent>>()
 
     /** True once the stored selection was applied or superseded (a user pick, or nothing usable stored). */
     private var selectionRestored = false
@@ -140,7 +198,7 @@ class StandingsViewModel(
             try {
                 preferences.getFavoriteTeams()?.let { stored ->
                     val names = favoriteNamesOf(stored)
-                    _uiState.update { if (it.favoriteNames == names) it else it.copy(favoriteNames = names) }
+                    _uiState.update { if (it.favoriteNames == names) it else it.copy(favoriteNames = names).presented() }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -189,6 +247,30 @@ class StandingsViewModel(
         loadTournaments()
     }
 
+    /** Shows the stage with [key], one of [StandingsUiState.stageTabs], and remembers it for this tournament. */
+    fun selectStage(key: String) {
+        val state = _uiState.value
+        val tournamentId = state.selectedTournamentId ?: return
+        if (key == state.selectedStageKey || state.stageTabs.none { it.key == key }) return
+        saveStage(tournamentId, key)
+        _uiState.update { it.copy(selectedStageKey = key).presented() }
+        loadMatchesIfShown()
+    }
+
+    /** Table or Matches; the matches of a tournament load the first time they are shown. */
+    fun selectStageView(view: StageView) {
+        if (view == _uiState.value.stageView) return
+        _uiState.update { it.copy(stageView = view) }
+        loadMatchesIfShown()
+    }
+
+    fun retryMatches() = loadMatches()
+
+    /** Shows only the matches [team] plays, or every match with null; no request is made. */
+    fun selectTeamFilter(team: Team?) {
+        _uiState.update { it.copy(teamFilter = team).presented() }
+    }
+
     /** Re-fetches only the leagues; tournaments and standings are left as they are. */
     fun retryLeagues() = fetchLeagues()
 
@@ -209,11 +291,8 @@ class StandingsViewModel(
         // Shares the standings job, so a retry or a selection change cancels it like any other standings load.
         standingsJob = viewModelScope.launch {
             try {
-                val rows = buildStandingsRows(repository.refreshStandings(tournamentId))
-                _uiState.update {
-                    if (it.selectedTournamentId != tournamentId) it
-                    else it.copy(standingsStatus = if (rows.isEmpty()) LoadStatus.Empty else LoadStatus.Content, rows = rows)
-                }
+                publishStandings(tournamentId, repository.refreshStandings(tournamentId))
+                if (tournamentId in matchesByTournament) refreshMatches(tournamentId)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -297,8 +376,10 @@ class StandingsViewModel(
                 standingsStatus = LoadStatus.Loading,
                 rows = emptyList(),
                 isRefreshing = false,
-            )
+            ).withoutStage()
         }
+        standings = null
+        matchesJob?.cancel()
         val leagueId = _uiState.value.selectedLeagueId
         savedStateHandle[KEY_LEAGUE_ID] = leagueId
         tournamentsJob = viewModelScope.launch {
@@ -327,15 +408,12 @@ class StandingsViewModel(
     private fun loadStandings() {
         standingsJob?.cancel()
         val tournamentId = _uiState.value.selectedTournamentId ?: return
-        _uiState.update { it.copy(standingsStatus = LoadStatus.Loading, rows = emptyList(), isRefreshing = false) }
+        matchesJob?.cancel()
+        standings = null
+        _uiState.update { it.copy(standingsStatus = LoadStatus.Loading, rows = emptyList(), isRefreshing = false).withoutStage() }
         standingsJob = viewModelScope.launch {
             try {
-                val rows = buildStandingsRows(repository.getStandings(tournamentId))
-                _uiState.update {
-                    // Defensive: the job is cancelled on change, but never publish for another selection.
-                    if (it.selectedTournamentId != tournamentId) it
-                    else it.copy(standingsStatus = if (rows.isEmpty()) LoadStatus.Empty else LoadStatus.Content, rows = rows)
-                }
+                publishStandings(tournamentId, repository.getStandings(tournamentId))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -347,6 +425,129 @@ class StandingsViewModel(
         }
     }
 
+    /**
+     * Shows [loaded] for [tournamentId], unless another tournament is selected meanwhile. The stage stays the
+     * one on screen (a refresh), else the one saved for this tournament, else [defaultStageIndex]; a key the
+     * standings no longer have counts as none.
+     */
+    private fun publishStandings(tournamentId: String, loaded: Standings) {
+        // Defensive: the job is cancelled on change, but never publish for another selection.
+        if (_uiState.value.selectedTournamentId != tournamentId) return
+        standings = loaded
+        val tabs = stageTabs(loaded)
+        val saved = savedStateHandle.get<String>(KEY_STAGE).takeIf { savedStateHandle.get<String>(KEY_STAGE_TOURNAMENT) == tournamentId }
+        val key = listOf(_uiState.value.selectedStageKey, saved).firstOrNull { key -> tabs.any { it.key == key } }
+            ?: tabs.getOrNull(defaultStageIndex(loaded.stages))?.key
+        if (key != null) saveStage(tournamentId, key)
+        _uiState.update {
+            it.copy(
+                standingsStatus = if (loaded.stages.isEmpty()) LoadStatus.Empty else LoadStatus.Content,
+                selectedStageKey = key,
+            ).presented()
+        }
+    }
+
+    private fun saveStage(tournamentId: String, key: String) {
+        savedStateHandle[KEY_STAGE] = key
+        savedStateHandle[KEY_STAGE_TOURNAMENT] = tournamentId
+    }
+
+    /** Loads the matches when the Matches view is on screen and this tournament's are neither kept nor loading. */
+    private fun loadMatchesIfShown() {
+        val state = _uiState.value
+        val tournamentId = state.selectedTournamentId ?: return
+        if (state.stageView != StageView.MATCHES || !state.canShowMatches) return
+        val cached = matchesByTournament[tournamentId]
+        when {
+            cached != null -> _uiState.update { it.copy(matchesStatus = statusOf(cached)).presented() }
+            matchesJob?.isActive != true -> loadMatches()
+        }
+    }
+
+    private fun loadMatches() {
+        matchesJob?.cancel()
+        val tournamentId = _uiState.value.selectedTournamentId ?: return
+        _uiState.update { it.copy(matchesStatus = LoadStatus.Loading) }
+        matchesJob = viewModelScope.launch {
+            try {
+                val events = fetchMatches(tournamentId) ?: return@launch
+                matchesByTournament[tournamentId] = events
+                _uiState.update {
+                    if (it.selectedTournamentId != tournamentId) it else it.copy(matchesStatus = statusOf(events)).presented()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update {
+                    if (it.selectedTournamentId != tournamentId) it else it.copy(matchesStatus = LoadStatus.Error(e.toUserMessage()))
+                }
+            }
+        }
+    }
+
+    /** Part of a refresh: loads the kept matches again, leaving them as they are when that fails. */
+    private suspend fun refreshMatches(tournamentId: String) {
+        val events = try {
+            fetchMatches(tournamentId) ?: return
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return
+        }
+        matchesByTournament[tournamentId] = events
+        _uiState.update {
+            if (it.selectedTournamentId != tournamentId) it else it.copy(matchesStatus = statusOf(events)).presented()
+        }
+    }
+
+    /** The regular stage matches of the selected tournament, null when it has no dates or no standings yet. */
+    private suspend fun fetchMatches(tournamentId: String): List<ScheduleEvent>? {
+        val state = _uiState.value
+        val tournament = state.tournaments.firstOrNull { it.id == tournamentId } ?: return null
+        val start = tournament.startDate ?: return null
+        val end = tournament.endDate ?: return null
+        val loaded = standings ?: return null
+        val events = scheduleRepository.loadEventsBetween(state.selectedLeagueId, start, end, zoneId)
+        return regularStageMatches(events, tournament, loaded, zoneId)
+    }
+
+    private fun statusOf(events: List<ScheduleEvent>): LoadStatus = if (events.isEmpty()) LoadStatus.Empty else LoadStatus.Content
+
+    /**
+     * This state with everything derived from the selected stage recomputed: its rows, the tabs, whether it
+     * lists matches, the team options and the kept matches by day, narrowed to [StandingsUiState.teamFilter].
+     */
+    private fun StandingsUiState.presented(): StandingsUiState {
+        val loaded = standings
+        val tabs = loaded?.let(::stageTabs).orEmpty()
+        val stage = loaded?.stages?.getOrNull(tabs.indexOfFirst { it.key == selectedStageKey })
+        val tournament = selectedTournament
+        val events = selectedTournamentId?.let { matchesByTournament[it] }.orEmpty()
+        val filter = teamFilter
+        val shown = if (filter == null) events else events.filter { it.involvesTeam(filter) }
+        return copy(
+            stageTabs = tabs,
+            rows = stage?.let { buildStandingsRows(Standings(listOf(it))) }.orEmpty(),
+            canShowMatches = stage?.isRanked == true && tournament?.startDate != null && tournament.endDate != null,
+            teamOptions = stage?.let { stageTeamOptions(it, favoriteNames) }.orEmpty(),
+            teamFilterStanding = filter?.let { team -> stage?.let { stageRankingOf(it, team) } }?.let(::stageStandingLine),
+            matchDays = groupEventsByDay(shown, zoneId),
+        )
+    }
+
+    /** A new tournament starts on its table, with all teams and no stage until its standings load. */
+    private fun StandingsUiState.withoutStage(): StandingsUiState = copy(
+        stageTabs = emptyList(),
+        selectedStageKey = null,
+        stageView = StageView.TABLE,
+        canShowMatches = false,
+        matchesStatus = LoadStatus.Loading,
+        matchDays = emptyList(),
+        teamOptions = emptyList(),
+        teamFilter = null,
+        teamFilterStanding = null,
+    )
+
     companion object {
         /** LCK: a round-robin league, so the default view shows real standings tables. */
         const val DEFAULT_LEAGUE_ID = "98767991310872058"
@@ -356,5 +557,7 @@ class StandingsViewModel(
 
         const val KEY_LEAGUE_ID = "standings.leagueId"
         const val KEY_TOURNAMENT_ID = "standings.tournamentId"
+        const val KEY_STAGE = "standings.stage"
+        const val KEY_STAGE_TOURNAMENT = "standings.stageTournamentId"
     }
 }

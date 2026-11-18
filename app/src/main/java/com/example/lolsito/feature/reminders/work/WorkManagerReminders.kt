@@ -85,11 +85,16 @@ class WorkManagerReminders(context: Context, private val clock: Clock) : Reminde
     }
 
     /** A newer request replaces a pending or running one, so the sync always reads the latest choices. */
-    override fun requestSync() {
+    override fun requestSync() = enqueueSync(onlyIfIdle = false)
+
+    /** For the app coming to the foreground: a sync already pending or running is left alone. */
+    fun requestSyncIfIdle() = enqueueSync(onlyIfIdle = true)
+
+    private fun enqueueSync(onlyIfIdle: Boolean) {
         val request = OneTimeWorkRequest.Builder(ReminderSyncWorker::class.java)
             .setConstraints(networkRequired)
             .build()
-        workManager.enqueueUniqueWork(SYNC_NOW, ExistingWorkPolicy.REPLACE, request)
+        workManager.enqueueUniqueWork(SYNC_NOW, syncPolicy(onlyIfIdle), request)
     }
 
     /** Idempotent: an already scheduled periodic sync keeps its schedule. */
@@ -117,3 +122,7 @@ class WorkManagerReminders(context: Context, private val clock: Clock) : Reminde
         fun reminderWorkName(matchId: String) = "matchReminder:$matchId"
     }
 }
+
+/** Choices changed: replace the sync so it reads them. Foreground: keep a sync already in flight. */
+internal fun syncPolicy(onlyIfIdle: Boolean): ExistingWorkPolicy =
+    if (onlyIfIdle) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE

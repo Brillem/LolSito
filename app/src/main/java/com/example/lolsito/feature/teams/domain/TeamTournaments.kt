@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.teams.domain
 
+import com.example.lolsito.core.error.swallowFailure
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
@@ -181,13 +182,4 @@ suspend fun StandingsRepository.recentTeamTournaments(
         .distinctBy { it.tournament.id }
         .sortedByDescending { it.tournament.startDate }
         .take(MAX_RECENT_TOURNAMENTS)
-}
-
-/** [block]'s value, or null when it fails; cancellation still propagates. */
-private suspend fun <T> swallowFailure(block: suspend () -> T): T? = try {
-    block()
-} catch (e: CancellationException) {
-    throw e
-} catch (e: Exception) {
-    null
 }

@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.match.ui
 
+import com.example.lolsito.core.error.toUserMessage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.model.MatchState
@@ -281,7 +282,7 @@ class MatchDetailViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                MatchDetailUiState.Error(e.message?.takeIf { it.isNotBlank() } ?: "Something went wrong")
+                MatchDetailUiState.Error(e.toUserMessage())
             }
         }
     }

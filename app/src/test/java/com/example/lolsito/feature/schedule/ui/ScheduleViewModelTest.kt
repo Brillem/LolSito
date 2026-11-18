@@ -210,7 +210,7 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val failed = vm.uiState.value
-        assertEquals("older down", failed.olderError)
+        assertEquals("No connection. Check your internet and try again.", failed.olderError)
         assertNull(failed.newerError)
         assertFalse(failed.isPaging)
         assertFalse(failed.isLoadingOlder)
@@ -244,7 +244,7 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
 
         val failed = vm.uiState.value
-        assertEquals("newer down", failed.newerError)
+        assertEquals("No connection. Check your internet and try again.", failed.newerError)
         assertNull(failed.olderError)
         assertFalse(failed.isPaging)
         assertFalse(failed.isLoadingOlder)
@@ -306,12 +306,12 @@ class ScheduleViewModelTest {
         repository.scheduleError = IOException("older down")
         vm.loadOlder()
         advanceUntilIdle()
-        assertEquals("older down", vm.uiState.value.olderError)
+        assertEquals("No connection. Check your internet and try again.", vm.uiState.value.olderError)
 
         repository.scheduleError = null
         vm.loadNewer()
         advanceUntilIdle()
-        assertEquals("older down", vm.uiState.value.olderError)
+        assertEquals("No connection. Check your internet and try again.", vm.uiState.value.olderError)
         assertNull(vm.uiState.value.newerError)
 
         val gate = CompletableDeferred<Unit>()
@@ -335,8 +335,8 @@ class ScheduleViewModelTest {
         advanceUntilIdle()
         vm.loadNewer()
         advanceUntilIdle()
-        assertEquals("down", vm.uiState.value.olderError)
-        assertEquals("down", vm.uiState.value.newerError)
+        assertEquals("No connection. Check your internet and try again.", vm.uiState.value.olderError)
+        assertEquals("No connection. Check your internet and try again.", vm.uiState.value.newerError)
 
         repository.scheduleError = null
         vm.retry()

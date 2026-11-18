@@ -77,7 +77,7 @@ class MatchDetailViewModelTest {
         val vm = viewModel("m1")
         vm.uiState.test {
             assertEquals(MatchDetailUiState.Loading, awaitItem())
-            assertEquals(MatchDetailUiState.Error("boom"), awaitItem())
+            assertEquals(MatchDetailUiState.Error("No connection. Check your internet and try again."), awaitItem())
 
             repository.error = null
             repository.detail = detail("m1")
@@ -90,13 +90,13 @@ class MatchDetailViewModelTest {
     }
 
     @Test
-    fun `blank error message falls back to a generic one`() = runTest(dispatcher) {
-        repository.error = IOException("")
+    fun `an unexpected failure reads as a generic message`() = runTest(dispatcher) {
+        repository.error = IllegalStateException("")
 
         val vm = viewModel("m1")
         vm.uiState.test {
             assertEquals(MatchDetailUiState.Loading, awaitItem())
-            assertEquals(MatchDetailUiState.Error("Something went wrong"), awaitItem())
+            assertEquals(MatchDetailUiState.Error("Something went wrong. Try again."), awaitItem())
         }
     }
 
@@ -245,7 +245,7 @@ class MatchDetailViewModelTest {
         val polling = launch { vm.pollWhileVisible() }
 
         advance(MATCH_DETAIL_POLL_INTERVAL * 3)
-        assertEquals(MatchDetailUiState.Error("boom"), vm.uiState.value)
+        assertEquals(MatchDetailUiState.Error("No connection. Check your internet and try again."), vm.uiState.value)
         assertEquals(1, repository.requests.size)
 
         repository.error = null
@@ -360,7 +360,7 @@ class MatchDetailViewModelTest {
 
         vm.refresh()
         advanceUntilIdle()
-        assertEquals(MatchDetailUiState.Error("boom"), vm.uiState.value)
+        assertEquals(MatchDetailUiState.Error("No connection. Check your internet and try again."), vm.uiState.value)
         assertFalse(vm.isRefreshing.value)
         assertEquals(1, repository.requests.size)
 

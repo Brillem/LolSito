@@ -224,7 +224,7 @@ class StandingsViewModelTest {
         repository.tournamentsError = IOException("tournaments down")
         val vm = viewModel()
         advanceUntilIdle()
-        assertEquals(LoadStatus.Error("tournaments down"), vm.uiState.value.tournamentsStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.tournamentsStatus)
 
         repository.tournamentsError = null
         vm.retryTournaments()
@@ -242,7 +242,7 @@ class StandingsViewModelTest {
         advanceUntilIdle()
 
         val state = vm.uiState.value
-        assertEquals(LoadStatus.Error("leagues down"), state.leaguesStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), state.leaguesStatus)
         assertTrue(state.leagues.isEmpty())
         assertEquals("a neutral label while the leagues are unavailable", "League", state.selectedLeagueLabel)
         assertEquals(LoadStatus.Content, state.tournamentsStatus)
@@ -283,7 +283,7 @@ class StandingsViewModelTest {
         val failed = vm.uiState.value
         assertEquals(LoadStatus.Content, failed.leaguesStatus)
         assertEquals(2, failed.leagues.size)
-        assertEquals(LoadStatus.Error("tournaments down"), failed.tournamentsStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), failed.tournamentsStatus)
 
         repository.tournamentsError = null
         vm.retryTournaments()
@@ -303,7 +303,7 @@ class StandingsViewModelTest {
         advanceUntilIdle()
         val failed = vm.uiState.value
         assertEquals(LoadStatus.Content, failed.tournamentsStatus)
-        assertEquals(LoadStatus.Error("standings down"), failed.standingsStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), failed.standingsStatus)
         assertEquals(LCK_SUMMER, failed.selectedTournamentId)
 
         repository.standingsError = null
@@ -508,7 +508,7 @@ class StandingsViewModelTest {
 
         assertEquals(WORLDS_2025, vm.uiState.value.selectedTournamentId)
         assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
-        assertEquals(LoadStatus.Error("leagues down"), vm.uiState.value.leaguesStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.leaguesStatus)
         assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2025"), repository.requests)
     }
 

@@ -18,12 +18,16 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -125,14 +129,19 @@ fun TeamProfileContent(
         )
         LoadStatusView(state.status, "Team not found", onRetry, loading = { ProfileSkeleton() }) {
             val profile = state.profile ?: return@LoadStatusView
+            var tab by rememberSaveable { mutableStateOf(ProfileTab.Overview) }
             LazyColumn(Modifier.fillMaxSize()) {
                 item(key = "header") { ProfileHeader(profile, state.standing) }
+                item(key = "tabs") { ProfileTabs(tab, onSelect = { tab = it }) }
+                if (tab == ProfileTab.Roster) {
+                    rosterRows(profile, state.lineup)
+                    return@LazyColumn
+                }
                 state.nextMatch?.let { next ->
                     item(key = "next-match") {
                         NextMatchCard(next, profile.name, state.zoneId, onClick = next.matchId?.let { id -> { onMatchClick(id) } })
                     }
                 }
-                rosterRows(profile, state.lineup)
                 if (state.form.isNotEmpty()) {
                     item(key = "form-title") { SectionTitle("Recent form") }
                     item(key = "form") {
@@ -316,12 +325,29 @@ private fun NextMatchCard(event: ScheduleEvent, teamName: String, zoneId: ZoneId
     }
 }
 
+/** The two views of a team profile, below its header. */
+private enum class ProfileTab(val label: String) { Overview("Overview"), Roster("Roster") }
+
+/** Overview | Roster, the same segmented buttons as the Items/Stats toggle of a game. */
+@Composable
+private fun ProfileTabs(selected: ProfileTab, onSelect: (ProfileTab) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
+        ProfileTab.entries.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = option == selected,
+                onClick = { onSelect(option) },
+                shape = SegmentedButtonDefaults.itemShape(index, ProfileTab.entries.size),
+                label = { Text(option.label) },
+            )
+        }
+    }
+}
+
 /**
  * The roster, each player with their role: the lineup of the last game played first when it is known, then the
  * substitutes; otherwise every player in role order.
  */
 private fun LazyListScope.rosterRows(profile: TeamProfile, lineup: RosterSplit?) {
-    item(key = "roster") { SectionTitle("Roster") }
     if (lineup != null) {
         playerRows("starter", lineup.starters)
         val substitutes = lineup.rest.flatMap { it.players }

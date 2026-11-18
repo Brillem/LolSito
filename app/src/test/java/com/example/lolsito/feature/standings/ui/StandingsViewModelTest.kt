@@ -731,6 +731,18 @@ class StandingsViewModelTest {
     }
 
     @Test
+    fun `refresh asks for fresh standings past any cache`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), repository.refreshes)
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf(LCK_SUMMER), repository.refreshes)
+    }
+
+    @Test
     fun `refresh keeps the rows on screen while it loads`() = runTest(dispatcher) {
         val vm = viewModel()
         advanceUntilIdle()
@@ -880,6 +892,7 @@ class StandingsViewModelTest {
         val tournamentGates = mutableMapOf<String, CompletableDeferred<Unit>>()
         val standingsGates = mutableMapOf<String, CompletableDeferred<Unit>>()
         val requests = mutableListOf<String>()
+        val refreshes = mutableListOf<String>()
         var tournamentsError: Throwable? = null
         var standingsError: Throwable? = null
 
@@ -895,6 +908,11 @@ class StandingsViewModelTest {
             standingsError?.let { throw it }
             requests += "s:$tournamentId"
             return standings[tournamentId] ?: error("No standings for $tournamentId")
+        }
+
+        override suspend fun refreshStandings(tournamentId: String): Standings {
+            refreshes += tournamentId
+            return getStandings(tournamentId)
         }
     }
 

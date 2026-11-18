@@ -208,7 +208,7 @@ class StandingsViewModel(
         // Shares the standings job, so a retry or a selection change cancels it like any other standings load.
         standingsJob = viewModelScope.launch {
             try {
-                val rows = buildStandingsRows(repository.getStandings(tournamentId))
+                val rows = buildStandingsRows(repository.refreshStandings(tournamentId))
                 _uiState.update {
                     if (it.selectedTournamentId != tournamentId) it
                     else it.copy(standingsStatus = if (rows.isEmpty()) LoadStatus.Empty else LoadStatus.Content, rows = rows)

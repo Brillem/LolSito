@@ -330,7 +330,7 @@ class GameStatsViewModelTest {
     @Test
     fun `an initial load is not held back by details that never answer`() = runTest(dispatcher) {
         val api = FakeLiveStatsApi(details = { FakeLiveStatsApi.never() })
-        val vm = GameStatsViewModel("g1", GameStatsRepositoryImpl(api, Clock.systemUTC()))
+        val vm = GameStatsViewModel("g1", GameStatsRepositoryImpl(api, Clock.systemUTC(), mapperDispatcher = Dispatchers.Unconfined))
 
         advance(DETAILS_WAIT_LIMIT - 1.milliseconds)
         assertEquals(LoadStatus.Loading, vm.uiState.value.status)
@@ -347,7 +347,7 @@ class GameStatsViewModelTest {
     fun `a poll tick is not held back by details that never answer and keeps the earlier details`() = runTest(dispatcher) {
         var gold = 31850
         val api = FakeLiveStatsApi(window = { Response.success(FakeLiveStatsApi.windowResponse().body()!!.withBlueGold(gold)) })
-        val vm = GameStatsViewModel("g1", GameStatsRepositoryImpl(api, Clock.systemUTC()))
+        val vm = GameStatsViewModel("g1", GameStatsRepositoryImpl(api, Clock.systemUTC(), mapperDispatcher = Dispatchers.Unconfined))
         advanceUntilIdle()
         assertTrue(vm.uiState.value.stats!!.blueTeam.players.all { it.details != null })
         val polling = launch { vm.pollWhileVisible() }

@@ -23,7 +23,9 @@ import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -71,7 +73,7 @@ class TeamsViewModelTest {
     private val directory = FakeDirectory()
 
     private fun viewModel() =
-        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, notifications, directory, defaultLeagueId = LCK)
+        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, notifications, directory, defaultLeagueId = LCK, searchDispatcher = dispatcher)
 
     @Test
     fun `loads the leagues and the default league's current teams`() = runTest(dispatcher) {
@@ -522,6 +524,40 @@ class TeamsViewModelTest {
         advanceUntilIdle()
         assertEquals(1, directory.requests)
         assertEquals(1, vm.uiState.value.searchResults.teams.size)
+    }
+
+    @Test
+    fun `results follow the query once typing pauses`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+
+        vm.onQueryChange("ge")
+        vm.onQueryChange("gen")
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(listOf("T1"), vm.uiState.value.searchResults.teams.map { it.code })
+
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(listOf("GEN"), vm.uiState.value.searchResults.teams.map { it.code })
+    }
+
+    @Test
+    fun `clearing the query clears the results at once, also with a search pending`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+
+        vm.onQueryChange("gen")
+        vm.clearQuery()
+        assertTrue(vm.uiState.value.searchResults.isEmpty)
+
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.searchResults.isEmpty)
+        assertEquals("", vm.uiState.value.query)
     }
 
     @Test

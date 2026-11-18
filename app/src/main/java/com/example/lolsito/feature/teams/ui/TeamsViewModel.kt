@@ -11,18 +11,29 @@ import com.example.lolsito.feature.reminders.domain.NotificationAvailability
 import com.example.lolsito.feature.reminders.domain.ReminderScheduler
 import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
 import com.example.lolsito.feature.standings.domain.StandingsRepository
-import com.example.lolsito.feature.teams.domain.DirectoryTeam
 import com.example.lolsito.feature.teams.domain.MIN_SEARCH_LENGTH
 import com.example.lolsito.feature.teams.domain.TeamDirectoryRepository
+import com.example.lolsito.feature.teams.domain.TeamSearchIndex
 import com.example.lolsito.feature.teams.domain.TeamSearchResults
 import com.example.lolsito.feature.teams.domain.TeamSummary
 import com.example.lolsito.feature.teams.domain.currentTeams
-import com.example.lolsito.feature.teams.domain.searchTeamsAndPlayers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Clock
@@ -78,6 +89,9 @@ data class TeamsUiState(
  * The search field ([onQueryChange]) looks for teams and players among every team of [teamDirectory]. That
  * list is requested the first time the user types, not before, and kept; a failed request shows an error
  * that [retrySearch] requests again. A blank query leaves the tab as it was.
+ *
+ * The search runs on [searchDispatcher], over the list's [TeamSearchIndex], once typing pauses for
+ * [SEARCH_DEBOUNCE_MILLIS]; a newer query cancels a search still running. A blank query clears the results at once.
  */
 class TeamsViewModel(
     private val standingsRepository: StandingsRepository,
@@ -89,6 +103,7 @@ class TeamsViewModel(
     private val notifications: NotificationAvailability,
     private val teamDirectory: TeamDirectoryRepository,
     defaultLeagueId: String = DEFAULT_LEAGUE_ID,
+    private val searchDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TeamsUiState(selectedLeagueId = defaultLeagueId))
@@ -98,9 +113,17 @@ class TeamsViewModel(
     private var remindersLoadJob: Job? = null
     private var teamsJob: Job? = null
     private var directoryJob: Job? = null
-    private var directory: List<DirectoryTeam>? = null
+    private val searchIndex = MutableStateFlow<TeamSearchIndex?>(null)
+
+    /**
+     * Every query typed, in order. Not a StateFlow: "t1", "", "t1" typed in a row must search "t1" again after
+     * the blank one cleared the results, and a StateFlow collector could see only the two equal "t1".
+     */
+    private val queries = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+        .apply { tryEmit("") }
 
     init {
+        observeSearch()
         loadRemindersEnabled()
         refreshFavorites()
         loadLeagues()
@@ -116,13 +139,18 @@ class TeamsViewModel(
     /** Sets the search text. The first non-blank one asks for the team list; later ones search what is kept. */
     fun onQueryChange(query: String) {
         _uiState.update { it.copy(query = query) }
+        queries.tryEmit(query)
         if (query.isBlank()) {
-            // Leaving a failed search behind: the next one starts clean.
-            _uiState.update { if (it.searchStatus is LoadStatus.Error) it.copy(searchStatus = LoadStatus.Content) else it }
-        } else if (directory == null && directoryJob?.isActive != true && _uiState.value.searchStatus !is LoadStatus.Error) {
+            // Leaving a failed search behind: the next one starts clean. The results go at once, without waiting.
+            _uiState.update {
+                it.copy(
+                    searchResults = TeamSearchResults(),
+                    searchStatus = if (it.searchStatus is LoadStatus.Error) LoadStatus.Content else it.searchStatus,
+                )
+            }
+        } else if (searchIndex.value == null && directoryJob?.isActive != true && _uiState.value.searchStatus !is LoadStatus.Error) {
             loadDirectory()
         }
-        publishResults()
     }
 
     /** Clears the search text, which brings the usual tab back. */
@@ -136,9 +164,8 @@ class TeamsViewModel(
         _uiState.update { it.copy(searchStatus = LoadStatus.Loading) }
         directoryJob = viewModelScope.launch {
             try {
-                directory = teamDirectory.getAllTeams()
+                searchIndex.value = teamDirectory.getSearchIndex()
                 _uiState.update { it.copy(searchStatus = LoadStatus.Content) }
-                publishResults()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -147,11 +174,21 @@ class TeamsViewModel(
         }
     }
 
-    /** Searches the kept team list for the current query; nothing to show until the list is here. */
-    private fun publishResults() {
-        val teams = directory
-        _uiState.update { state ->
-            state.copy(searchResults = if (teams == null) TeamSearchResults() else searchTeamsAndPlayers(teams, state.query, leagueOrder = state.leagues.map { it.name }))
+    /**
+     * Searches the kept team list for the query once typing pauses, and again when the list arrives or the
+     * league order (which decides the team of a duplicated player) changes; nothing to show until the list is
+     * here. Results are only shown while the query they were searched for is still the one typed.
+     */
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    private fun observeSearch() {
+        val query = queries
+            .debounce { if (it.isBlank()) 0L else SEARCH_DEBOUNCE_MILLIS }
+        val leagueOrder = _uiState.map { state -> state.leagues.map { it.name } }.distinctUntilChanged()
+        viewModelScope.launch {
+            combine(query, searchIndex, leagueOrder) { q, index, order -> Triple(q, index, order) }
+                .mapLatest { (q, index, order) -> q to (index?.search(q, leagueOrder = order) ?: TeamSearchResults()) }
+                .flowOn(searchDispatcher)
+                .collect { (q, results) -> _uiState.update { if (it.query == q) it.copy(searchResults = results) else it } }
         }
     }
 
@@ -228,8 +265,6 @@ class TeamsViewModel(
                 _uiState.update {
                     it.copy(leagues = leagues, leaguesStatus = if (leagues.isEmpty()) LoadStatus.Empty else LoadStatus.Content)
                 }
-                // The league order decides which team keeps a duplicated player.
-                publishResults()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -287,6 +322,9 @@ class TeamsViewModel(
 
     companion object {
         const val DEFAULT_LEAGUE_ID = "98767991310872058" // LCK
+
+        /** How long typing must pause before the query is searched. */
+        const val SEARCH_DEBOUNCE_MILLIS = 150L
 
         const val PERMISSION_DENIED_NOTICE =
             "Reminders need permission to send notifications. Allow notifications for LolSito in the system settings."

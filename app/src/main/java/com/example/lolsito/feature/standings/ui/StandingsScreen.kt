@@ -208,7 +208,6 @@ fun StandingsList(
                     last = rows.getOrNull(index + 1) !is StandingsRow.RankingRow,
                 )
                 is StandingsRow.EmptySection -> InfoText("No standings for this section yet")
-                is StandingsRow.EliminationNotice -> EliminationNotice()
                 is StandingsRow.MatchRow -> SectionMatchRow(
                     row,
                     onClick = { onMatchClick(row.sectionMatch.match.id) },
@@ -310,18 +309,6 @@ internal fun FavoriteStar(modifier: Modifier = Modifier) {
         tint = MaterialTheme.colorScheme.primary,
         modifier = modifier.size(12.dp),
     )
-}
-
-@Composable
-private fun EliminationNotice() {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
-        Text("Elimination stage", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-        Text(
-            "Bracket and Swiss stages have no standings table. Matches:",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
 }
 
 /**

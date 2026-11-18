@@ -39,9 +39,6 @@ sealed interface StandingsRow {
     /** Section (or section-less stage) with neither rankings nor matches yet. */
     data class EmptySection(override val key: String) : StandingsRow
 
-    /** Bracket/Swiss stage: every section lists matches instead of a table. */
-    data class EliminationNotice(override val key: String) : StandingsRow
-
     data class MatchRow(override val key: String, val sectionMatch: SectionMatch) : StandingsRow {
         val result: MatchResultDisplay
             get() = formatMatchResult(sectionMatch.state, sectionMatch.match.teams, sectionMatch.match.format)
@@ -114,7 +111,7 @@ fun formatRecord(wins: Int?, losses: Int?): String = when {
  * Stages in API order. Each section decides on its own: rankings show a table; matches without rankings
  * show the official layout when the section has columns (a Swiss view by round when no match feeds another,
  * see [buildSwiss], otherwise a bracket), else the match list; and a section with neither shows an empty
- * row. Elimination stages (bracket or Swiss) also get a notice, and skip their sections with no matches.
+ * row. Elimination stages (bracket or Swiss) skip their sections with no matches.
  */
 fun buildStandingsRows(standings: Standings): List<StandingsRow> {
     // Same "#ordinal" suffix as ScheduleDay.keys, applied to the whole list.
@@ -124,9 +121,6 @@ fun buildStandingsRows(standings: Standings): List<StandingsRow> {
     standings.stages.forEach { stage ->
         val stageBase = "stage:${stage.slug ?: stage.name}"
         rows += StandingsRow.StageHeader(key(stageBase), stage.name, stage.isElimination)
-        if (stage.isElimination) {
-            rows += StandingsRow.EliminationNotice(key("notice:$stageBase"))
-        }
         if (stage.sections.isEmpty()) {
             rows += StandingsRow.EmptySection(key("empty:$stageBase"))
         }

@@ -48,7 +48,6 @@ class StandingsRowsTest {
 
         rows.assertUniqueKeys()
         assertTrue(rows.none { it is StandingsRow.TableHeader || it is StandingsRow.RankingRow })
-        assertEquals(3, rows.count { it is StandingsRow.EliminationNotice })
         assertTrue(rows.none { it is StandingsRow.EmptySection || it is StandingsRow.MatchRow })
         assertEquals(2, rows.count { it is StandingsRow.BracketRow })
         assertEquals(1, rows.count { it is StandingsRow.SwissRow })
@@ -61,7 +60,7 @@ class StandingsRowsTest {
         val rows = buildStandingsRows(Standings(listOf(StandingsStage("Knockouts", "knockouts", emptyList()))))
 
         assertEquals(1, rows.count { it is StandingsRow.EmptySection })
-        assertTrue(rows.none { it is StandingsRow.EliminationNotice || it is StandingsRow.MatchRow })
+        assertTrue(rows.none { it is StandingsRow.MatchRow })
         assertFalse(rows.filterIsInstance<StandingsRow.StageHeader>().single().isElimination)
     }
 
@@ -103,7 +102,6 @@ class StandingsRowsTest {
         val rows = buildStandingsRows(Standings(listOf(stage)))
 
         rows.assertUniqueKeys()
-        assertEquals(1, rows.count { it is StandingsRow.EliminationNotice })
         assertEquals(listOf("q1", "q2", "f1"), rows.filterIsInstance<StandingsRow.MatchRow>().map { it.sectionMatch.match.id })
         assertEquals(listOf("Quarterfinals", "Final"), rows.filterIsInstance<StandingsRow.SectionHeader>().map { it.name })
         assertTrue(rows.none { it is StandingsRow.EmptySection })
@@ -119,7 +117,6 @@ class StandingsRowsTest {
         val rows = buildStandingsRows(Standings(listOf(stage)))
 
         rows.assertUniqueKeys()
-        assertEquals(1, rows.count { it is StandingsRow.EliminationNotice })
         assertEquals(listOf("q1"), rows.filterIsInstance<StandingsRow.MatchRow>().map { it.sectionMatch.match.id })
         assertTrue(rows.none { it is StandingsRow.EmptySection })
         assertEquals(listOf("Quarterfinals"), rows.filterIsInstance<StandingsRow.SectionHeader>().map { it.name })
@@ -127,13 +124,12 @@ class StandingsRowsTest {
     }
 
     @Test
-    fun `unstarted stage without rankings or matches shows empty sections, not an elimination notice`() {
+    fun `unstarted stage without rankings or matches shows empty sections`() {
         val stage = StandingsStage("Groups", "groups", listOf(section("Group A"), section("Group B")))
         val rows = buildStandingsRows(Standings(listOf(stage)))
 
         rows.assertUniqueKeys()
         assertEquals(2, rows.count { it is StandingsRow.EmptySection })
-        assertTrue(rows.none { it is StandingsRow.EliminationNotice })
         assertFalse(rows.filterIsInstance<StandingsRow.StageHeader>().single().isElimination)
     }
 

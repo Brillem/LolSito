@@ -18,12 +18,16 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -125,8 +129,14 @@ fun TeamProfileContent(
         )
         LoadStatusView(state.status, "Team not found", onRetry, loading = { ProfileSkeleton() }) {
             val profile = state.profile ?: return@LoadStatusView
+            var tab by rememberSaveable { mutableStateOf(ProfileTab.Overview) }
             LazyColumn(Modifier.fillMaxSize()) {
                 item(key = "header") { ProfileHeader(profile, state.standing) }
+                item(key = "tabs") { ProfileTabs(tab, onSelect = { tab = it }) }
+                if (tab == ProfileTab.Roster) {
+                    rosterRows(profile, state.lineup)
+                    return@LazyColumn
+                }
                 state.nextMatch?.let { next ->
                     item(key = "next-match") {
                         NextMatchCard(next, profile.name, state.zoneId, onClick = next.matchId?.let { id -> { onMatchClick(id) } })
@@ -146,7 +156,6 @@ fun TeamProfileContent(
                         TournamentRow(tournament, onClick = { onTournamentClick(tournament.leagueId, tournament.tournamentId) })
                     }
                 }
-                rosterRows(profile, state.lineup)
                 matchRows(state, onRetry, onLoadOlder, onMatchClick)
             }
         }
@@ -316,27 +325,46 @@ private fun NextMatchCard(event: ScheduleEvent, teamName: String, zoneId: ZoneId
     }
 }
 
+/** The two views of a team profile, below its header. */
+private enum class ProfileTab(val label: String) { Overview("Overview"), Roster("Roster") }
+
+/** Overview | Roster, the same segmented buttons as the Items/Stats toggle of a game. */
+@Composable
+private fun ProfileTabs(selected: ProfileTab, onSelect: (ProfileTab) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
+        ProfileTab.entries.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = option == selected,
+                onClick = { onSelect(option) },
+                shape = SegmentedButtonDefaults.itemShape(index, ProfileTab.entries.size),
+                label = { Text(option.label) },
+            )
+        }
+    }
+}
+
+/**
+ * The roster, each player with their role: the lineup of the last game played first when it is known, then the
+ * substitutes; otherwise every player in role order.
+ */
 private fun LazyListScope.rosterRows(profile: TeamProfile, lineup: RosterSplit?) {
     if (lineup != null) {
-        item(key = "starters") { SectionTitle("Starters") }
-        item(key = "starters-caption") { InfoText("Lineup of the last game played") }
-        itemsIndexed(lineup.starters, key = { index, _ -> "starter:$index" }) { _, player -> PlayerRow(player) }
-        item(key = "roster") { SectionTitle("Rest of the roster") }
-        roleGroups(lineup.rest)
+        playerRows("starter", lineup.starters)
+        val substitutes = lineup.rest.flatMap { it.players }
+        if (substitutes.isNotEmpty()) {
+            item(key = "substitutes") { GroupLabel("Substitutes") }
+            playerRows("substitute", substitutes)
+        }
         return
     }
-    item(key = "roster") { SectionTitle("Roster") }
     if (profile.roster.isEmpty()) {
         item(key = "roster-empty") { InfoText("No players listed") }
     }
-    roleGroups(profile.roster)
+    playerRows("player", profile.roster.flatMap { it.players })
 }
 
-private fun LazyListScope.roleGroups(groups: List<RoleGroup>) {
-    groups.forEach { group ->
-        item(key = "role:${group.role}") { GroupLabel(group.role.label) }
-        itemsIndexed(group.players, key = { index, _ -> "player:${group.role}:$index" }) { _, player -> PlayerRow(player) }
-    }
+private fun LazyListScope.playerRows(keyPrefix: String, players: List<Player>) {
+    itemsIndexed(players, key = { index, _ -> "$keyPrefix:$index" }) { _, player -> PlayerRow(player) }
 }
 
 private fun LazyListScope.matchRows(
@@ -395,7 +423,7 @@ private fun LazyListScope.dayRows(
     }
 }
 
-/** The card of one player: photo, summoner name and, when known, real name. */
+/** The card of one player: photo, summoner name and, when known, real name; their role on the right. */
 @Composable
 private fun PlayerRow(player: Player) {
     AppCard(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)) {
@@ -408,6 +436,10 @@ private fun PlayerRow(player: Player) {
                 if (realName.isNotEmpty()) {
                     Text(realName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+            if (player.role != PlayerRole.OTHER) {
+                Spacer(Modifier.width(12.dp))
+                Text(player.role.label, style = LabelText.Number, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

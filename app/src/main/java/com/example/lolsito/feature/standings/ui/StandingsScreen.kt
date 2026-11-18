@@ -82,7 +82,6 @@ import com.example.lolsito.feature.schedule.ui.dayRows
 import com.example.lolsito.feature.standings.domain.StageTab
 import com.example.lolsito.feature.standings.domain.TeamOption
 import com.example.lolsito.feature.standings.domain.identity
-import com.example.lolsito.feature.standings.domain.stageSelectorFitsSegments
 import com.example.lolsito.feature.standings.domain.stageTabs
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
@@ -276,41 +275,27 @@ fun StandingsList(
 }
 
 /**
- * One option per stage, named as the API names it: segmented buttons, styled like the Items/Stats toggle of a
- * game, when the names fit them ([stageSelectorFitsSegments]), otherwise a row of chips that scrolls sideways,
- * so no name is ever cut.
+ * One chip per stage, named as the API names it, in a row that scrolls sideways so no name is ever cut. Chips
+ * keep it apart from the Table | Matches segmented toggle below it.
  */
 @Composable
 private fun StageSelector(tabs: List<StageTab>, selectedKey: String?, onSelect: (String) -> Unit) {
-    if (stageSelectorFitsSegments(tabs.map { it.name })) {
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
-            tabs.forEachIndexed { index, tab ->
-                SegmentedButton(
-                    selected = tab.key == selectedKey,
-                    onClick = { onSelect(tab.key) },
-                    shape = SegmentedButtonDefaults.itemShape(index, tabs.size),
-                    label = { Text(tab.name, maxLines = 1, softWrap = false) },
-                )
-            }
-        }
-    } else {
-        val accent = MaterialTheme.colorScheme.primary
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = Spacing.Screen, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            tabs.forEach { tab ->
-                val selected = tab.key == selectedKey
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelect(tab.key) },
-                    label = { Text(tab.name, maxLines = 1, softWrap = false) },
-                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selected, selectedBorderColor = accent),
-                )
-            }
+    val accent = MaterialTheme.colorScheme.primary
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = Spacing.Screen, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        tabs.forEach { tab ->
+            val selected = tab.key == selectedKey
+            FilterChip(
+                selected = selected,
+                onClick = { onSelect(tab.key) },
+                label = { Text(tab.name, maxLines = 1, softWrap = false) },
+                border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selected, selectedBorderColor = accent),
+            )
         }
     }
 }

@@ -78,14 +78,6 @@ class StageMatchesTest {
         assertEquals(3, tabs.map { it.key }.toSet().size)
     }
 
-    @Test
-    fun `up to three short names fit segments, more or longer names scroll`() {
-        assertTrue(stageSelectorFitsSegments(listOf("Groups", "Play-Ins", "Knockouts")))
-        assertTrue(stageSelectorFitsSegments(listOf("Regular Season", "Playoffs")))
-        assertFalse(stageSelectorFitsSegments(listOf("Groups", "Play-Ins", "Knockouts", "Finals")))
-        assertFalse(stageSelectorFitsSegments(listOf("Regional Championship", "Groups", "Play-Ins")))
-    }
-
     // Regular stage matches
 
     private val tournament = Tournament("t", "t", LocalDate.of(2026, 1, 5), LocalDate.of(2026, 1, 20))

@@ -34,4 +34,13 @@ interface UserPreferences {
     suspend fun getMatchRemindersEnabled(): Boolean?
 
     suspend fun saveMatchRemindersEnabled(enabled: Boolean)
+
+    /** The matches marked with "Remind me", in the order they were marked; null when none ever was. */
+    suspend fun getMarkedMatches(): List<MarkedMatch>?
+
+    /** Adds [match], or replaces the stored one of the same match id in place. */
+    suspend fun saveMarkedMatch(match: MarkedMatch)
+
+    /** Drops the marked matches of [matchIds]; ids not marked are ignored. */
+    suspend fun removeMarkedMatches(matchIds: Set<String>)
 }

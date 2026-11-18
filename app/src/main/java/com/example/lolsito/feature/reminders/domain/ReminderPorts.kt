@@ -41,3 +41,11 @@ fun interface NotificationAvailability {
 fun interface ReminderSyncTrigger {
     fun requestSync()
 }
+
+/**
+ * Turns off the favorites' reminders at once, without waiting for a sync or a network: cancels every scheduled
+ * reminder except those of [markedMatchIds], the matches marked with "Remind me", which do not depend on the bell.
+ */
+suspend fun ReminderScheduler.cancelAllExcept(markedMatchIds: Set<String>) {
+    scheduled().map { it.matchId }.filterNot { it in markedMatchIds }.distinct().forEach(::cancel)
+}

@@ -6,7 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.polling.MATCH_DETAIL_POLL_INTERVAL
 import com.example.lolsito.core.polling.pollWhile
+import com.example.lolsito.core.preferences.MarkedMatch
 import com.example.lolsito.core.preferences.UserPreferences
+import com.example.lolsito.feature.reminders.domain.ReminderSyncTrigger
+import com.example.lolsito.feature.reminders.domain.reminderDetail
+import com.example.lolsito.feature.reminders.domain.reminderTeamsLabel
+import com.example.lolsito.feature.teams.ui.TeamsViewModel
 import com.example.lolsito.feature.match.domain.GameOutcome
 import com.example.lolsito.feature.match.domain.GameWinnerSource
 import com.example.lolsito.feature.match.domain.MatchDetail
@@ -36,7 +41,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -46,6 +53,12 @@ sealed interface MatchDetailUiState {
     /** [resultsHidden]: the no-spoilers mode is on and the user has not revealed this series (see [displayedResult]). */
     data class Content(val detail: MatchDetail, val resultsHidden: Boolean = false) : MatchDetailUiState
 }
+
+/**
+ * The "Remind me" button of a match still to be played: [isSet] once the match is marked ("Reminder set");
+ * [notice] says why it could not be set, if it could not.
+ */
+data class MatchReminderButton(val isSet: Boolean, val notice: String? = null)
 
 /** The recent form and head to head sections of Match detail, loaded apart from the series. */
 sealed interface MatchHistoryUiState {
@@ -81,6 +94,10 @@ sealed interface MatchHistoryUiState {
  *
  * [refresh] (pull to refresh) loads the series and then the history again while both stay on screen; whatever
  * fails stays as it was. The polling is paused for as long as it runs, so the two never overlap.
+ *
+ * [reminderButton] offers "Remind me" for an unstarted series whose [startTime] is known. [setReminder] marks the
+ * match in [preferences] (with its league, found by slug in [leaguesRepository], so the reminder sync can find it)
+ * and [removeReminder] unmarks it; either asks [reminderSync] for a sync, which schedules or cancels the reminder.
  */
 class MatchDetailViewModel(
     private val matchId: String,
@@ -91,6 +108,7 @@ class MatchDetailViewModel(
     private val leaguesRepository: LeaguesRepository,
     private val zoneId: ZoneId,
     private val gameWinners: GameWinnerSource = GameWinnerSource { null },
+    private val reminderSync: ReminderSyncTrigger = ReminderSyncTrigger {},
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<MatchDetailUiState>(MatchDetailUiState.Loading)
@@ -129,14 +147,109 @@ class MatchDetailViewModel(
     /** What was loaded, whether or not it may be shown; [historyState] is what the screen gets. */
     private var history: MatchHistoryUiState = MatchHistoryUiState.None
 
+    /** Whether this match is marked with "Remind me"; null until the store was read. */
+    private val _marked = MutableStateFlow<Boolean?>(null)
+    private val _reminderNotice = MutableStateFlow<String?>(null)
+    private var reminderJob: Job? = null
+
+    /** "Remind me", or null when not offered: the series started, its start time is unknown, or it is not loaded. */
+    val reminderButton: StateFlow<MatchReminderButton?> =
+        combine(_uiState, _startTime, _marked, _reminderNotice) { state, start, marked, notice ->
+            val unstarted = (state as? MatchDetailUiState.Content)?.detail?.state == MatchState.UNSTARTED
+            if (unstarted && start != null && marked != null) MatchReminderButton(marked, notice) else null
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     private var loadJob: Job? = null
     private var historyJob: Job? = null
     private var refreshJob: Job? = null
     private var noSpoilers: Boolean? = null
     private var revealed = false
 
+    companion object {
+        const val REMINDER_FAILED_NOTICE = "Could not set the reminder. Try again."
+    }
+
     init {
         load()
+        viewModelScope.launch {
+            val marked = try {
+                preferences.getMarkedMatches().orEmpty().any { it.matchId == matchId }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
+            // A tap made while reading wins over the stored value.
+            if (_marked.value == null) _marked.value = marked
+        }
+    }
+
+    /**
+     * Marks this match with "Remind me" (the notification permission is already granted or not needed). It reads
+     * as set at once; when its league cannot be found or the store fails, it goes back to unset and says so.
+     */
+    fun setReminder() {
+        val detail = (_uiState.value as? MatchDetailUiState.Content)?.detail ?: return
+        val start = _startTime.value ?: return
+        reminderJob?.cancel()
+        _marked.value = true
+        _reminderNotice.value = null
+        reminderJob = viewModelScope.launch {
+            try {
+                val leagueId = leagueIdOf(detail) ?: throw IllegalStateException("league not found")
+                val marked = MarkedMatch(
+                    matchId = matchId,
+                    leagueId = leagueId,
+                    startTime = start,
+                    teamsLabel = reminderTeamsLabel(detail.teams),
+                    detail = reminderDetail(detail.leagueName, detail.format),
+                )
+                preferences.saveMarkedMatch(marked)
+                reminderSync.requestSync()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _marked.value = false
+                _reminderNotice.value = REMINDER_FAILED_NOTICE
+            }
+        }
+    }
+
+    /** Unmarks this match; the next sync cancels its reminder, and a check due before then no longer notifies it. */
+    fun removeReminder() {
+        reminderJob?.cancel()
+        _marked.value = false
+        _reminderNotice.value = null
+        reminderJob = viewModelScope.launch {
+            try {
+                preferences.removeMarkedMatches(setOf(matchId))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Like the favorites star: not remembering is better than failing the tap.
+            }
+            reminderSync.requestSync()
+        }
+    }
+
+    /** The answer to the notification permission asked when tapping "Remind me"; denied leaves it unset and says why. */
+    fun onNotificationPermissionResult(granted: Boolean) {
+        if (granted) {
+            setReminder()
+        } else {
+            _reminderNotice.value = TeamsViewModel.PERMISSION_DENIED_NOTICE
+        }
+    }
+
+    /** The league of the series, found by its slug (or, without one, its name) among the leagues. */
+    private suspend fun leagueIdOf(detail: MatchDetail): String? {
+        val leagues = leaguesRepository.getLeagues()
+        val slug = detail.leagueSlug?.trim()?.takeIf { it.isNotEmpty() }
+        return if (slug != null) {
+            leagues.firstOrNull { it.slug.equals(slug, ignoreCase = true) }?.id
+        } else {
+            leagues.firstOrNull { it.name.trim().equals(detail.leagueName.trim(), ignoreCase = true) }?.id
+        }
     }
 
     fun retry() = load()

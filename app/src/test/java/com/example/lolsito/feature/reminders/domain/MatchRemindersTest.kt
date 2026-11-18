@@ -264,4 +264,69 @@ class MatchRemindersTest {
         )
         assertEquals(InternationalLeagues.ids.sorted(), reminderLeagueIds(listOf(null)))
     }
+
+    // Matches marked with "Remind me".
+
+    @Test
+    fun `a marked match gets a reminder whatever its teams, like a favorite's match`() {
+        val reminders = remindersFor(listOf(event("m1"), event("m2")), emptyList(), now, markedMatchIds = setOf("m2"))
+        assertEquals(listOf("m2"), reminders.map { it.matchId })
+        assertEquals(remindersFor(listOf(event("m2")), favorites, now), reminders)
+    }
+
+    @Test
+    fun `a marked match qualifies only within the same window as a favorite's match`() {
+        val events = listOf(
+            event("far", start = now.plus(REMINDER_WINDOW).plusSeconds(1)),
+            event("gaveUp", start = now.minus(START_CHECK_GIVE_UP)),
+            event("done", state = MatchState.COMPLETED),
+        )
+        assertTrue(remindersFor(events, emptyList(), now, markedMatchIds = setOf("far", "gaveUp", "done")).isEmpty())
+    }
+
+    @Test
+    fun `a marked match in progress keeps its reminder, so a sync never cancels it before its check notifies`() {
+        val live = event("live", start = now.minus(Duration.ofMinutes(5)), state = MatchState.IN_PROGRESS)
+        assertEquals(listOf("live"), remindersFor(listOf(live), emptyList(), now, markedMatchIds = setOf("live")).map { it.matchId })
+        assertTrue(remindersFor(listOf(live), favorites, now).isEmpty())
+    }
+
+    @Test
+    fun `a marked reminder is still wanted with the bell off and no favorite, and not once unmarked`() {
+        val a = reminder("a")
+        assertTrue(a.isStillWanted(remindersEnabled = false, favoriteNames = emptyList(), markedMatchIds = setOf("a")))
+        assertFalse(a.isStillWanted(remindersEnabled = false, favoriteNames = emptyList(), markedMatchIds = setOf("b")))
+    }
+
+    @Test
+    fun `a mark expires once its match is completed or past the give up time without being live`() {
+        fun mark(id: String, start: Instant) =
+            com.example.lolsito.core.preferences.MarkedMatch(id, "lck", start, "GEN vs BLG", "LCK · Bo5")
+        val longAgo = now.minus(START_CHECK_GIVE_UP)
+        val marks = listOf(
+            mark("done", now.minus(Duration.ofHours(1))),
+            mark("live", longAgo),
+            mark("upcoming", now.plus(Duration.ofDays(5))),
+            mark("vanished", longAgo),
+            mark("vanishedRecently", now.minus(Duration.ofHours(1))),
+            mark("postponedLate", now.minus(Duration.ofHours(1))),
+            mark("delayedNow", longAgo),
+        )
+        val events = listOf(
+            event("done", start = now.minus(Duration.ofHours(1)), state = MatchState.COMPLETED),
+            event("live", start = longAgo, state = MatchState.IN_PROGRESS),
+            event("postponedLate", start = longAgo, state = MatchState.UNSTARTED),
+            event("delayedNow", start = now.plus(Duration.ofHours(1)), state = MatchState.UNSTARTED),
+        )
+        assertEquals(setOf("done", "vanished", "postponedLate"), expiredMarks(marks, events, now))
+    }
+
+    @Test
+    fun `marked matches add their leagues to the favorites' schedule filter`() {
+        assertEquals(
+            (listOf("lck", "lec") + InternationalLeagues.ids).distinct().sorted(),
+            reminderLeagueIds(listOf("lck"), markedLeagueIds = listOf("lec", "lck")),
+        )
+        assertEquals(listOf("lec"), reminderLeagueIds(emptyList(), markedLeagueIds = listOf("lec")))
+    }
 }

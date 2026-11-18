@@ -48,6 +48,8 @@ import com.example.lolsito.feature.match.ui.MatchDetailScreen
 import com.example.lolsito.feature.match.ui.MatchDetailViewModel
 import com.example.lolsito.feature.schedule.ui.ScheduleScreen
 import com.example.lolsito.feature.schedule.ui.ScheduleViewModel
+import com.example.lolsito.feature.settings.ui.SettingsScreen
+import com.example.lolsito.feature.settings.ui.SettingsViewModel
 import com.example.lolsito.feature.standings.ui.StandingsScreen
 import com.example.lolsito.feature.standings.ui.StandingsViewModel
 import com.example.lolsito.feature.teams.ui.TeamProfileScreen
@@ -60,6 +62,7 @@ object Routes {
     const val SCHEDULE = "schedule"
     const val STANDINGS = "standings"
     const val TEAMS = "teams"
+    const val SETTINGS = "settings"
     const val MATCH_ID_ARG = "matchId"
     const val MATCH = "match/{$MATCH_ID_ARG}"
 
@@ -221,7 +224,23 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                             navController.openTournamentsTab()
                         }
                     },
+                    onSettingsClick = { navController.navigateFrom(entry, Routes.SETTINGS) },
                 )
+            }
+            composable(Routes.SETTINGS) {
+                val vm: SettingsViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer {
+                            SettingsViewModel(
+                                preferences = container.userPreferences,
+                                reminderScheduler = container.reminderScheduler,
+                                reminderSync = container.reminderSyncTrigger,
+                                notifications = container.notificationAvailability,
+                            )
+                        }
+                    }
+                )
+                SettingsScreen(viewModel = vm, zoneId = container.zoneId(), onBack = { navController.navigateUp() })
             }
             composable(Routes.STANDINGS) { entry ->
                 val vm: StandingsViewModel = viewModel(
@@ -329,6 +348,7 @@ fun LolSitoApp(container: AppContainer, matchToOpen: String? = null, onMatchOpen
                                 scheduleRepository = container.scheduleRepository,
                                 leaguesRepository = container.leaguesRepository,
                                 zoneId = container.zoneId(),
+                                reminderSync = container.reminderSyncTrigger,
                             )
                         }
                     }

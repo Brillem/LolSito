@@ -229,6 +229,24 @@ class ScheduleViewModel(
         _uiState.update { it.copy(favoritesOnly = !it.favoritesOnly).withSections() }
     }
 
+    /**
+     * Reads the no-spoilers mode again, as the screen comes back (Settings changes it too); an unreadable or
+     * missing preference keeps the current mode. Nothing is reloaded: the mode only changes what is shown.
+     */
+    fun refreshNoSpoilers() {
+        if (!noSpoilersRestored) return // The first load reads it anyway.
+        viewModelScope.launch {
+            val stored = try {
+                preferences.getNoSpoilers()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            if (stored != null) _uiState.update { if (it.noSpoilers == stored) it else it.copy(noSpoilers = stored) }
+        }
+    }
+
     /** Reads the favorites again, as the screen comes back; an unreadable preference keeps the current ones. */
     fun refreshFavorites() {
         viewModelScope.launch { readFavorites() }

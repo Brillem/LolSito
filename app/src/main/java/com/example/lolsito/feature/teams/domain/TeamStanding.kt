@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.teams.domain
 
+import com.example.lolsito.core.model.ordinalLabel
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.Standings
 import com.example.lolsito.feature.standings.domain.StandingsRepository
@@ -17,18 +18,6 @@ fun findTeamRanking(standings: Standings, teamId: String, teamName: String): Ran
     val name = teamName.trim()
     return rankings.firstOrNull { it.team.id == teamId }
         ?: rankings.firstOrNull { it.team.name.trim().equals(name, ignoreCase = true) }
-}
-
-/** English ordinal: 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st... */
-fun ordinalLabel(n: Int): String {
-    val suffix = when {
-        n % 100 in 11..13 -> "th"
-        n % 10 == 1 -> "st"
-        n % 10 == 2 -> "nd"
-        n % 10 == 3 -> "rd"
-        else -> "th"
-    }
-    return "$n$suffix"
 }
 
 /**

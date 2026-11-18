@@ -7,7 +7,7 @@ import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
 import com.example.lolsito.feature.schedule.domain.isFavoriteIn
 import com.example.lolsito.feature.schedule.domain.mergeEvents
-import com.example.lolsito.feature.teams.domain.ordinalLabel
+import com.example.lolsito.core.model.ordinalLabel
 import java.time.LocalDate
 import java.time.ZoneId
 

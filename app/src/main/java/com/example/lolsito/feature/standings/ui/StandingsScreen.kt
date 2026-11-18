@@ -57,6 +57,7 @@ import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.ui.AppTopBar
 import com.example.lolsito.core.ui.ChevronDownIcon
 import com.example.lolsito.core.ui.DropdownPicker
 import com.example.lolsito.core.ui.GroupLabel
@@ -100,6 +101,8 @@ fun StandingsScreen(
     onMatchClick: (String) -> Unit,
     onTeamClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** Set when the tournament was opened on top of another screen: a top bar with a back arrow is shown. */
+    onBack: (() -> Unit)? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     // The mode is toggled in Schedule and favorites are starred in a team's profile: read both again whenever this tab comes back.
@@ -122,6 +125,7 @@ fun StandingsScreen(
         onSelectStageView = viewModel::selectStageView,
         onRetryMatches = viewModel::retryMatches,
         onSelectTeamFilter = viewModel::selectTeamFilter,
+        onBack = onBack,
     )
 }
 
@@ -143,8 +147,10 @@ fun StandingsContent(
     onSelectStageView: (StageView) -> Unit = {},
     onRetryMatches: () -> Unit = {},
     onSelectTeamFilter: (Team?) -> Unit = {},
+    onBack: (() -> Unit)? = null,
 ) {
     Column(modifier.fillMaxSize()) {
+        if (onBack != null) AppTopBar(state.selectedTournament?.label ?: "Tournament", onBack)
         Row(
             Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(Spacing.CardGap),

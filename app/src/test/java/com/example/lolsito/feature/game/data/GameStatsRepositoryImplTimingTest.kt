@@ -3,6 +3,7 @@ package com.example.lolsito.feature.game.data
 import com.example.lolsito.core.network.dto.LiveStatsWindowResponse
 import com.example.lolsito.feature.game.domain.GameStats
 import com.example.lolsito.testutil.FakeLiveStatsApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -29,7 +30,7 @@ class GameStatsRepositoryImplTimingTest {
 
     private val clock = Clock.fixed(Instant.parse("2026-11-11T16:11:15.900Z"), ZoneOffset.UTC)
     private val api = FakeLiveStatsApi()
-    private val repository = GameStatsRepositoryImpl(api, clock)
+    private val repository = GameStatsRepositoryImpl(api, clock, mapperDispatcher = Dispatchers.Unconfined)
 
     private fun hasDetails(stats: GameStats) =
         (stats.blueTeam.players + stats.redTeam.players).any { it.details != null }

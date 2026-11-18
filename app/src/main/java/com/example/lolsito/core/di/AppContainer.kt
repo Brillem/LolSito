@@ -24,6 +24,7 @@ import com.example.lolsito.feature.schedule.data.LiveMatchesRepositoryImpl
 import com.example.lolsito.feature.schedule.data.ScheduleRepositoryImpl
 import com.example.lolsito.feature.schedule.domain.LiveMatchesRepository
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
+import com.example.lolsito.feature.standings.data.CachedStandingsRepository
 import com.example.lolsito.feature.standings.data.StandingsRepositoryImpl
 import com.example.lolsito.feature.standings.domain.StandingsRepository
 import com.example.lolsito.feature.teams.data.TeamDirectoryRepositoryImpl
@@ -64,7 +65,8 @@ class AppContainer(private val context: Context) {
     val scheduleRepository: ScheduleRepository by lazy { ScheduleRepositoryImpl(api) }
     val liveMatchesRepository: LiveMatchesRepository by lazy { LiveMatchesRepositoryImpl(api) }
     val matchDetailRepository: MatchDetailRepository by lazy { MatchDetailRepositoryImpl(api) }
-    val standingsRepository: StandingsRepository by lazy { StandingsRepositoryImpl(api) }
+    /** One cached standings source shared by Standings, Teams and Schedule; pull to refresh skips the cache. */
+    val standingsRepository: StandingsRepository by lazy { CachedStandingsRepository(StandingsRepositoryImpl(api), clock()) }
     val teamsRepository: TeamsRepository by lazy { TeamsRepositoryImpl(api) }
     val teamDirectoryRepository: TeamDirectoryRepository by lazy { TeamDirectoryRepositoryImpl(api) }
     val teamLineupRepository: TeamLineupRepository by lazy { TeamLineupRepositoryImpl(matchDetailRepository, liveStatsApi) }
@@ -105,7 +107,7 @@ class AppContainer(private val context: Context) {
      */
     fun onAppForegrounded() {
         workManagerReminders.ensurePeriodicSync()
-        workManagerReminders.requestSync()
+        workManagerReminders.requestSyncIfIdle()
     }
 
     fun zoneId(): ZoneId = ZoneId.systemDefault()

@@ -23,7 +23,9 @@ import com.example.lolsito.testutil.FakeUserPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -71,7 +73,7 @@ class TeamsViewModelTest {
     private val directory = FakeDirectory()
 
     private fun viewModel() =
-        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, notifications, directory, defaultLeagueId = LCK)
+        TeamsViewModel(repository, leaguesRepository, preferences, clock, reminderScheduler, reminderSync, notifications, directory, defaultLeagueId = LCK, searchDispatcher = dispatcher)
 
     @Test
     fun `loads the leagues and the default league's current teams`() = runTest(dispatcher) {
@@ -133,7 +135,7 @@ class TeamsViewModelTest {
         val vm = viewModel()
         advanceUntilIdle()
 
-        assertEquals(LoadStatus.Error("offline"), vm.uiState.value.status)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.status)
         assertEquals(emptyList<TeamSummary>(), vm.uiState.value.teams)
 
         repository.error = null
@@ -525,6 +527,40 @@ class TeamsViewModelTest {
     }
 
     @Test
+    fun `results follow the query once typing pauses`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+
+        vm.onQueryChange("ge")
+        vm.onQueryChange("gen")
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(listOf("T1"), vm.uiState.value.searchResults.teams.map { it.code })
+
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(listOf("GEN"), vm.uiState.value.searchResults.teams.map { it.code })
+    }
+
+    @Test
+    fun `clearing the query clears the results at once, also with a search pending`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.onQueryChange("t1")
+        advanceUntilIdle()
+
+        vm.onQueryChange("gen")
+        vm.clearQuery()
+        assertTrue(vm.uiState.value.searchResults.isEmpty)
+
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.searchResults.isEmpty)
+        assertEquals("", vm.uiState.value.query)
+    }
+
+    @Test
     fun `a query shorter than two characters finds nothing`() = runTest(dispatcher) {
         val vm = viewModel()
         advanceUntilIdle()
@@ -545,7 +581,7 @@ class TeamsViewModelTest {
 
         vm.onQueryChange("t1")
         advanceUntilIdle()
-        assertEquals(LoadStatus.Error("offline"), vm.uiState.value.searchStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.searchStatus)
 
         directory.error = null
         vm.retrySearch()

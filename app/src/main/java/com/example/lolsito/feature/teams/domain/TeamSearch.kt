@@ -28,6 +28,9 @@ data class TeamSearchResults(
 /** Every team the API lists, fetched on first use and kept for the next queries. */
 interface TeamDirectoryRepository {
     suspend fun getAllTeams(): List<DirectoryTeam>
+
+    /** A [TeamSearchIndex] over [getAllTeams]; an implementation that keeps the list should keep this too. */
+    suspend fun getSearchIndex(): TeamSearchIndex = TeamSearchIndex(getAllTeams())
 }
 
 /** The shortest query (after trimming) that searches anything. */
@@ -55,71 +58,103 @@ const val MIN_SEARCHABLE_ROSTER = 5
  * A player with an id that is on several searchable teams (a main team and its academy) is listed once, under
  * the team whose home league comes first in [leagueOrder] (league names, matched trimmed and ignoring case; a
  * league not in it ranks last); ties keep the first team of [teams]. Players without an id are never merged.
+ *
+ * To search the same teams again and again, build a [TeamSearchIndex] once and call [TeamSearchIndex.search].
  */
 fun searchTeamsAndPlayers(
     teams: List<DirectoryTeam>,
     query: String,
     limit: Int = SEARCH_RESULT_LIMIT,
     leagueOrder: List<String> = emptyList(),
-): TeamSearchResults {
-    val needle = normalizeForSearch(query)
-    if (needle.length < MIN_SEARCH_LENGTH) return TeamSearchResults()
-    val searchable = teams.filter { it.active && it.homeLeagueName != null && it.players.size >= MIN_SEARCHABLE_ROSTER }
+): TeamSearchResults = TeamSearchIndex(teams).search(query, limit, leagueOrder)
 
-    val teamHits = searchable
-        .mapNotNull { team -> team.rank(needle)?.let { rank -> Triple(rank, normalizeForSearch(team.name), team) } }
-        .sortedWith(compareBy({ it.first }, { it.second }))
-        .take(limit)
-        .map { it.third }
+/**
+ * [teams] ready to be searched by the rules of [searchTeamsAndPlayers]: the searchable teams are picked and
+ * every name, code and league normalized once, when the index is built, so a query only compares strings. The
+ * players merged by league order are kept for the last order asked. Safe to use from several threads.
+ */
+class TeamSearchIndex(teams: List<DirectoryTeam>) {
 
-    val leagueRanks = leagueOrder.withIndex().reversed().associate { (i, name) -> normalizeForSearch(name) to i }
-    fun leagueRank(team: DirectoryTeam): Int = team.homeLeagueName?.let { leagueRanks[normalizeForSearch(it)] } ?: Int.MAX_VALUE
+    private class IndexedTeam(val team: DirectoryTeam, val name: String, val code: String, val league: String?)
 
-    val playerHits = searchable
-        .flatMap { team -> team.players.map { player -> PlayerHit(player, team) } }
-        .let { hits -> hits.keepBestTeamPerPlayer(::leagueRank) }
-        .mapNotNull { hit -> hit.player.rank(needle)?.let { rank -> Triple(rank, normalizeForSearch(hit.player.summonerName), hit) } }
-        .sortedWith(compareBy({ it.first }, { it.second }))
-        .take(limit)
-        .map { it.third }
+    private class IndexedPlayer(val hit: PlayerHit, val owner: IndexedTeam, val summoner: String, val realName: String)
 
-    return TeamSearchResults(teamHits, playerHits)
-}
+    private class MergedPlayers(val leagueOrder: List<String>, val players: List<IndexedPlayer>)
 
-/** One hit per player id, on the team [rankOf] puts first (earlier in the list wins a tie); the rest keep their order. */
-private fun List<PlayerHit>.keepBestTeamPerPlayer(rankOf: (DirectoryTeam) -> Int): List<PlayerHit> {
-    val best = HashMap<String, PlayerHit>()
-    for (hit in this) {
-        val id = hit.player.id?.takeIf { it.isNotBlank() } ?: continue
-        val kept = best[id]
-        if (kept == null || rankOf(hit.team) < rankOf(kept.team)) best[id] = hit
+    private val teams: List<IndexedTeam> = teams
+        .filter { it.active && it.homeLeagueName != null && it.players.size >= MIN_SEARCHABLE_ROSTER }
+        .map { IndexedTeam(it, normalizeForSearch(it.name), normalizeForSearch(it.code), it.homeLeagueName?.let(::normalizeForSearch)) }
+
+    private val players: List<IndexedPlayer> = this.teams.flatMap { team ->
+        team.team.players.map { player ->
+            IndexedPlayer(
+                PlayerHit(player, team.team),
+                team,
+                normalizeForSearch(player.summonerName),
+                normalizeForSearch(listOfNotNull(player.firstName, player.lastName).joinToString(" ")),
+            )
+        }
     }
-    return filter { hit ->
-        val id = hit.player.id?.takeIf { it.isNotBlank() } ?: return@filter true
-        best[id] === hit
-    }
-}
 
-private fun DirectoryTeam.rank(needle: String): Int? {
-    val name = normalizeForSearch(name)
-    val code = normalizeForSearch(code)
-    return when {
+    @Volatile
+    private var merged: MergedPlayers? = null
+
+    fun search(query: String, limit: Int = SEARCH_RESULT_LIMIT, leagueOrder: List<String> = emptyList()): TeamSearchResults {
+        val needle = normalizeForSearch(query)
+        if (needle.length < MIN_SEARCH_LENGTH) return TeamSearchResults()
+
+        val teamHits = teams
+            .mapNotNull { team -> team.rank(needle)?.let { rank -> Triple(rank, team.name, team.team) } }
+            .sortedWith(compareBy({ it.first }, { it.second }))
+            .take(limit)
+            .map { it.third }
+
+        val playerHits = mergedPlayers(leagueOrder)
+            .mapNotNull { player -> player.rank(needle)?.let { rank -> Triple(rank, player.summoner, player.hit) } }
+            .sortedWith(compareBy({ it.first }, { it.second }))
+            .take(limit)
+            .map { it.third }
+
+        return TeamSearchResults(teamHits, playerHits)
+    }
+
+    private fun mergedPlayers(leagueOrder: List<String>): List<IndexedPlayer> {
+        merged?.takeIf { it.leagueOrder == leagueOrder }?.let { return it.players }
+        val leagueRanks = leagueOrder.withIndex().reversed().associate { (i, name) -> normalizeForSearch(name) to i }
+        val kept = players.keepBestTeamPerPlayer { team -> team.league?.let { leagueRanks[it] } ?: Int.MAX_VALUE }
+        merged = MergedPlayers(leagueOrder.toList(), kept)
+        return kept
+    }
+
+    /** One entry per player id, on the team [rankOf] puts first (earlier in the list wins a tie); the rest keep their order. */
+    private fun List<IndexedPlayer>.keepBestTeamPerPlayer(rankOf: (IndexedTeam) -> Int): List<IndexedPlayer> {
+        val best = HashMap<String, IndexedPlayer>()
+        for (entry in this) {
+            val id = entry.hit.player.id?.takeIf { it.isNotBlank() } ?: continue
+            val kept = best[id]
+            if (kept == null || rankOf(entry.owner) < rankOf(kept.owner)) best[id] = entry
+        }
+        return filter { entry ->
+            val id = entry.hit.player.id?.takeIf { it.isNotBlank() } ?: return@filter true
+            best[id] === entry
+        }
+    }
+
+    private fun IndexedTeam.rank(needle: String): Int? = when {
         code == needle -> 0
         name.startsWith(needle) || code.startsWith(needle) -> 1
         name.contains(needle) || code.contains(needle) -> 2
         else -> null
     }
-}
 
-private fun Player.rank(needle: String): Int? {
-    val summoner = normalizeForSearch(summonerName)
-    if (summoner.isEmpty()) return null
-    val realName = normalizeForSearch(listOfNotNull(firstName, lastName).joinToString(" "))
-    return when {
-        summoner.startsWith(needle) -> 0
-        summoner.contains(needle) -> 1
-        realName.contains(needle) -> 2
-        else -> null
+    private fun IndexedPlayer.rank(needle: String): Int? {
+        if (summoner.isEmpty()) return null
+        return when {
+            summoner.startsWith(needle) -> 0
+            summoner.contains(needle) -> 1
+            realName.contains(needle) -> 2
+            else -> null
+        }
     }
 }
 

@@ -66,6 +66,21 @@ class GoldHistoryRepositoryTest {
     }
 
     @Test
+    fun `only the most recently used games keep their samples`() = runTest {
+        val bounded = GameStatsRepositoryImpl(api, Clock.fixed(end, ZoneOffset.UTC), maxCachedGames = 2)
+        bounded.getGoldHistory("g1", until = end)
+        bounded.getGoldHistory("g2", until = end)
+        bounded.getGoldHistory("g1", until = end) // g1 is now the most recent, so g3 pushes out g2.
+        bounded.getGoldHistory("g3", until = end)
+        api.requested.clear()
+
+        bounded.getGoldHistory("g1", until = end)
+        assertEquals(emptyList<String>(), api.requested)
+        bounded.getGoldHistory("g2", until = end)
+        assertEquals(5, api.requested.size)
+    }
+
+    @Test
     fun `the cache is per game`() = runTest {
         repository.getGoldHistory("g1", until = end)
         api.requested.clear()

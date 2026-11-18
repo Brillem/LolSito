@@ -222,4 +222,25 @@ class TeamSearchTest {
         assertEquals(listOf("Shared 1", "Shared 2", "Shared 3", "Shared 4", "Shared 5"), hits.map { it.player.summonerName })
         assertEquals(setOf("2"), hits.map { it.team.id }.toSet())
     }
+
+    @Test
+    fun `an index built once answers every query like a fresh search`() {
+        val teams = listOf(
+            team("1", "T1 Academy", "T1A", league = "LCK Challengers", players = listOf(faker(), player("Rékkles", "Martin", "Larsson"))),
+            team("2", "T1", "T1", league = "LCK", players = listOf(faker(), player("Keria"))),
+            team("3", "Café Team", "CAF", players = listOf(player("Kerian"))),
+            team("4", "Old", "OLD", active = false, players = listOf(player("Keriax"))),
+            team("5", "Short", "SHO", players = listOf(player("Kerio")), padRoster = false),
+        )
+        val index = TeamSearchIndex(teams)
+
+        for (order in listOf(emptyList(), listOf("LCK", "LCK Challengers"), listOf("LCK Challengers", "LCK"))) {
+            for (query in listOf("t1", "faker", "kéria", "rekkles", "cafe", "lee", "o", "  ", "sho", "old")) {
+                assertEquals("$query / $order", searchTeamsAndPlayers(teams, query, leagueOrder = order), index.search(query, leagueOrder = order))
+            }
+        }
+        assertEquals(listOf("1"), index.search("faker", leagueOrder = listOf("LCK Challengers", "LCK")).players.map { it.team.id })
+        assertEquals(listOf("2"), index.search("faker", leagueOrder = listOf("LCK", "LCK Challengers")).players.map { it.team.id })
+        assertEquals(1, index.search("t1", limit = 1).teams.size)
+    }
 }

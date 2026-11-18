@@ -288,7 +288,7 @@ class MatchDetailHistoryViewModelTest {
         schedule.pages[null] = page(fullHistory())
         val vm = viewModel()
         advanceUntilIdle()
-        assertEquals(MatchDetailUiState.Error("boom"), vm.uiState.value)
+        assertEquals(MatchDetailUiState.Error("No connection. Check your internet and try again."), vm.uiState.value)
         assertTrue(schedule.requests.isEmpty())
 
         repository.error = null

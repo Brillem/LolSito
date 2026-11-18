@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.teams.ui
 
+import com.example.lolsito.core.error.toUserMessage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
@@ -187,7 +188,7 @@ class TeamProfileViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoadingOlder = false, olderError = e.toMessage()) }
+                _uiState.update { it.copy(isLoadingOlder = false, olderError = e.toUserMessage()) }
             }
         }
     }
@@ -211,7 +212,7 @@ class TeamProfileViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(status = LoadStatus.Error(e.toMessage()), matchesStatus = LoadStatus.Empty) }
+                _uiState.update { it.copy(status = LoadStatus.Error(e.toUserMessage()), matchesStatus = LoadStatus.Empty) }
                 return@launch
             }
             if (profile == null) {
@@ -232,7 +233,7 @@ class TeamProfileViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(matchesStatus = LoadStatus.Error(e.toMessage())) }
+                _uiState.update { it.copy(matchesStatus = LoadStatus.Error(e.toUserMessage())) }
             }
         }
     }
@@ -347,6 +348,4 @@ class TeamProfileViewModel(
             )
         }
     }
-
-    private fun Exception.toMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Something went wrong"
 }

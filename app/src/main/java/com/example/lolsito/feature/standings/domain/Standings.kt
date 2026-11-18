@@ -76,6 +76,9 @@ interface StandingsRepository {
     /** Tournaments of a league, newest first (API order). */
     suspend fun getTournaments(leagueId: String): List<Tournament>
     suspend fun getStandings(tournamentId: String): Standings
+
+    /** The standings of [tournamentId] fresh from the source, past any cache (pull to refresh). */
+    suspend fun refreshStandings(tournamentId: String): Standings = getStandings(tournamentId)
 }
 
 /**

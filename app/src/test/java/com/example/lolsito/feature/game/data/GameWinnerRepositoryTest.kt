@@ -71,4 +71,21 @@ class GameWinnerRepositoryTest {
 
         assertNull(repository.getWinnerTeamId("g1"))
     }
+
+    @Test
+    fun `only the most recently used winners are kept`() = runTest {
+        val bounded = GameStatsRepositoryImpl(api, Clock.fixed(Instant.parse("2026-11-11T16:11:15Z"), ZoneOffset.UTC), maxCachedGames = 2)
+        api.window = { window("finished") }
+
+        bounded.getWinnerTeamId("g1")
+        bounded.getWinnerTeamId("g2")
+        bounded.getWinnerTeamId("g1") // g1 is now the most recent, so g3 pushes out g2.
+        bounded.getWinnerTeamId("g3")
+        assertEquals(3, api.windowStartingTimes.size)
+
+        bounded.getWinnerTeamId("g1")
+        assertEquals(3, api.windowStartingTimes.size)
+        bounded.getWinnerTeamId("g2")
+        assertEquals(4, api.windowStartingTimes.size)
+    }
 }

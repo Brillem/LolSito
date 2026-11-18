@@ -224,7 +224,7 @@ class StandingsViewModelTest {
         repository.tournamentsError = IOException("tournaments down")
         val vm = viewModel()
         advanceUntilIdle()
-        assertEquals(LoadStatus.Error("tournaments down"), vm.uiState.value.tournamentsStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.tournamentsStatus)
 
         repository.tournamentsError = null
         vm.retryTournaments()
@@ -242,7 +242,7 @@ class StandingsViewModelTest {
         advanceUntilIdle()
 
         val state = vm.uiState.value
-        assertEquals(LoadStatus.Error("leagues down"), state.leaguesStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), state.leaguesStatus)
         assertTrue(state.leagues.isEmpty())
         assertEquals("a neutral label while the leagues are unavailable", "League", state.selectedLeagueLabel)
         assertEquals(LoadStatus.Content, state.tournamentsStatus)
@@ -283,7 +283,7 @@ class StandingsViewModelTest {
         val failed = vm.uiState.value
         assertEquals(LoadStatus.Content, failed.leaguesStatus)
         assertEquals(2, failed.leagues.size)
-        assertEquals(LoadStatus.Error("tournaments down"), failed.tournamentsStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), failed.tournamentsStatus)
 
         repository.tournamentsError = null
         vm.retryTournaments()
@@ -303,7 +303,7 @@ class StandingsViewModelTest {
         advanceUntilIdle()
         val failed = vm.uiState.value
         assertEquals(LoadStatus.Content, failed.tournamentsStatus)
-        assertEquals(LoadStatus.Error("standings down"), failed.standingsStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), failed.standingsStatus)
         assertEquals(LCK_SUMMER, failed.selectedTournamentId)
 
         repository.standingsError = null
@@ -508,7 +508,7 @@ class StandingsViewModelTest {
 
         assertEquals(WORLDS_2025, vm.uiState.value.selectedTournamentId)
         assertEquals(LoadStatus.Content, vm.uiState.value.standingsStatus)
-        assertEquals(LoadStatus.Error("leagues down"), vm.uiState.value.leaguesStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.leaguesStatus)
         assertEquals(listOf("t:$WORLDS", "s:$WORLDS_2025"), repository.requests)
     }
 
@@ -731,6 +731,18 @@ class StandingsViewModelTest {
     }
 
     @Test
+    fun `refresh asks for fresh standings past any cache`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), repository.refreshes)
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals(listOf(LCK_SUMMER), repository.refreshes)
+    }
+
+    @Test
     fun `refresh keeps the rows on screen while it loads`() = runTest(dispatcher) {
         val vm = viewModel()
         advanceUntilIdle()
@@ -880,6 +892,7 @@ class StandingsViewModelTest {
         val tournamentGates = mutableMapOf<String, CompletableDeferred<Unit>>()
         val standingsGates = mutableMapOf<String, CompletableDeferred<Unit>>()
         val requests = mutableListOf<String>()
+        val refreshes = mutableListOf<String>()
         var tournamentsError: Throwable? = null
         var standingsError: Throwable? = null
 
@@ -895,6 +908,11 @@ class StandingsViewModelTest {
             standingsError?.let { throw it }
             requests += "s:$tournamentId"
             return standings[tournamentId] ?: error("No standings for $tournamentId")
+        }
+
+        override suspend fun refreshStandings(tournamentId: String): Standings {
+            refreshes += tournamentId
+            return getStandings(tournamentId)
         }
     }
 

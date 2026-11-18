@@ -135,7 +135,7 @@ class TeamsViewModelTest {
         val vm = viewModel()
         advanceUntilIdle()
 
-        assertEquals(LoadStatus.Error("offline"), vm.uiState.value.status)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.status)
         assertEquals(emptyList<TeamSummary>(), vm.uiState.value.teams)
 
         repository.error = null
@@ -581,7 +581,7 @@ class TeamsViewModelTest {
 
         vm.onQueryChange("t1")
         advanceUntilIdle()
-        assertEquals(LoadStatus.Error("offline"), vm.uiState.value.searchStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.searchStatus)
 
         directory.error = null
         vm.retrySearch()

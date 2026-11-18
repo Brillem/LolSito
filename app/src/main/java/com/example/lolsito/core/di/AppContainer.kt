@@ -107,7 +107,7 @@ class AppContainer(private val context: Context) {
      */
     fun onAppForegrounded() {
         workManagerReminders.ensurePeriodicSync()
-        workManagerReminders.requestSync()
+        workManagerReminders.requestSyncIfIdle()
     }
 
     fun zoneId(): ZoneId = ZoneId.systemDefault()

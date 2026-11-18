@@ -2,6 +2,7 @@ package com.example.lolsito.feature.teams.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.lolsito.core.error.toUserMessage
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.preferences.FavoriteTeam
@@ -169,7 +170,7 @@ class TeamsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(searchStatus = LoadStatus.Error(e.toMessage())) }
+                _uiState.update { it.copy(searchStatus = LoadStatus.Error(e.toUserMessage())) }
             }
         }
     }
@@ -268,7 +269,7 @@ class TeamsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(leaguesStatus = LoadStatus.Error(e.toMessage())) }
+                _uiState.update { it.copy(leaguesStatus = LoadStatus.Error(e.toUserMessage())) }
             }
         }
     }
@@ -287,7 +288,7 @@ class TeamsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(status = LoadStatus.Error(e.toMessage())) }
+                _uiState.update { it.copy(status = LoadStatus.Error(e.toUserMessage())) }
             }
         }
     }
@@ -317,8 +318,6 @@ class TeamsViewModel(
             // Ignored, like the favorites star.
         }
     }
-
-    private fun Exception.toMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Something went wrong"
 
     companion object {
         const val DEFAULT_LEAGUE_ID = "98767991310872058" // LCK

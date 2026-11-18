@@ -61,13 +61,18 @@ class CachedStandingsRepositoryTest {
     }
 
     @Test
-    fun `standings of a tournament that ended before today are kept for good`() = runTest {
+    fun `standings of a tournament that ended before today are kept for an hour`() = runTest {
         repository.getTournaments(LEAGUE)
         repository.getStandings(FINISHED)
-        clock.advance(Duration.ofDays(30))
+        clock.advance(Duration.ofMinutes(59))
         repository.getStandings(FINISHED)
 
         assertEquals(listOf("t:$LEAGUE", "s:$FINISHED"), source.requests)
+
+        clock.advance(Duration.ofMinutes(2))
+        repository.getStandings(FINISHED)
+
+        assertEquals(listOf("t:$LEAGUE", "s:$FINISHED", "s:$FINISHED"), source.requests)
     }
 
     @Test

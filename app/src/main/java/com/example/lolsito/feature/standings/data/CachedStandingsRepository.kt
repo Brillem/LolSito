@@ -14,6 +14,12 @@ import java.util.concurrent.ConcurrentHashMap
 /** How long a league's tournament list is kept. */
 val TOURNAMENTS_TTL: Duration = Duration.ofHours(1)
 
+/**
+ * How long the standings of a finished tournament are kept: they no longer change, but a copy served offline
+ * may be stale, so it is not kept for the app's whole lifetime.
+ */
+val FINISHED_STANDINGS_TTL: Duration = Duration.ofHours(1)
+
 /** How long the standings of a tournament that may still be played are kept. */
 val LIVE_STANDINGS_TTL: Duration = Duration.ofMinutes(2)
 
@@ -21,7 +27,8 @@ val LIVE_STANDINGS_TTL: Duration = Duration.ofMinutes(2)
  * Keeps [source]'s answers in memory for the app's lifetime, following the pattern of
  * [com.example.lolsito.core.leagues.CachedLeaguesRepository]:
  * - a league's tournaments for [TOURNAMENTS_TTL];
- * - a tournament's standings for good once the tournament is finished, for [LIVE_STANDINGS_TTL] otherwise.
+ * - a tournament's standings for [FINISHED_STANDINGS_TTL] once the tournament is finished, for
+ *   [LIVE_STANDINGS_TTL] otherwise.
  *   A tournament is finished when a tournament list fetched through this cache gave it an end date before
  *   today ([clock]); one never seen in a list, or without an end date, counts as not finished.
  *
@@ -34,8 +41,8 @@ class CachedStandingsRepository(
     private val clock: Clock,
 ) : StandingsRepository {
 
-    private class Entry<T>(val value: T, val expiresAt: Instant?) {
-        fun isFresh(now: Instant): Boolean = expiresAt == null || now.isBefore(expiresAt)
+    private class Entry<T>(val value: T, val expiresAt: Instant) {
+        fun isFresh(now: Instant): Boolean = now.isBefore(expiresAt)
     }
 
     private val tournaments = ConcurrentHashMap<String, Entry<List<Tournament>>>()
@@ -62,7 +69,7 @@ class CachedStandingsRepository(
     private fun standingsEntry(value: Standings, tournamentId: String): Entry<Standings> {
         val end = endDates[tournamentId]
         val finished = end != null && end.isBefore(LocalDate.now(clock))
-        return Entry(value, if (finished) null else clock.instant().plus(LIVE_STANDINGS_TTL))
+        return Entry(value, clock.instant().plus(if (finished) FINISHED_STANDINGS_TTL else LIVE_STANDINGS_TTL))
     }
 
     private suspend fun <T> cachedOrFetch(

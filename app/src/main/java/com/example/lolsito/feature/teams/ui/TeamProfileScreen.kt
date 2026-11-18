@@ -132,6 +132,7 @@ fun TeamProfileContent(
                         NextMatchCard(next, profile.name, state.zoneId, onClick = next.matchId?.let { id -> { onMatchClick(id) } })
                     }
                 }
+                rosterRows(profile, state.lineup)
                 if (state.form.isNotEmpty()) {
                     item(key = "form-title") { SectionTitle("Recent form") }
                     item(key = "form") {
@@ -146,7 +147,6 @@ fun TeamProfileContent(
                         TournamentRow(tournament, onClick = { onTournamentClick(tournament.leagueId, tournament.tournamentId) })
                     }
                 }
-                rosterRows(profile, state.lineup)
                 matchRows(state, onRetry, onLoadOlder, onMatchClick)
             }
         }
@@ -316,27 +316,29 @@ private fun NextMatchCard(event: ScheduleEvent, teamName: String, zoneId: ZoneId
     }
 }
 
+/**
+ * The roster, each player with their role: the lineup of the last game played first when it is known, then the
+ * substitutes; otherwise every player in role order.
+ */
 private fun LazyListScope.rosterRows(profile: TeamProfile, lineup: RosterSplit?) {
+    item(key = "roster") { SectionTitle("Roster") }
     if (lineup != null) {
-        item(key = "starters") { SectionTitle("Starters") }
-        item(key = "starters-caption") { InfoText("Lineup of the last game played") }
-        itemsIndexed(lineup.starters, key = { index, _ -> "starter:$index" }) { _, player -> PlayerRow(player) }
-        item(key = "roster") { SectionTitle("Rest of the roster") }
-        roleGroups(lineup.rest)
+        playerRows("starter", lineup.starters)
+        val substitutes = lineup.rest.flatMap { it.players }
+        if (substitutes.isNotEmpty()) {
+            item(key = "substitutes") { GroupLabel("Substitutes") }
+            playerRows("substitute", substitutes)
+        }
         return
     }
-    item(key = "roster") { SectionTitle("Roster") }
     if (profile.roster.isEmpty()) {
         item(key = "roster-empty") { InfoText("No players listed") }
     }
-    roleGroups(profile.roster)
+    playerRows("player", profile.roster.flatMap { it.players })
 }
 
-private fun LazyListScope.roleGroups(groups: List<RoleGroup>) {
-    groups.forEach { group ->
-        item(key = "role:${group.role}") { GroupLabel(group.role.label) }
-        itemsIndexed(group.players, key = { index, _ -> "player:${group.role}:$index" }) { _, player -> PlayerRow(player) }
-    }
+private fun LazyListScope.playerRows(keyPrefix: String, players: List<Player>) {
+    itemsIndexed(players, key = { index, _ -> "$keyPrefix:$index" }) { _, player -> PlayerRow(player) }
 }
 
 private fun LazyListScope.matchRows(
@@ -395,7 +397,7 @@ private fun LazyListScope.dayRows(
     }
 }
 
-/** The card of one player: photo, summoner name and, when known, real name. */
+/** The card of one player: photo, summoner name and, when known, real name; their role on the right. */
 @Composable
 private fun PlayerRow(player: Player) {
     AppCard(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = Spacing.CardGap / 2)) {
@@ -408,6 +410,10 @@ private fun PlayerRow(player: Player) {
                 if (realName.isNotEmpty()) {
                     Text(realName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+            if (player.role != PlayerRole.OTHER) {
+                Spacer(Modifier.width(12.dp))
+                Text(player.role.label, style = LabelText.Number, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

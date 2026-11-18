@@ -250,11 +250,11 @@ fun PickerSheet(
 }
 
 /**
- * One row of a [PickerSheet]: the optional picture at [imageUrl], the [label] and, when [selected], the
- * accent color, a tinted background and a check at the end.
+ * One row of a [PickerSheet]: the optional picture at [imageUrl], the [label] followed by the optional [badge]
+ * (e.g. a favorite star) and, when [selected], the accent color, a tinted background and a check at the end.
  */
 @Composable
-fun PickerRow(label: String, imageUrl: String?, selected: Boolean, onClick: () -> Unit) {
+fun PickerRow(label: String, imageUrl: String?, selected: Boolean, onClick: () -> Unit, badge: (@Composable () -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -268,14 +268,20 @@ fun PickerRow(label: String, imageUrl: String?, selected: Boolean, onClick: () -
             TeamLogo(imageUrl, contentDescription = null, size = 28.dp)
             Spacer(Modifier.width(12.dp))
         }
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (badge != null) {
+                Spacer(Modifier.width(6.dp))
+                badge()
+            }
+        }
         if (selected) {
             Spacer(Modifier.width(8.dp))
             Icon(

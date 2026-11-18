@@ -512,19 +512,23 @@ private fun UpcomingTournamentRow(tournament: UpcomingTournament, zoneId: ZoneId
     }
 }
 
+/**
+ * Each day as a sticky [DayHeader] over its [EventRow]s. [isLive] decides the LIVE badge: by default no row is
+ * live, since Schedule lists live matches in their own section whatever their state says.
+ */
 @OptIn(ExperimentalFoundationApi::class)
-private fun LazyListScope.dayRows(
+internal fun LazyListScope.dayRows(
     days: List<ScheduleDay>,
     zoneId: ZoneId,
     noSpoilers: Boolean,
     favoriteNames: List<String>,
     onMatchClick: (String) -> Unit,
+    isLive: (ScheduleEvent) -> Boolean = { false },
 ) {
     days.forEach { day ->
         stickyHeader(key = day.headerKey) { DayHeader(day.date) }
         itemsIndexed(day.events, key = { index, _ -> day.keys[index] }) { _, event ->
-            // Live matches have their own section, so a row here is never live, whatever its state says.
-            EventRow(event, zoneId, isLive = false, noSpoilers = noSpoilers, favoriteNames = favoriteNames, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
+            EventRow(event, zoneId, isLive = isLive(event), noSpoilers = noSpoilers, favoriteNames = favoriteNames, onClick = event.matchId?.let { id -> { onMatchClick(id) } })
         }
     }
 }

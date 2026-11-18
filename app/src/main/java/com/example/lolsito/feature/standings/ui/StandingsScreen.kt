@@ -15,15 +15,31 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +57,7 @@ import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchOutcome
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.ui.ChevronDownIcon
 import com.example.lolsito.core.ui.DropdownPicker
 import com.example.lolsito.core.ui.GroupLabel
 import com.example.lolsito.core.ui.InfoText
@@ -49,6 +66,8 @@ import com.example.lolsito.core.ui.LiveBadge
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LoadStatusView
 import com.example.lolsito.core.ui.MatchCard
+import com.example.lolsito.core.ui.PickerRow
+import com.example.lolsito.core.ui.PickerSheet
 import com.example.lolsito.core.ui.SectionTitle
 import com.example.lolsito.core.ui.Shapes
 import com.example.lolsito.core.ui.SkeletonBlock
@@ -57,6 +76,12 @@ import com.example.lolsito.core.ui.Spacing
 import com.example.lolsito.core.ui.TeamLogo
 import com.example.lolsito.feature.schedule.ui.StarIcon
 import com.example.lolsito.feature.schedule.ui.TeamCell
+import com.example.lolsito.feature.schedule.ui.dayRows
+import com.example.lolsito.feature.standings.domain.StageTab
+import com.example.lolsito.feature.standings.domain.TeamOption
+import com.example.lolsito.feature.standings.domain.identity
+import com.example.lolsito.feature.standings.domain.stageSelectorFitsSegments
+import com.example.lolsito.feature.standings.domain.stageTabs
 import com.example.lolsito.feature.standings.domain.Ranking
 import com.example.lolsito.feature.standings.domain.SectionMatch
 import com.example.lolsito.feature.standings.domain.Standings
@@ -65,6 +90,7 @@ import com.example.lolsito.feature.standings.domain.StandingsStage
 import com.example.lolsito.feature.standings.domain.Tournament
 import com.example.lolsito.ui.theme.LabelText
 import com.example.lolsito.ui.theme.LolSitoTheme
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 /** Container: wires the ViewModel to the stateless [StandingsContent]. */
@@ -92,6 +118,10 @@ fun StandingsScreen(
         onTeamClick = onTeamClick,
         modifier = modifier,
         onRefresh = viewModel::refresh,
+        onSelectStage = viewModel::selectStage,
+        onSelectStageView = viewModel::selectStageView,
+        onRetryMatches = viewModel::retryMatches,
+        onSelectTeamFilter = viewModel::selectTeamFilter,
     )
 }
 
@@ -109,6 +139,10 @@ fun StandingsContent(
     modifier: Modifier = Modifier,
     /** Pull to refresh on the standings list. */
     onRefresh: () -> Unit = {},
+    onSelectStage: (String) -> Unit = {},
+    onSelectStageView: (StageView) -> Unit = {},
+    onRetryMatches: () -> Unit = {},
+    onSelectTeamFilter: (Team?) -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         Row(
@@ -155,14 +189,25 @@ fun StandingsContent(
                 onRetryStandings,
                 loading = { StandingsSkeleton() },
             ) {
-                PullToRefreshBox(isRefreshing = state.isRefreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
-                    StandingsList(
-                        state.rows,
-                        onMatchClick,
-                        onTeamClick,
-                        noSpoilers = state.noSpoilers,
-                        favoriteNames = state.favoriteNames,
-                    )
+                val showsSelector = state.stageTabs.size > 1
+                Column(Modifier.fillMaxSize()) {
+                    if (showsSelector) StageSelector(state.stageTabs, state.selectedStageKey, onSelectStage)
+                    if (state.canShowMatches) StageViewToggle(state.stageView, onSelectStageView)
+                    PullToRefreshBox(isRefreshing = state.isRefreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+                        if (state.canShowMatches && state.stageView == StageView.MATCHES) {
+                            StageMatchesList(state, onMatchClick, onSelectTeamFilter, onRetryMatches)
+                        } else {
+                            StandingsList(
+                                state.rows,
+                                onMatchClick,
+                                onTeamClick,
+                                noSpoilers = state.noSpoilers,
+                                favoriteNames = state.favoriteNames,
+                                // The selector already names the stage.
+                                showStageHeaders = !showsSelector,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -193,9 +238,11 @@ fun StandingsList(
     noSpoilers: Boolean = false,
     /** Names of the starred teams: their table rows and match cards show a star. */
     favoriteNames: List<String> = emptyList(),
+    showStageHeaders: Boolean = true,
 ) {
+    val shown = if (showStageHeaders) rows else rows.filterNot { it is StandingsRow.StageHeader }
     LazyColumn(modifier.fillMaxSize()) {
-        itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
+        itemsIndexed(shown, key = { _, row -> row.key }) { index, row ->
             when (row) {
                 is StandingsRow.StageHeader -> SectionTitle(row.name)
                 is StandingsRow.SectionHeader -> GroupLabel(row.name, color = MaterialTheme.colorScheme.inversePrimary)
@@ -205,7 +252,7 @@ fun StandingsList(
                     onTeamClick,
                     favorite = row.isFavorite(favoriteNames),
                     // The table ends where the next row is not another ranking.
-                    last = rows.getOrNull(index + 1) !is StandingsRow.RankingRow,
+                    last = shown.getOrNull(index + 1) !is StandingsRow.RankingRow,
                 )
                 is StandingsRow.EmptySection -> InfoText("No standings for this section yet")
                 is StandingsRow.MatchRow -> SectionMatchRow(
@@ -216,6 +263,148 @@ fun StandingsList(
                 )
                 is StandingsRow.BracketRow -> BracketView(row, onMatchClick, noSpoilers = noSpoilers, favoriteNames = favoriteNames)
                 is StandingsRow.SwissRow -> SwissView(row, onMatchClick, noSpoilers = noSpoilers, favoriteNames = favoriteNames)
+            }
+        }
+    }
+}
+
+/**
+ * One option per stage, named as the API names it: segmented buttons, styled like the Items/Stats toggle of a
+ * game, when the names fit them ([stageSelectorFitsSegments]), otherwise a row of chips that scrolls sideways,
+ * so no name is ever cut.
+ */
+@Composable
+private fun StageSelector(tabs: List<StageTab>, selectedKey: String?, onSelect: (String) -> Unit) {
+    if (stageSelectorFitsSegments(tabs.map { it.name })) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
+            tabs.forEachIndexed { index, tab ->
+                SegmentedButton(
+                    selected = tab.key == selectedKey,
+                    onClick = { onSelect(tab.key) },
+                    shape = SegmentedButtonDefaults.itemShape(index, tabs.size),
+                    label = { Text(tab.name, maxLines = 1, softWrap = false) },
+                )
+            }
+        }
+    } else {
+        val accent = MaterialTheme.colorScheme.primary
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.Screen, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            tabs.forEach { tab ->
+                val selected = tab.key == selectedKey
+                FilterChip(
+                    selected = selected,
+                    onClick = { onSelect(tab.key) },
+                    label = { Text(tab.name, maxLines = 1, softWrap = false) },
+                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selected, selectedBorderColor = accent),
+                )
+            }
+        }
+    }
+}
+
+/** Table | Matches of a ranked stage, the same segmented buttons as the Items/Stats toggle of a game. */
+@Composable
+private fun StageViewToggle(view: StageView, onViewChange: (StageView) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
+        StageView.entries.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = option == view,
+                onClick = { onViewChange(option) },
+                shape = SegmentedButtonDefaults.itemShape(index, StageView.entries.size),
+                label = { Text(option.label) },
+            )
+        }
+    }
+}
+
+/**
+ * The matches of a ranked stage by day, with Schedule's cards: tapping one opens it, no-spoilers and favorite
+ * stars apply as in Schedule, and a match being played shows LIVE. Above them, the team filter chip and the
+ * chosen team's place and record in the stage.
+ */
+@Composable
+private fun StageMatchesList(
+    state: StandingsUiState,
+    onMatchClick: (String) -> Unit,
+    onSelectTeamFilter: (Team?) -> Unit,
+    onRetry: () -> Unit,
+) {
+    LoadStatusView(state.matchesStatus, "No matches for this stage", onRetry) {
+        var sheetOpen by remember { mutableStateOf(false) }
+        LazyColumn(Modifier.fillMaxSize()) {
+            item(key = "team-filter") {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TeamFilterChip(state.teamFilter, onClick = { sheetOpen = true })
+                    state.teamFilterStanding?.let { line ->
+                        Spacer(Modifier.width(12.dp))
+                        Text(line, style = LabelText.Number, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
+                }
+            }
+            val filter = state.teamFilter
+            if (filter != null && state.matchDays.isEmpty()) {
+                item(key = "team-filter-empty") { InfoText("No matches for ${filter.code} in this stage") }
+            }
+            dayRows(
+                state.matchDays,
+                state.zoneId,
+                state.noSpoilers,
+                state.favoriteNames,
+                onMatchClick,
+                isLive = { it.state == MatchState.IN_PROGRESS },
+            )
+        }
+        if (sheetOpen) {
+            TeamFilterSheet(state.teamOptions, state.teamFilter, onSelectTeamFilter, onDismiss = { sheetOpen = false })
+        }
+    }
+}
+
+/** "All teams ▾", or the chosen team's logo and code. */
+@Composable
+private fun TeamFilterChip(team: Team?, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    FilterChip(
+        selected = team != null,
+        onClick = onClick,
+        label = { Text(team?.code ?: "All teams", maxLines = 1, softWrap = false) },
+        // Logos are not tinted: they are often white on transparent, which reads on the black chip.
+        leadingIcon = team?.let { { TeamLogo(it.imageUrl, contentDescription = null, size = 18.dp) } },
+        trailingIcon = { Icon(ChevronDownIcon, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) },
+        border = FilterChipDefaults.filterChipBorder(enabled = true, selected = team != null, selectedBorderColor = accent),
+    )
+}
+
+/** "All teams" and the stage's teams (favorites first, starred); picking one closes the sheet. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TeamFilterSheet(options: List<TeamOption>, selected: Team?, onSelect: (Team?) -> Unit, onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState()
+    val scope = rememberCoroutineScope()
+    fun pick(team: Team?) {
+        onSelect(team)
+        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+    }
+    PickerSheet(title = "Team", onDismiss = onDismiss, sheetState = sheetState) {
+        LazyColumn(contentPadding = WindowInsets.navigationBars.asPaddingValues()) {
+            item(key = "all-teams") { PickerRow("All teams", imageUrl = null, selected = selected == null, onClick = { pick(null) }) }
+            items(options, key = { "team:${it.team.identity}" }) { option ->
+                PickerRow(
+                    label = option.team.name,
+                    imageUrl = option.team.imageUrl,
+                    selected = selected?.identity == option.team.identity,
+                    onClick = { pick(option.team) },
+                    badge = if (option.favorite) ({ FavoriteStar() }) else null,
+                )
             }
         }
     }
@@ -412,7 +601,10 @@ private fun StandingsContentPreview() {
                 tournaments = listOf(Tournament("t", "lck_split_3_2026", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 1))),
                 selectedTournamentId = "t",
                 standingsStatus = LoadStatus.Content,
-                rows = buildStandingsRows(previewStandings),
+                rows = buildStandingsRows(Standings(previewStandings.stages.take(1))),
+                stageTabs = stageTabs(previewStandings),
+                selectedStageKey = stageTabs(previewStandings).first().key,
+                canShowMatches = true,
             ),
             onSelectLeague = {}, onSelectTournament = {}, onRetryLeagues = {}, onRetryTournaments = {}, onRetryStandings = {}, onMatchClick = {}, onTeamClick = {},
         )

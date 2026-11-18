@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -247,7 +248,7 @@ fun StandingsList(
     showStageHeaders: Boolean = true,
 ) {
     val shown = if (showStageHeaders) rows else rows.filterNot { it is StandingsRow.StageHeader }
-    LazyColumn(modifier.fillMaxSize()) {
+    LazyColumn(modifier.fillMaxSize(), contentPadding = ListEndPadding) {
         itemsIndexed(shown, key = { _, row -> row.key }) { index, row ->
             when (row) {
                 is StandingsRow.StageHeader -> SectionTitle(row.name)
@@ -343,7 +344,7 @@ private fun StageMatchesList(
 ) {
     LoadStatusView(state.matchesStatus, "No matches for this stage", onRetry) {
         var sheetOpen by remember { mutableStateOf(false) }
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = ListEndPadding) {
             item(key = "team-filter") {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen),
@@ -651,3 +652,6 @@ private fun StandingsLeaguesErrorPreview() {
         )
     }
 }
+
+/** Space after the last card of a list, so it does not run into the bottom bar. */
+private val ListEndPadding = PaddingValues(bottom = Spacing.Screen)

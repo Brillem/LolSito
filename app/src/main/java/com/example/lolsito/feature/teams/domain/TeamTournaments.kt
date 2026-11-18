@@ -74,9 +74,11 @@ fun participated(standings: Standings, teamId: String, teamName: String): Boolea
  * How far the team got in [tournament], from its [standings] and as of [today]; null when it cannot be said.
  *
  * 1. A tournament being played ([isOngoing]) is [RESULT_IN_PROGRESS].
- * 2. When the last stage is an elimination bracket ending in a final that is decided and played by the team:
- *    [RESULT_CHAMPION] for the winner, [RESULT_FINALIST] for the loser. A final not played yet, or without a
- *    known winner, claims nothing and the next rule applies.
+ * 2. The tournament's final decides when the team played it: [RESULT_CHAMPION] for the winner, [RESULT_FINALIST]
+ *    for the loser. It is the final of the latest elimination bracket whose finalists play in no later stage, so
+ *    a qualifier for other teams after the Playoffs (LPL's "Regional Qualifier") does not hide it, and a play-in
+ *    final whose winner moves on is not it. A final not played yet, or without a known winner, claims nothing
+ *    and the next rule applies.
  * 3. Otherwise the last stage the team appears in decides. A ranked table gives the place ("3rd", the stage name
  *    when the API sent no ordinal). A bracket or Swiss stage that is not the last one gives its name ("Play-Ins",
  *    "Swiss"); in the last stage it is the round of the team's last match ("Semifinals"). When that round is only a
@@ -94,7 +96,9 @@ fun tournamentResult(
     val matcher = TeamMatcher(standings, teamId, teamName)
     val stages = standings.stages.filter { it.sections.isNotEmpty() }
     val lastStage = stages.lastOrNull() ?: return null
-    finalResult(lastStage, matcher)?.let { return it }
+    for (index in stages.indices.reversed()) {
+        finalResult(stages[index], stages.subList(index + 1, stages.size), matcher)?.let { return it }
+    }
     for (stage in stages.asReversed()) {
         val ranking = stage.sections.flatMap { it.rankings }.firstOrNull { matcher.matches(it.team) }
         if (ranking != null) return ranking.ordinal?.let { ordinalLabel(it) } ?: stage.name.takeIf { it.isNotBlank() }
@@ -118,9 +122,10 @@ private val FINAL_CELL = Regex("(^|\\W)finals?$", RegexOption.IGNORE_CASE)
 /**
  * [RESULT_CHAMPION] or [RESULT_FINALIST] when [stage] is an elimination bracket whose final - the only match of
  * the last cell of its last column, named like a final and feeding no other match - is decided and played by the
- * team; null otherwise. A double elimination ends the same way: both bracket finals feed the grand final.
+ * team, and neither finalist plays in [laterStages]; null otherwise. A double elimination ends the same way: both
+ * bracket finals feed the grand final.
  */
-private fun finalResult(stage: StandingsStage, matcher: TeamMatcher): String? {
+private fun finalResult(stage: StandingsStage, laterStages: List<StandingsStage>, matcher: TeamMatcher): String? {
     if (!stage.isElimination) return null
     val section = stage.sections.lastOrNull { it.columns.isNotEmpty() } ?: return null
     val cell = section.columns.lastOrNull { it.cells.isNotEmpty() }?.cells?.last() ?: return null
@@ -128,6 +133,10 @@ private fun finalResult(stage: StandingsStage, matcher: TeamMatcher): String? {
     val final = cell.matches.singleOrNull() ?: return null
     if (section.winnerLinks.any { it.fromMatchId == final.match.id }) return null
     if (!matcher.plays(final)) return null
+    if (laterStages.isNotEmpty()) {
+        val later = Standings(laterStages)
+        if (final.match.teams.any { TeamMatcher(later, it.id.orEmpty(), it.name).isPresent }) return null
+    }
     val winner = final.decidedWinner() ?: return null
     return if (matcher.matches(winner)) RESULT_CHAMPION else RESULT_FINALIST
 }

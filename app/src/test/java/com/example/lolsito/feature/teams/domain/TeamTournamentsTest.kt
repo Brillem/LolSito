@@ -262,6 +262,35 @@ class TeamTournamentsTest {
         assertEquals("Semifinals", result(standings, name = "T1", id = "t1"))
     }
 
+    /** LPL Split 3 2026: a qualifier stage for other teams comes after the Playoffs, whose final is the real one. */
+    private val lplSplit3 = Standings(
+        listOf(
+            table("Group Stage", ranking("BLG", 1), ranking("AL", 2), ranking("IG", 3), ranking("NIP", 4)),
+            bracket("Playoffs Play-in", listOf(listOf(cell("Finals", match("pi1", "EDG", "NIP", firstWins = false))))),
+            bracket(
+                "Playoffs",
+                listOf(
+                    listOf(cell("Upper Bracket - Semifinals", match("ub", "BLG", "NIP"))),
+                    listOf(cell("Finals", match("f", "AL", "BLG"))),
+                ),
+            ),
+            bracket("Regional Qualifier", listOf(listOf(cell("Round 1", match("rq", "IG", "TES"))))),
+        ),
+    )
+
+    @Test
+    fun `a final followed by a stage neither finalist plays in still decides champion and finalist`() {
+        assertEquals("Champion", result(lplSplit3, name = "AL", id = "al"))
+        assertEquals("Finalist", result(lplSplit3, name = "BLG", id = "blg"))
+    }
+
+    @Test
+    fun `a final whose winner plays a later stage is not the tournament's final`() {
+        // EDG lost the play-in final; NIP won it and went on to the Playoffs.
+        assertEquals("Playoffs Play-in", result(lplSplit3, name = "EDG", id = "edg"))
+        assertEquals("Playoffs", result(lplSplit3, name = "NIP", id = "nip"))
+    }
+
     @Test
     fun `a Swiss stage as the last stage has no final and gives no label`() {
         val swiss = bracket(

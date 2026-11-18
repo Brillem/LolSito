@@ -4,6 +4,7 @@ import com.example.lolsito.core.model.Match
 import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.preferences.FavoriteTeam
+import com.example.lolsito.core.preferences.MarkedMatch
 import com.example.lolsito.feature.schedule.domain.LiveMatchesRepository
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.testutil.FakeReminderScheduler
@@ -128,5 +129,18 @@ class CheckMatchStartTest {
         } catch (e: CancellationException) {
             assertTrue(scheduler.checkAgainCalls.isEmpty())
         }
+    }
+
+    @Test
+    fun `a marked match is notified with the bell off and no favorite, and stops once unmarked`() = runTest {
+        preferences.matchRemindersEnabled = false
+        preferences.favoriteTeams = emptyList()
+        preferences.markedMatches = listOf(MarkedMatch("m1", "lck", start, "GEN vs BLG", "LCK · Bo5"))
+        live = listOf(liveEvent("m1"))
+
+        assertTrue(check(reminder))
+
+        preferences.markedMatches = emptyList()
+        assertFalse(check(reminder))
     }
 }

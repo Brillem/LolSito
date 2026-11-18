@@ -1,6 +1,7 @@
 package com.example.lolsito.testutil
 
 import com.example.lolsito.core.preferences.FavoriteTeam
+import com.example.lolsito.core.preferences.MarkedMatch
 import com.example.lolsito.core.preferences.StandingsSelection
 import com.example.lolsito.core.preferences.UserPreferences
 import java.io.IOException
@@ -12,6 +13,7 @@ class FakeUserPreferences(
     var noSpoilers: Boolean? = null,
     var favoriteTeams: List<FavoriteTeam>? = null,
     var matchRemindersEnabled: Boolean? = null,
+    var markedMatches: List<MarkedMatch>? = null,
 ) : UserPreferences {
     var readFails = false
     var writeFails = false
@@ -21,6 +23,8 @@ class FakeUserPreferences(
     val savedNoSpoilers = mutableListOf<Boolean>()
     val savedFavoriteTeams = mutableListOf<List<FavoriteTeam>>()
     val savedMatchRemindersEnabled = mutableListOf<Boolean>()
+    val savedMarkedMatches = mutableListOf<MarkedMatch>()
+    val removedMarkedMatches = mutableListOf<Set<String>>()
 
     override suspend fun getScheduleLeagueIds(): Set<String>? {
         reads++
@@ -78,5 +82,27 @@ class FakeUserPreferences(
         if (writeFails) throw IOException("write failed")
         savedMatchRemindersEnabled += enabled
         matchRemindersEnabled = enabled
+    }
+
+    override suspend fun getMarkedMatches(): List<MarkedMatch>? {
+        if (readFails) throw IOException("read failed")
+        return markedMatches
+    }
+
+    override suspend fun saveMarkedMatch(match: MarkedMatch) {
+        if (writeFails) throw IOException("write failed")
+        savedMarkedMatches += match
+        val current = markedMatches.orEmpty()
+        markedMatches = if (current.any { it.matchId == match.matchId }) {
+            current.map { if (it.matchId == match.matchId) match else it }
+        } else {
+            current + match
+        }
+    }
+
+    override suspend fun removeMarkedMatches(matchIds: Set<String>) {
+        if (writeFails) throw IOException("write failed")
+        removedMarkedMatches += matchIds
+        markedMatches = markedMatches.orEmpty().filterNot { it.matchId in matchIds }
     }
 }

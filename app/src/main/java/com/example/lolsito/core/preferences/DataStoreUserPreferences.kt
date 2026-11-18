@@ -60,6 +60,29 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
         dataStore.edit { it[MATCH_REMINDERS] = enabled }
     }
 
+    override suspend fun getMarkedMatches(): List<MarkedMatch>? =
+        dataStore.data.first()[MARKED_MATCHES]?.let(::decodeMarkedMatches)
+
+    /** Read and written in one edit, so a sync removing old marks never loses one marked meanwhile. */
+    override suspend fun saveMarkedMatch(match: MarkedMatch) {
+        dataStore.edit { preferences ->
+            val current = preferences[MARKED_MATCHES]?.let(::decodeMarkedMatches).orEmpty()
+            val updated = if (current.any { it.matchId == match.matchId }) {
+                current.map { if (it.matchId == match.matchId) match else it }
+            } else {
+                current + match
+            }
+            preferences[MARKED_MATCHES] = encodeMarkedMatches(updated)
+        }
+    }
+
+    override suspend fun removeMarkedMatches(matchIds: Set<String>) {
+        dataStore.edit { preferences ->
+            val current = preferences[MARKED_MATCHES]?.let(::decodeMarkedMatches) ?: return@edit
+            preferences[MARKED_MATCHES] = encodeMarkedMatches(current.filterNot { it.matchId in matchIds })
+        }
+    }
+
     companion object {
         /** A corrupt file is replaced by empty preferences, so persistence recovers instead of failing forever. */
         internal val corruptionHandler = ReplaceFileCorruptionHandler<Preferences> { emptyPreferences() }
@@ -70,6 +93,7 @@ class DataStoreUserPreferences(private val dataStore: DataStore<Preferences>) : 
         internal val NO_SPOILERS = booleanPreferencesKey("noSpoilers")
         internal val FAVORITE_TEAMS = stringPreferencesKey("favoriteTeams")
         internal val MATCH_REMINDERS = booleanPreferencesKey("matchReminders")
+        internal val MARKED_MATCHES = stringPreferencesKey("markedMatches")
 
         fun create(context: Context): UserPreferences =
             DataStoreUserPreferences(context.applicationContext.userPreferencesDataStore)

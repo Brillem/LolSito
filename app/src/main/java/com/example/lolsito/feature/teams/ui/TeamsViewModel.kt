@@ -1,5 +1,7 @@
 package com.example.lolsito.feature.teams.ui
 
+import com.example.lolsito.feature.reminders.domain.cancelAllExcept
+import com.example.lolsito.core.error.swallowFailure
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.error.toUserMessage
@@ -220,12 +222,18 @@ class TeamsViewModel(
         }
     }
 
-    /** Turns the bell off: every reminder is cancelled at once, without waiting for a sync or a network. */
+    /**
+     * Turns the bell off: every favorite's reminder is cancelled, without waiting for a sync or a network. The
+     * reminders of matches marked with "Remind me" stay, since they do not depend on the bell.
+     */
     fun disableReminders() {
         remindersLoadJob?.cancel()
         _uiState.update { it.copy(remindersEnabled = false, remindersNotice = null) }
-        reminderScheduler.cancelAll()
-        viewModelScope.launch { saveRemindersEnabled(false) }
+        viewModelScope.launch {
+            val markedIds = swallowFailure { preferences.getMarkedMatches() }.orEmpty().mapTo(HashSet()) { it.matchId }
+            reminderScheduler.cancelAllExcept(markedIds)
+            saveRemindersEnabled(false)
+        }
     }
 
     /** The answer to the notification permission asked when turning the bell on; denied leaves it off and says why. */

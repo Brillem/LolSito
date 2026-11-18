@@ -7,8 +7,8 @@ import kotlinx.coroutines.CancellationException
 import java.time.Clock
 
 /**
- * One check of whether a reminder's match has started. The bell and the favorites are read again first,
- * so a change made since the reminder was scheduled stops its checks. Then the live feed is asked: a
+ * One check of whether a reminder's match has started. The bell, the favorites and the marked matches are
+ * read again first, so a change made since the reminder was scheduled stops its checks. Then the live feed is asked: a
  * match in progress is to be notified; one that is not, or a feed that fails, gets another check from
  * the [scheduler] until the checks give up (see [startCheck]).
  *
@@ -45,6 +45,7 @@ class CheckMatchStart(
         reminder.isStillWanted(
             remindersEnabled = preferences.getMatchRemindersEnabled() ?: false,
             favoriteNames = favoriteNamesOf(preferences.getFavoriteTeams().orEmpty()),
+            markedMatchIds = preferences.getMarkedMatches().orEmpty().map { it.matchId },
         )
     } catch (e: CancellationException) {
         throw e

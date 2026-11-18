@@ -21,6 +21,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -35,6 +37,15 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.example.lolsito.feature.teams.ui.BellIcon
+import com.example.lolsito.feature.teams.ui.BellOutlineIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -103,7 +114,22 @@ fun MatchDetailScreen(
     val startTime by viewModel.startTime.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val gameOutcomes by viewModel.gameOutcomes.collectAsStateWithLifecycle()
+    val reminderButton by viewModel.reminderButton.collectAsStateWithLifecycle()
     WhileStarted(viewModel) { viewModel.pollWhileVisible() }
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.onNotificationPermissionResult(granted)
+    }
+    val onToggleReminder = {
+        when {
+            reminderButton?.isSet == true -> viewModel.removeReminder()
+            // Android 13+ needs the permission to notify; the system asks only when it is not granted yet.
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED ->
+                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            else -> viewModel.setReminder()
+        }
+    }
     MatchDetailContent(
         state = state,
         onBack = onBack,
@@ -119,6 +145,8 @@ fun MatchDetailScreen(
         startTime = startTime,
         isRefreshing = isRefreshing,
         onRefresh = viewModel::refresh,
+        reminderButton = reminderButton,
+        onToggleReminder = onToggleReminder,
     )
 }
 
@@ -141,6 +169,9 @@ fun MatchDetailContent(
     startTime: Instant? = null,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
+    /** "Remind me" for a series still to be played, or null when not offered; see [MatchDetailViewModel.reminderButton]. */
+    reminderButton: MatchReminderButton? = null,
+    onToggleReminder: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         AppTopBar("Match", onBack)
@@ -164,6 +195,8 @@ fun MatchDetailContent(
                     onMatchClick,
                     // Hidden results hide who won each game too, whatever was worked out.
                     if (state.resultsHidden) emptyMap() else gameOutcomes,
+                    reminderButton,
+                    onToggleReminder,
                 )
             }
         }
@@ -181,6 +214,8 @@ private fun MatchDetailBody(
     onRetryHistory: () -> Unit,
     onMatchClick: (String) -> Unit,
     gameOutcomes: Map<String, GameOutcome>,
+    reminderButton: MatchReminderButton?,
+    onToggleReminder: () -> Unit,
 ) {
     val detail = content.detail
     val context = LocalContext.current
@@ -194,6 +229,9 @@ private fun MatchDetailBody(
             }
         }
         item(key = "header") { MatchHeader(content, onTeamClick) }
+        if (reminderButton != null) {
+            item(key = "remind-me") { RemindMeButton(reminderButton, onToggleReminder) }
+        }
         if (calendarEvent != null) {
             item(key = "add-to-calendar") {
                 OutlinedButton(
@@ -294,6 +332,39 @@ private fun HistoryStatus(history: MatchHistoryUiState, onRetry: () -> Unit) {
  * Loading state of the whole screen, shaped like it: the two team logos around the score, then a title and
  * three game cards.
  */
+/**
+ * "Remind me" with an outlined bell, or "Reminder set" with a filled one once the match is marked; tapping it
+ * again removes the reminder. The notice, if any, says why it could not be set.
+ */
+@Composable
+private fun RemindMeButton(button: MatchReminderButton, onToggle: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.Screen, vertical = 8.dp)) {
+        OutlinedButton(
+            onClick = onToggle,
+            modifier = Modifier.fillMaxWidth().semantics {
+                stateDescription = if (button.isSet) "Reminder set" else "No reminder"
+            },
+        ) {
+            Icon(
+                imageVector = if (button.isSet) BellIcon else BellOutlineIcon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (button.isSet) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(if (button.isSet) "Reminder set" else "Remind me")
+        }
+        button.notice?.let { notice ->
+            Text(
+                notice,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun MatchDetailSkeleton(modifier: Modifier = Modifier) {
     SkeletonScreen(modifier) {

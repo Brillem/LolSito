@@ -69,6 +69,7 @@ import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.model.TeamEmphasis
 import com.example.lolsito.core.ui.AppCard
 import com.example.lolsito.core.ui.ChevronDownIcon
+import com.example.lolsito.core.ui.GearIcon
 import com.example.lolsito.core.ui.LOSER_ALPHA
 import com.example.lolsito.core.ui.LoadStatus
 import com.example.lolsito.core.ui.LiveBadge
@@ -99,6 +100,7 @@ fun ScheduleScreen(
     onMatchClick: (String) -> Unit,
     onTournamentClick: (leagueId: String, tournamentId: String) -> Unit,
     modifier: Modifier = Modifier,
+    onSettingsClick: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     WhileStarted(viewModel) { viewModel.pollWhileVisible() }
@@ -110,8 +112,12 @@ fun ScheduleScreen(
             delay(60_000L - now.toEpochMilli() % 60_000L)
         }
     }
-    // Favorites are starred in a team's profile: read them again whenever this tab comes back.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshFavorites() }
+    // Favorites are starred in a team's profile, and Settings can change the no-spoilers mode: read them
+    // again whenever this tab comes back.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshFavorites()
+        viewModel.refreshNoSpoilers()
+    }
     CompositionLocalProvider(LocalNow provides now) {
     ScheduleContent(
         state = state,
@@ -126,6 +132,7 @@ fun ScheduleScreen(
         modifier = modifier,
         onRefresh = viewModel::refresh,
         onTournamentClick = onTournamentClick,
+        onSettingsClick = onSettingsClick,
     )
     }
 }
@@ -150,6 +157,8 @@ fun ScheduleContent(
     onRefresh: () -> Unit = {},
     /** Opens a tournament of the "Upcoming tournaments" section in the Tournaments tab. */
     onTournamentClick: (leagueId: String, tournamentId: String) -> Unit = { _, _ -> },
+    /** Opens Settings, from the gear next to the eye. */
+    onSettingsClick: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -164,6 +173,9 @@ fun ScheduleContent(
                 onToggleFavoritesOnly = onToggleFavoritesOnly,
             )
             NoSpoilersToggle(state.noSpoilers, onToggleNoSpoilers)
+            IconButton(onClick = onSettingsClick) {
+                Icon(GearIcon, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         PullToRefreshBox(isRefreshing = state.isRefreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             if (state.liveOnly) {
@@ -227,8 +239,9 @@ fun ScheduleFilterRow(
     val accent = MaterialTheme.colorScheme.primary
     var sheetOpen by remember { mutableStateOf(false) }
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
+        // No end padding and tight gaps: the eye and gear buttons that follow bring their own inset.
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         FilterChip(
             selected = liveOnly,

@@ -1223,6 +1223,21 @@ class ScheduleViewModelTest {
     }
 
     @Test
+    fun `refreshing no spoilers picks up a change made in Settings without reloading`() = runTest(dispatcher) {
+        repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
+        val vm = viewModel()
+        advanceUntilIdle()
+        val calls = repository.scheduleCalls
+
+        preferences.noSpoilers = true
+        vm.refreshNoSpoilers()
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.noSpoilers)
+        assertEquals(calls, repository.scheduleCalls)
+    }
+
+    @Test
     fun `toggling no spoilers does not reload the schedule or touch the selection`() = runTest(dispatcher) {
         repository.pages[key(setOf(WORLDS), null)] = page(listOf(event("1", 1)))
         val vm = viewModel()

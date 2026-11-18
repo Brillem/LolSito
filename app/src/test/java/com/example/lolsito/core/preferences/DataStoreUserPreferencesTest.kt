@@ -168,4 +168,55 @@ class DataStoreUserPreferencesTest {
         val raw = encodeFavoriteTeams(listOf(t1, t1.copy(name = "Renamed"), odd))
         assertEquals(listOf(t1, odd), decodeFavoriteTeams(raw))
     }
+
+    private val gen = MarkedMatch("m1", "lck", java.time.Instant.parse("2026-11-20T08:00:00Z"), "GEN vs BLG", "LCK · Bo5")
+    private val weird = MarkedMatch("m;2,", "l,1", java.time.Instant.parse("2026-11-21T09:30:00Z"), "A;B vs C,D", "Worlds % · Bo3")
+
+    @Test
+    fun `nothing stored reads no marked matches as null`() = runTest(UnconfinedTestDispatcher()) {
+        assertNull(preferences().getMarkedMatches())
+    }
+
+    @Test
+    fun `marked matches round trip in order, keeping every field, and saving one again replaces it`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val preferences = preferences()
+            preferences.saveMarkedMatch(gen)
+            preferences.saveMarkedMatch(weird)
+            assertEquals(listOf(gen, weird), preferences.getMarkedMatches())
+
+            val moved = gen.copy(startTime = gen.startTime.plusSeconds(3600))
+            preferences.saveMarkedMatch(moved)
+            assertEquals(listOf(moved, weird), preferences.getMarkedMatches())
+        }
+
+    @Test
+    fun `removing marked matches drops only those ids and leaves the other preferences alone`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val preferences = preferences()
+            preferences.saveFavoriteTeams(listOf(t1))
+            preferences.saveMatchRemindersEnabled(true)
+            preferences.saveMarkedMatch(gen)
+            preferences.saveMarkedMatch(weird)
+
+            preferences.removeMarkedMatches(setOf(gen.matchId, "unknown"))
+
+            assertEquals(listOf(weird), preferences.getMarkedMatches())
+            assertEquals(listOf(t1), preferences.getFavoriteTeams())
+            assertEquals(true, preferences.getMatchRemindersEnabled())
+        }
+
+    @Test
+    fun `an unparseable stored value reads as no marked matches and a later save round trips`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val dataStore = dataStore()
+            val preferences = DataStoreUserPreferences(dataStore)
+            for (garbage in listOf("garbage", "m,l,notanumber,a,b", "%zz,l,1,a,b", "m,l,1,a,b,extra")) {
+                dataStore.edit { it[DataStoreUserPreferences.MARKED_MATCHES] = garbage }
+                assertEquals("for \"$garbage\"", emptyList<MarkedMatch>(), preferences.getMarkedMatches())
+            }
+
+            preferences.saveMarkedMatch(gen)
+            assertEquals(listOf(gen), preferences.getMarkedMatches())
+        }
 }

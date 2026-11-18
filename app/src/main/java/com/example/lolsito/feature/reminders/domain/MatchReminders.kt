@@ -1,7 +1,9 @@
 package com.example.lolsito.feature.reminders.domain
 
 import com.example.lolsito.core.model.MatchState
+import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.Team
+import com.example.lolsito.core.preferences.MarkedMatch
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.involvesFavorite
 import com.example.lolsito.feature.schedule.domain.isFavoriteIn
@@ -55,19 +57,47 @@ data class ReminderPlan(val toSchedule: List<MatchReminder>, val toCancel: List<
 
 /**
  * The reminders [events] call for: one per unstarted match of a favorite (recognized by name, like the
- * Schedule star) starting at most [REMINDER_WINDOW] after [now]. A match past its official start still
- * qualifies while it is unstarted and its checks have not given up ([START_CHECK_GIVE_UP]), so a sync
- * does not cancel the checks of a match that is running late. Events without a match have no identity
- * to remind about.
+ * Schedule star) or marked with "Remind me" ([markedMatchIds]) starting at most [REMINDER_WINDOW] after
+ * [now]. A match past its official start still qualifies while it is unstarted and its checks have not
+ * given up ([START_CHECK_GIVE_UP]), so a sync does not cancel the checks of a match that is running late.
+ * A marked match also qualifies while in progress: its mark only goes once it is over (see [expiredMarks]),
+ * so a sync made just after it went live never cancels the check that is about to notify it. Events
+ * without a match have no identity to remind about.
  */
-fun remindersFor(events: List<ScheduleEvent>, favoriteNames: Collection<String>, now: Instant): List<MatchReminder> {
+fun remindersFor(
+    events: List<ScheduleEvent>,
+    favoriteNames: Collection<String>,
+    now: Instant,
+    markedMatchIds: Set<String> = emptySet(),
+): List<MatchReminder> {
     val horizon = now.plus(REMINDER_WINDOW)
     val stillChecked = now.minus(START_CHECK_GIVE_UP)
     return events
-        .filter { it.state == MatchState.UNSTARTED && it.startTime.isAfter(stillChecked) && !it.startTime.isAfter(horizon) }
-        .filter { it.involvesFavorite(favoriteNames) }
+        .filter { event ->
+            val marked = event.matchId?.let { it in markedMatchIds } == true
+            val waiting = event.state == MatchState.UNSTARTED && event.startTime.isAfter(stillChecked) &&
+                !event.startTime.isAfter(horizon) && (marked || event.involvesFavorite(favoriteNames))
+            waiting || (marked && event.state == MatchState.IN_PROGRESS)
+        }
         .mapNotNull { it.toReminder() }
         .distinctBy { it.matchId }
+}
+
+/**
+ * The marks of [marked] to drop after a sync read [events] at [now]: those whose match is completed, and
+ * those not in progress once [START_CHECK_GIVE_UP] has passed since their start (the schedule's, or the stored
+ * one when the match is no longer among [events]), when their checks have given up anyway.
+ */
+fun expiredMarks(marked: List<MarkedMatch>, events: List<ScheduleEvent>, now: Instant): Set<String> {
+    val byId = events.filter { it.matchId != null }.associateBy { it.matchId }
+    return marked.filter { mark ->
+        val event = byId[mark.matchId]
+        when (event?.state) {
+            MatchState.COMPLETED -> true
+            MatchState.IN_PROGRESS -> false
+            else -> !now.isBefore((event?.startTime ?: mark.startTime).plus(START_CHECK_GIVE_UP))
+        }
+    }.mapTo(HashSet()) { it.matchId }
 }
 
 private fun ScheduleEvent.toReminder(): MatchReminder? {
@@ -75,11 +105,19 @@ private fun ScheduleEvent.toReminder(): MatchReminder? {
     return MatchReminder(
         matchId = match.id,
         startTime = startTime,
-        teamsLabel = match.teams.joinToString(" vs ") { team -> team.code.trim().ifEmpty { team.name.trim() } },
-        detail = listOfNotNull(leagueName.trim().takeIf { it.isNotEmpty() }, match.format?.label).joinToString(" · "),
+        teamsLabel = reminderTeamsLabel(match.teams),
+        detail = reminderDetail(leagueName, match.format),
         teamNames = match.teams.map { it.name },
     )
 }
+
+/** The teams of a reminder by code (by name when a code is missing), e.g. "GEN vs BLG". */
+fun reminderTeamsLabel(teams: List<Team>): String =
+    teams.joinToString(" vs ") { team -> team.code.trim().ifEmpty { team.name.trim() } }
+
+/** The league and, when known, the format of a reminder, e.g. "LCK · Bo5". */
+fun reminderDetail(leagueName: String, format: SeriesFormat?): String =
+    listOfNotNull(leagueName.trim().takeIf { it.isNotEmpty() }, format?.label).joinToString(" · ")
 
 /**
  * Schedules every wanted reminder not scheduled yet or scheduled with another version (the start time
@@ -128,10 +166,21 @@ fun startCheck(reminder: MatchReminder, liveMatchIds: Set<String>?, now: Instant
 fun matchIdsInProgress(liveEvents: List<ScheduleEvent>): Set<String> =
     liveEvents.filter { it.state == MatchState.IN_PROGRESS }.mapNotNullTo(HashSet()) { it.match?.id }
 
-/** Checked at every check of the reminder: the bell is still on and one of the match's teams is still a favorite. */
-fun MatchReminder.isStillWanted(remindersEnabled: Boolean, favoriteNames: Collection<String>): Boolean =
-    remindersEnabled && teamNames.any { name -> Team(name, code = "", imageUrl = null, outcome = null, gameWins = null).isFavoriteIn(favoriteNames) }
+/**
+ * Checked at every check of the reminder: the match is still marked with "Remind me" ([markedMatchIds]), or
+ * the bell is still on and one of the match's teams is still a favorite.
+ */
+fun MatchReminder.isStillWanted(
+    remindersEnabled: Boolean,
+    favoriteNames: Collection<String>,
+    markedMatchIds: Collection<String> = emptySet(),
+): Boolean =
+    matchId in markedMatchIds ||
+        remindersEnabled && teamNames.any { name -> Team(name, code = "", imageUrl = null, outcome = null, gameWins = null).isFavoriteIn(favoriteNames) }
 
-/** One schedule filter for all favorites: each one's [teamScheduleLeagueIds], merged, sorted and without repeats. */
-fun reminderLeagueIds(homeLeagueIds: List<String?>): List<String> =
-    homeLeagueIds.flatMap(::teamScheduleLeagueIds).distinct().sorted()
+/**
+ * One schedule filter for all favorites and marked matches: each favorite's [teamScheduleLeagueIds] plus the
+ * league of each marked match ([markedLeagueIds]), merged, sorted and without repeats.
+ */
+fun reminderLeagueIds(homeLeagueIds: List<String?>, markedLeagueIds: List<String> = emptyList()): List<String> =
+    (homeLeagueIds.flatMap(::teamScheduleLeagueIds) + markedLeagueIds).distinct().sorted()

@@ -1,5 +1,7 @@
 package com.example.lolsito.feature.teams.ui
 
+import com.example.lolsito.feature.reminders.domain.MatchReminder
+import com.example.lolsito.core.preferences.MarkedMatch
 import com.example.lolsito.core.leagues.LeaguesRepository
 import com.example.lolsito.core.model.League
 import com.example.lolsito.core.model.Team
@@ -410,10 +412,11 @@ class TeamsViewModelTest {
         val vm = viewModel()
         advanceUntilIdle()
 
+        reminderScheduler.schedule(MatchReminder("m1", Instant.parse("2026-11-20T08:00:00Z"), "GEN vs BLG", "LCK · Bo5", listOf("Gen.G", "BLG")))
         vm.disableReminders()
         assertFalse("flips at once", vm.uiState.value.remindersEnabled)
-        assertEquals("cancelled without waiting for a sync", 1, reminderScheduler.cancelAllCalls)
         advanceUntilIdle()
+        assertTrue("cancelled without waiting for a sync", reminderScheduler.reminders.isEmpty())
 
         assertEquals(listOf(false), preferences.savedMatchRemindersEnabled)
         assertEquals(0, reminderSync.requests)
@@ -432,7 +435,23 @@ class TeamsViewModelTest {
         vm.disableReminders()
         advanceUntilIdle()
         assertFalse(vm.uiState.value.remindersEnabled)
-        assertEquals(1, reminderScheduler.cancelAllCalls)
+        assertTrue(reminderScheduler.reminders.isEmpty())
+    }
+
+    @Test
+    fun `turning the bell off keeps the reminders of matches marked with Remind me`() = runTest(dispatcher) {
+        preferences.matchRemindersEnabled = true
+        preferences.markedMatches = listOf(MarkedMatch("marked", "lec", Instant.parse("2026-11-21T18:00:00Z"), "G2 vs FNC", "LEC · Bo3"))
+        val vm = viewModel()
+        advanceUntilIdle()
+        reminderScheduler.schedule(MatchReminder("marked", Instant.parse("2026-11-21T18:00:00Z"), "G2 vs FNC", "LEC · Bo3", listOf("G2 Esports", "Fnatic")))
+        reminderScheduler.schedule(MatchReminder("favorite", Instant.parse("2026-11-20T08:00:00Z"), "GEN vs BLG", "LCK · Bo5", listOf("Gen.G", "BLG")))
+
+        vm.disableReminders()
+        advanceUntilIdle()
+
+        assertEquals(listOf("marked"), reminderScheduler.reminders.keys.toList())
+        assertEquals(0, reminderScheduler.cancelAllCalls)
     }
 
     @Test

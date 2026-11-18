@@ -8,6 +8,7 @@ import com.example.lolsito.core.model.SeriesFormat
 import com.example.lolsito.core.model.SeriesType
 import com.example.lolsito.core.model.Team
 import com.example.lolsito.core.preferences.FavoriteTeam
+import com.example.lolsito.core.preferences.MarkedMatch
 import com.example.lolsito.feature.schedule.domain.ScheduleEvent
 import com.example.lolsito.feature.schedule.domain.SchedulePage
 import com.example.lolsito.feature.schedule.domain.ScheduleRepository
@@ -255,6 +256,90 @@ class SyncMatchRemindersTest {
         assertFalse(reachesReminderWindow(SchedulePage(emptyList(), null, newerToken = "n1"), now))
     }
 
+    // Matches marked with "Remind me".
+
+    private fun mark(id: String, league: String = LEC, start: Instant = now.plus(Duration.ofHours(1))) =
+        MarkedMatch(id, league, start, "DRX vs KT", "LCK · Bo3")
+
+    @Test
+    fun `a marked match is reminded with the bell off and no favorites, asking only for its league`() = runTest {
+        preferences.matchRemindersEnabled = false
+        preferences.favoriteTeams = emptyList()
+        preferences.markedMatches = listOf(mark("m2"))
+
+        sync()
+
+        assertEquals(listOf(listOf(LEC) to null), schedule.requests)
+        assertTrue(teams.requests.isEmpty())
+        assertEquals(listOf("m2"), scheduler.scheduledCalls.map { it.matchId })
+    }
+
+    @Test
+    fun `marked leagues are added to the favorites' leagues and both kinds of match are reminded`() = runTest {
+        preferences.markedMatches = listOf(mark("m2"))
+
+        sync()
+
+        assertEquals(listOf((listOf(LCK, LEC) + InternationalLeagues.ids).distinct().sorted() to null), schedule.requests)
+        assertEquals(listOf("m1", "m2"), scheduler.scheduledCalls.map { it.matchId })
+    }
+
+    @Test
+    fun `a marked match beyond 48 hours stays marked and is scheduled once a later sync sees it in the window`() = runTest {
+        preferences.favoriteTeams = emptyList()
+        val later = now.plus(Duration.ofHours(60))
+        preferences.markedMatches = listOf(mark("m3", start = later))
+        schedule.events = listOf(event("m3", "DRX", "KT Rolster", start = later))
+
+        sync()
+
+        assertTrue(scheduler.scheduledCalls.isEmpty())
+        assertEquals(listOf("m3"), preferences.markedMatches.orEmpty().map { it.matchId })
+
+        val laterSync = SyncMatchReminders(preferences, teams, leagues, schedule, scheduler, Clock.fixed(later.minus(Duration.ofHours(10)), ZoneOffset.UTC))
+        laterSync()
+
+        assertEquals(listOf("m3"), scheduler.scheduledCalls.map { it.matchId })
+    }
+
+    @Test
+    fun `a mark is removed once its match is completed or gone past the give up time, and its reminder cancelled`() = runTest {
+        preferences.favoriteTeams = emptyList()
+        preferences.markedMatches = listOf(mark("m2"), mark("gone", start = now.minus(START_CHECK_GIVE_UP)), mark("kept", start = now.plus(Duration.ofDays(4))))
+        sync()
+        assertEquals(listOf("m2"), scheduler.reminders.keys.toList())
+
+        schedule.events = listOf(event("m2", "DRX", "KT Rolster").copy(state = MatchState.COMPLETED))
+        sync()
+
+        assertEquals(listOf("kept"), preferences.markedMatches.orEmpty().map { it.matchId })
+        assertEquals(listOf("m2"), scheduler.cancelledCalls)
+    }
+
+    @Test
+    fun `an unmarked match has its reminder cancelled`() = runTest {
+        preferences.favoriteTeams = emptyList()
+        preferences.markedMatches = listOf(mark("m2"))
+        sync()
+
+        preferences.markedMatches = emptyList()
+        sync()
+
+        assertEquals(listOf("m2"), scheduler.cancelledCalls)
+        assertTrue(scheduler.reminders.isEmpty())
+    }
+
+    @Test
+    fun `a mark that cannot be removed does not fail the sync`() = runTest {
+        preferences.favoriteTeams = emptyList()
+        preferences.markedMatches = listOf(mark("gone", start = now.minus(START_CHECK_GIVE_UP)))
+        preferences.writeFails = true
+
+        sync()
+
+        assertEquals(1, preferences.markedMatches.orEmpty().size)
+    }
+
     private fun hoursAhead(hours: Long): Instant = now.plus(Duration.ofHours(hours))
 
     private fun profile(team: FavoriteTeam, homeLeague: String?) =
@@ -295,6 +380,7 @@ class SyncMatchRemindersTest {
     private companion object {
         const val LCK = "98767991310872058"
         const val LPL = "98767991314006698"
+        const val LEC = "98767991302996019"
         val GEN = FavoriteTeam("10", "gen-g", "Gen.G", "GEN", null)
         val T1 = FavoriteTeam("20", "t1", "T1", "T1", null)
     }

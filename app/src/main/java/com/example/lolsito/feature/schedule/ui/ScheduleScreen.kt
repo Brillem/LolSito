@@ -376,8 +376,8 @@ private fun ScheduleList(
     onTournamentClick: (leagueId: String, tournamentId: String) -> Unit,
 ) {
     // A section is shown while it has days or a paging control, which needs its header to make sense.
-    val showUpcoming = state.upcomingDays.isNotEmpty() || state.canLoadNewer
-    val showResults = state.resultDays.isNotEmpty() || state.canLoadOlder
+    val showUpcoming = state.showsSections && (state.upcomingDays.isNotEmpty() || state.canLoadNewer)
+    val showResults = state.showsSections && (state.resultDays.isNotEmpty() || state.canLoadOlder)
     LazyColumn(Modifier.fillMaxSize()) {
         upcomingTournamentRows(state, onTournamentClick)
         state.favoritesEmptyMessage?.let { message ->
@@ -422,7 +422,7 @@ private fun ScheduleList(
                 state.olderError?.let { PagingError(it) }
             }
         }
-        if (state.liveEvents.isEmpty() && !showUpcoming && !showResults) {
+        if (state.favoritesEmptyMessage == null && state.liveEvents.isEmpty() && !showUpcoming && !showResults) {
             item(key = "empty-range") {
                 Text(
                     "No matches in this range",

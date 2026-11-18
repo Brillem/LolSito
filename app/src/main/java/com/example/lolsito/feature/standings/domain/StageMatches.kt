@@ -39,23 +39,6 @@ private fun StandingsStage.hasBeenPlayed(): Boolean =
     allMatches().any { it.state == MatchState.COMPLETED || it.state == MatchState.IN_PROGRESS } ||
         sections.any { section -> section.rankings.any { (it.wins ?: 0) + (it.losses ?: 0) > 0 } }
 
-/**
- * Whether the stage names fit a segmented button row without truncating: at most three stages, each name
- * short enough for its share of a phone's width ([SEGMENT_NAME_LENGTH_TWO] characters with two segments,
- * [SEGMENT_NAME_LENGTH_THREE] with three). Otherwise the selector is a scrollable row.
- */
-fun stageSelectorFitsSegments(names: List<String>): Boolean {
-    val limit = when (names.size) {
-        in 0..2 -> SEGMENT_NAME_LENGTH_TWO
-        3 -> SEGMENT_NAME_LENGTH_THREE
-        else -> return false
-    }
-    return names.all { it.length <= limit }
-}
-
-private const val SEGMENT_NAME_LENGTH_TWO = 16
-private const val SEGMENT_NAME_LENGTH_THREE = 10
-
 /** A stage with a ranking table: it can also show its matches, which the standings do not carry. */
 val StandingsStage.isRanked: Boolean get() = sections.any { it.isRanked }
 

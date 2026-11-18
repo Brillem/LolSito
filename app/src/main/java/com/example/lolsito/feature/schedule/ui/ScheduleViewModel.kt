@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.schedule.ui
 
+import com.example.lolsito.core.error.toUserMessage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.leagues.LeaguesRepository
@@ -353,7 +354,7 @@ class ScheduleViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(status = LoadStatus.Error(e.toMessage())) }
+                _uiState.update { it.copy(status = LoadStatus.Error(e.toUserMessage())) }
             }
         }
     }
@@ -395,7 +396,7 @@ class ScheduleViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                val message = e.toMessage()
+                val message = e.toUserMessage()
                 _uiState.update {
                     val idle = it.copy(isLoadingOlder = false, isLoadingNewer = false)
                     if (older) idle.copy(olderError = message) else idle.copy(newerError = message)
@@ -477,8 +478,6 @@ class ScheduleViewModel(
             liveMatchIds = lastLiveIds,
         )
     }
-
-    private fun Exception.toMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Something went wrong"
 
     companion object {
         const val DEFAULT_LEAGUE_ID = "98767975604431411" // Worlds

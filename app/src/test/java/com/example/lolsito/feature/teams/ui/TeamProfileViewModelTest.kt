@@ -212,7 +212,7 @@ class TeamProfileViewModelTest {
         advanceUntilIdle()
 
         var state = vm.uiState.value
-        assertEquals("timeout", state.olderError)
+        assertEquals("No connection. Check your internet and try again.", state.olderError)
         assertFalse(state.isLoadingOlder)
         assertTrue(state.canLoadOlder)
         assertEquals(LoadStatus.Content, state.matchesStatus)
@@ -234,7 +234,7 @@ class TeamProfileViewModelTest {
         val vm = viewModel()
         advanceUntilIdle()
 
-        assertEquals(LoadStatus.Error("offline"), vm.uiState.value.status)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.status)
         assertNull(vm.uiState.value.profile)
         assertEquals(emptyList<Any>(), schedule.requests)
 
@@ -266,7 +266,7 @@ class TeamProfileViewModelTest {
         advanceUntilIdle()
 
         assertEquals(LoadStatus.Content, vm.uiState.value.status)
-        assertEquals(LoadStatus.Error("no schedule"), vm.uiState.value.matchesStatus)
+        assertEquals(LoadStatus.Error("No connection. Check your internet and try again."), vm.uiState.value.matchesStatus)
         assertFalse(vm.uiState.value.canLoadOlder)
 
         schedule.error = null

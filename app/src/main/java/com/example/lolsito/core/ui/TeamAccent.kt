@@ -1,5 +1,6 @@
 package com.example.lolsito.core.ui
 
+import com.example.lolsito.core.cache.BoundedCache
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
@@ -16,7 +17,6 @@ import coil3.request.allowHardware
 import coil3.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The accent color of the team whose logo is at [imageUrl], taken from the logo itself since the API
@@ -43,7 +43,7 @@ private const val NO_ACCENT = 0
 
 /** Accents by logo address, kept for the app's lifetime: a logo is read once, however many screens show it. */
 private object TeamAccents {
-    private val byUrl = ConcurrentHashMap<String, Int>()
+    private val byUrl = BoundedCache<String, Int>(MAX_ENTRIES)
 
     /** The accent if already known ([NO_ACCENT] when there is none), or null when the logo has not been read. */
     fun known(imageUrl: String?): Int? = if (imageUrl.isNullOrBlank()) NO_ACCENT else byUrl[imageUrl]
@@ -72,4 +72,7 @@ private object TeamAccents {
 
     /** Enough pixels to tell a logo's color. */
     private const val SAMPLE_SIZE = 64
+
+    /** Logos in view are few; older accents are simply read again. */
+    private const val MAX_ENTRIES = 200
 }

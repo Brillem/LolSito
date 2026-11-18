@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.game.ui
 
+import com.example.lolsito.core.error.toUserMessage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lolsito.core.polling.GAME_STATS_POLL_INTERVAL
@@ -80,7 +81,7 @@ class GameStatsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                GameStatsUiState(LoadStatus.Error(e.message?.takeIf { it.isNotBlank() } ?: "Something went wrong"))
+                GameStatsUiState(LoadStatus.Error(e.toUserMessage()))
             }
             _uiState.value = state
             // A child of this load, so a reload cancels it; the stats never wait for it.

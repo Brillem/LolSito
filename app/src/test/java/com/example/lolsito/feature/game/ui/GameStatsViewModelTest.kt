@@ -81,7 +81,7 @@ class GameStatsViewModelTest {
         val vm = GameStatsViewModel(gameId = "g1", repository = repository)
         vm.uiState.test {
             assertEquals(GameStatsUiState(LoadStatus.Loading), awaitItem())
-            assertEquals(GameStatsUiState(LoadStatus.Error("boom")), awaitItem())
+            assertEquals(GameStatsUiState(LoadStatus.Error("No connection. Check your internet and try again.")), awaitItem())
 
             repository.error = null
             repository.stats = stats
@@ -94,13 +94,13 @@ class GameStatsViewModelTest {
     }
 
     @Test
-    fun `blank error message falls back to a generic one`() = runTest(dispatcher) {
-        repository.error = IOException("")
+    fun `an unexpected failure reads as a generic message`() = runTest(dispatcher) {
+        repository.error = IllegalStateException("")
 
         val vm = GameStatsViewModel(gameId = "g1", repository = repository)
         vm.uiState.test {
             assertEquals(GameStatsUiState(LoadStatus.Loading), awaitItem())
-            assertEquals(GameStatsUiState(LoadStatus.Error("Something went wrong")), awaitItem())
+            assertEquals(GameStatsUiState(LoadStatus.Error("Something went wrong. Try again.")), awaitItem())
         }
     }
 

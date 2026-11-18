@@ -1,5 +1,6 @@
 package com.example.lolsito.feature.standings.ui
 
+import com.example.lolsito.core.error.toUserMessage
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -279,7 +280,7 @@ class StandingsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(leaguesStatus = LoadStatus.Error(e.toMessage())) }
+                _uiState.update { it.copy(leaguesStatus = LoadStatus.Error(e.toUserMessage())) }
             }
         }.also { job -> job.invokeOnCompletion { result?.complete(null) } }
     }
@@ -318,7 +319,7 @@ class StandingsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(tournamentsStatus = LoadStatus.Error(e.toMessage())) }
+                _uiState.update { it.copy(tournamentsStatus = LoadStatus.Error(e.toUserMessage())) }
             }
         }
     }
@@ -340,13 +341,11 @@ class StandingsViewModel(
             } catch (e: Exception) {
                 _uiState.update {
                     if (it.selectedTournamentId != tournamentId) it
-                    else it.copy(standingsStatus = LoadStatus.Error(e.toMessage()))
+                    else it.copy(standingsStatus = LoadStatus.Error(e.toUserMessage()))
                 }
             }
         }
     }
-
-    private fun Exception.toMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Something went wrong"
 
     companion object {
         /** LCK: a round-robin league, so the default view shows real standings tables. */

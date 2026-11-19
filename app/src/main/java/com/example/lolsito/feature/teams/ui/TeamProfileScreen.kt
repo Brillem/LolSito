@@ -48,7 +48,6 @@ import com.example.lolsito.core.model.MatchState
 import com.example.lolsito.core.ui.AppCard
 import com.example.lolsito.core.ui.AppTopBar
 import com.example.lolsito.core.ui.FormMarks
-import com.example.lolsito.core.ui.GroupLabel
 import com.example.lolsito.core.ui.InfoText
 import com.example.lolsito.core.ui.InlineError
 import com.example.lolsito.core.ui.LoadStatus
@@ -344,17 +343,12 @@ private fun ProfileTabs(selected: ProfileTab, onSelect: (ProfileTab) -> Unit) {
 }
 
 /**
- * The roster, each player with their role: the lineup of the last game played first when it is known, then the
- * substitutes; otherwise every player in role order.
+ * The roster, each player with their role: the lineup of the last game played when it is known (the rest of
+ * the roster is mostly academy players, so it is left out); otherwise every player in role order.
  */
 private fun LazyListScope.rosterRows(profile: TeamProfile, lineup: RosterSplit?) {
     if (lineup != null) {
         playerRows("starter", lineup.starters)
-        val substitutes = lineup.rest.flatMap { it.players }
-        if (substitutes.isNotEmpty()) {
-            item(key = "substitutes") { GroupLabel("Substitutes") }
-            playerRows("substitute", substitutes)
-        }
         return
     }
     if (profile.roster.isEmpty()) {
